@@ -1,0 +1,26 @@
+logging:
+  level: debug
+
+detector:
+  type: yolov8
+  config: config/model/yolov8n.yaml
+
+preprocess:
+  backend: cpu
+
+inference:
+  backend: deepx
+
+postprocess:
+  backend: cpu
+
+tracking:
+  type: bytetrack
+  config: config/tracking/bytetrack.yaml
+
+communication:
+  enabled: false
+  config: config/communication.yaml
+
+measurement:
+  enabled: false

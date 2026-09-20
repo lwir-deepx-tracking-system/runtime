@@ -1,0 +1,15 @@
+model:
+  name: yolov8n
+  path: models/yolov8n.dxnn
+
+input:
+  width: 640
+  height: 640
+
+preprocess:
+  resize: letterbox
+  normalize: false
+
+postprocess:
+  confidence_threshold: 0.25
+  nms_threshold: 0.45
