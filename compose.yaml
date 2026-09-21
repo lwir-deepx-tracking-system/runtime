@@ -13,5 +13,24 @@ services:
     stdin_open: true
     tty: true
 
+  training:
+    profiles:
+      - training
+
+    build:
+      context: .
+      dockerfile: docker/training/Dockerfile
+    image: lwir-training:latest
+
+    volumes:
+      - .:/workspace/lwir-npu-tracking-system
+
+    working_dir: /workspace/lwir-npu-tracking-system/training
+
+    entrypoint: /bin/bash
+
+    stdin_open: true
+    tty: true
+
 volumes:
   runtime-build:
