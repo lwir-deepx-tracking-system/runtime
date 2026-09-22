@@ -1,11 +1,11 @@
 # CMake 빌드 결과물
-/runtime/build/
+/build/
 
 # 실행 및 측정 결과
-/runtime/results/
+/results/
 
 # 컴파일된 모델 파일은 별도로 배포한다.
-/runtime/models/
+/models/
 
 # 개발자 PC에 종속된 VS Code 설정
 /.vscode/

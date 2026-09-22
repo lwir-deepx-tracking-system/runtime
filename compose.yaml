@@ -3,29 +3,10 @@ services:
     image: lwir-runtime-pc:dxas-5749ab70-ubuntu22.04
 
     volumes:
-      - .:/workspace/lwir-npu-tracking-system
-      - runtime-build:/workspace/lwir-npu-tracking-system/runtime/build
+      - .:/workspace/lwir-deepx-tracking-system
+      - runtime-build:/workspace/lwir-deepx-tracking-system/build
 
-    working_dir: /workspace/lwir-npu-tracking-system/runtime
-
-    entrypoint: /bin/bash
-
-    stdin_open: true
-    tty: true
-
-  training:
-    profiles:
-      - training
-
-    build:
-      context: .
-      dockerfile: docker/training/Dockerfile
-    image: lwir-training:latest
-
-    volumes:
-      - .:/workspace/lwir-npu-tracking-system
-
-    working_dir: /workspace/lwir-npu-tracking-system/training
+    working_dir: /workspace/lwir-deepx-tracking-system
 
     entrypoint: /bin/bash
 

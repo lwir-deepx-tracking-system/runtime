@@ -15,4 +15,4 @@ RUN apt-get update && apt-get install -y \
     libopencv-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace/lwir-npu-tracking-system/runtime
+WORKDIR /workspace/lwir-deepx-tracking-system
