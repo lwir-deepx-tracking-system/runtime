@@ -7,5 +7,8 @@
 # 컴파일된 모델 파일은 별도로 배포한다.
 /models/
 
+# 개인별 실행 설정. 공용 기준 설정은 /config/*.yaml에 유지한다.
+/config/local/
+
 # 개발자 PC에 종속된 VS Code 설정
 /.vscode/

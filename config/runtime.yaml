@@ -18,9 +18,9 @@ tracking:
   type: bytetrack
   config: config/tracking/bytetrack.yaml
 
-communication:
+control:
   enabled: false
-  config: config/communication.yaml
+  config: config/control.yaml
 
 measurement:
   enabled: false

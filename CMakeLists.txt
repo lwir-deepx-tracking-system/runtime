@@ -32,7 +32,7 @@ add_executable(lwir_runtime
     src/tracking/bytetrack_tracker.cpp
 
     src/target/target_selector.cpp
-    src/communication/stm32_link.cpp
+    src/control/gimbal_controller.cpp
 
     src/pipeline/camera_thread.cpp
     src/pipeline/preprocess_thread.cpp
@@ -40,7 +40,7 @@ add_executable(lwir_runtime
     src/pipeline/postprocess_thread.cpp
     src/pipeline/tracking_thread.cpp
     src/pipeline/target_selection_thread.cpp
-    src/pipeline/communication_thread.cpp
+    src/pipeline/control_thread.cpp
 )
 
 # 헤더 검색 경로

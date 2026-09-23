@@ -1,0 +1,2 @@
+# 실제 GPIO/PWM/I2C 설정은 짐벌 하드웨어 방식이 정해지면 추가한다.
+driver: unconfigured

@@ -2,17 +2,18 @@
 
 #include <pthread.h>
 
-#include "common/threadsafequeue.hpp"
 #include "common/stage_metric.hpp"
-#include "communication/stm32_link.hpp"
+#include "common/threadsafequeue.hpp"
+#include "control/gimbal_controller.hpp"
 
-// 선택 결과 queue를 소비하고 STM32Link에 전달하는 worker.
-class CommunicationThread
+// 선택 결과 queue를 소비하고 Orange Pi의 짐벌 제어기에 전달하는 worker.
+class ControlThread
 {
 private:
-    STM32Link& link_;
+    GimbalController& controller_;
     ThreadSafeQueue<TargetSelection>& input_queue_;
     pthread_t thread_;
+    bool control_enabled_;
     bool measurement_enabled_;
     std::vector<StageMetric> metrics_;
 
@@ -20,7 +21,9 @@ private:
     void run();
 
 public:
-    CommunicationThread(STM32Link& link, ThreadSafeQueue<TargetSelection>& input_queue,
+    ControlThread(GimbalController& controller,
+        ThreadSafeQueue<TargetSelection>& input_queue,
+        bool control_enabled,
         bool measurement_enabled);
     void start();
     void join();

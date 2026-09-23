@@ -22,6 +22,6 @@
 
 ## 현재 구조에서 유지할 경계
 
-`Camera → Preprocess → Inference → Postprocess → Tracking → 대상 선택 → STM32 통신`
+`Camera → Preprocess → Inference → Postprocess → Tracking → 대상 선택 → Orange Pi 짐벌 제어`
 
-Tracking은 모든 객체의 Track을 만들고, 대상 선택 단계는 GUI에서 지정한 ID를 찾는다. 실제 알고리즘, STM32 프로토콜, ID가 사라졌을 때의 제어 정책은 이번 구조 합의와 분리해 결정한다.
+Tracking은 모든 객체의 Track을 만들고, 대상 선택 단계는 GUI에서 지정한 ID를 찾는다. Orange Pi의 실제 하드웨어 제어 방식과 ID가 사라졌을 때의 제어 정책은 이번 구조 합의와 분리해 결정한다.

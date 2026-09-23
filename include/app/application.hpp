@@ -22,7 +22,7 @@
 #include "pipeline/postprocess_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
 #include "pipeline/target_selection_thread.hpp"
-#include "pipeline/communication_thread.hpp"
+#include "pipeline/control_thread.hpp"
 
 // 프로그램의 구성 요소를 생성하고
 // Pipeline 실행을 관리하는 최상위 Application 클래스
@@ -44,7 +44,7 @@ private:
     // Tracking 결과를 다음 Stage로 전달
     ThreadSafeQueue<TrackingResult> track_queue_;
 
-    // 선택 ID의 관측 결과를 STM32 통신 단계로 전달
+    // 선택 ID의 관측 결과를 Orange Pi 짐벌 제어 단계로 전달
     ThreadSafeQueue<TargetSelection> target_selection_queue_;
 
     std::string config_path_;
@@ -85,8 +85,8 @@ private:
     TargetSelector target_selector_;
     std::unique_ptr<TargetSelectionThread> target_selection_thread_;
 
-    STM32Link stm32_link_;
-    std::unique_ptr<CommunicationThread> communication_thread_;
+    GimbalController gimbal_controller_;
+    std::unique_ptr<ControlThread> control_thread_;
 
 
 public:

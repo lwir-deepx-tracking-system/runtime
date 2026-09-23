@@ -1,12 +1,12 @@
 # LWIR DEEPX 표적 탐지·추적 시스템
 
-LWIR 영상에서 객체를 탐지하고 Track ID를 부여합니다. 사용자가 ID를 선택하면 그 객체의 위치를 STM32에 전달해 짐벌이 따라가도록 만드는 프로젝트입니다. 현재는 PC의 `runtime-pc` 환경에서 **YOLO + ByteTrack 기준선**의 C++ 구조를 개발 중입니다.
+LWIR 영상에서 객체를 탐지하고 Track ID를 부여합니다. 사용자가 ID를 선택하면 Orange Pi의 runtime이 짐벌을 직접 제어해 해당 객체를 따라가도록 만드는 프로젝트입니다. 별도 제어용 STM32 firmware는 사용하지 않습니다. 현재는 PC의 `runtime-pc` 환경에서 **YOLO + ByteTrack 기준선**의 C++ 구조를 개발 중이며, 실제 제어는 Orange Pi용 runtime에 연결할 예정입니다.
 
 ## 파이프라인 구조
 
 ```mermaid
 flowchart LR
-    CameraThread --> PreprocessThread --> InferenceThread --> PostprocessThread --> TrackingThread --> TargetSelectionThread --> CommunicationThread
+    CameraThread --> PreprocessThread --> InferenceThread --> PostprocessThread --> TrackingThread --> TargetSelectionThread --> ControlThread
 ```
 
 각 상자는 별도 POSIX pthread입니다. thread 사이 데이터는 `ThreadSafeQueue`로 전달되며, [Application](src/app/application.cpp)이 구성요소와 thread를 연결하고 `Tracker` 객체를 소유합니다. `TrackingThread`는 `Tracker` 인터페이스를 통해 현재 `ByteTrackTracker`를 호출합니다.
@@ -18,7 +18,7 @@ flowchart LR
 | Inference → Postprocess | `ModelOutput` | 프레임 ID, 모델 출력 |
 | Postprocess → Tracking | `DetectionResult` | 프레임 ID, `vector<Detection>` |
 | Tracking → Target selection | `TrackingResult` | 프레임 ID, `vector<Track>` |
-| Target selection → Communication | `TargetSelection` | 선택 ID와 일치한 Track, 또는 일치 결과 없음 |
+| Target selection → Control | `TargetSelection` | 선택 ID와 일치한 Track, 또는 일치 결과 없음 |
 
 `Detection`과 `Track`은 객체 하나를 뜻합니다. `DetectionResult`와 `TrackingResult`는 객체가 0개인 프레임도 표시할 수 있는 **한 프레임의 결과**입니다. 일반 실행과 측정 실행은 같은 데이터 타입을 사용합니다.
 
@@ -30,7 +30,91 @@ flowchart LR
 - [yolov8n.yaml](config/model/yolov8n.yaml): 모델 경로 `models/yolov8n.dxnn`, 입력 크기·전처리 조건·후처리 임계값.
 - [bytetrack.yaml](config/tracking/bytetrack.yaml): 추적 파라미터. 현재 ByteTrack 구현은 파일 경로만 보관하며 값을 적용하지 않습니다.
 
-컴파일된 `.dxnn`은 `models/`에 두도록 경로가 잡혀 있지만, 현재 모델 파일은 없고 `models/`는 Git에서 제외됩니다. `runtime.yaml`의 `communication.enabled`는 아직 통신 thread를 끄지 않습니다.
+컴파일된 `.dxnn`은 `models/`에 두도록 경로가 잡혀 있지만, 현재 모델 파일은 없고 `models/`는 Git에서 제외됩니다. `runtime.yaml`의 `control.enabled`가 `false`이면 Control thread는 queue 종료를 위해 선택 결과만 소비하고 `GimbalController::apply()`를 호출하지 않습니다.
+
+`config/`에 추적되는 YAML은 팀 공용 기준값입니다. 개인 장치 경로나 임계값을 시험할 때는 공용 파일을 직접 바꾸지 않고, 아래처럼 Git에서 제외되는 `config/local/`에 복사해 사용합니다. 새 기본값을 팀 전체에 적용할 때만 공용 YAML을 수정해 PR에 포함합니다.
+
+```bash
+mkdir -p config/local
+cp config/runtime.yaml config/local/runtime.yaml
+./build/lwir_runtime config/local/runtime.yaml
+```
+
+복사한 `runtime.yaml` 안의 모델·추적·제어 설정 경로도 개인별로 바꾸고 싶다면 해당 YAML을 `config/local/`에 함께 복사하고 경로를 수정합니다. 별도 설정 경로를 주지 않으면 기존처럼 `config/runtime.yaml`을 사용합니다.
+
+## Git 작업 규칙
+
+팀원은 가능한 한 서로 다른 컴포넌트를 맡고, **컴포넌트 하나당 작업 브랜치 하나**를 사용합니다. 예를 들어 Camera 담당자는 `feature/camera-input`, Tracking 담당자는 `feature/tracking-bytetrack`처럼 브랜치를 만듭니다. 한 브랜치에 관련 없는 여러 컴포넌트 변경을 섞지 않습니다.
+
+### 작업 시작
+
+새 작업을 시작할 때는 팀 기준 브랜치를 최신 상태로 맞춘 뒤 작업 브랜치를 만듭니다. 아래 `base_branch`에는 팀이 정한 기준 브랜치 이름을 입력합니다.
+
+```bash
+read -r -p '팀 기준 브랜치 이름: ' base_branch
+git switch "$base_branch"
+git pull --ff-only
+read -r -p '새 작업 브랜치 이름: ' work_branch
+git switch -c "$work_branch"
+```
+
+이미 만든 작업 브랜치를 이어서 사용할 때는 새 브랜치를 다시 만들지 않습니다.
+
+```bash
+git branch
+git switch feature/camera-input
+```
+
+### 파일 담당 범위
+
+각 담당자는 자기 컴포넌트의 `include/`, `src/`, `tests/` 파일을 중심으로 수정합니다.
+
+| 담당 컴포넌트 | 주 작업 위치 |
+|---|---|
+| Camera | `include/camera/`, `src/camera/`, `tests/camera/` |
+| Preprocess | `include/preprocess/`, `src/preprocess/`, `tests/preprocess/` |
+| Inference | `include/inference/`, `src/inference/`, `tests/inference/` |
+| Postprocess | `include/postprocess/`, `src/postprocess/`, `tests/postprocess/` |
+| Tracking | `include/tracking/`, `src/tracking/`, `tests/tracking/` |
+| Target selection | `include/target/`, `src/target/`, `tests/target/` |
+| Gimbal control | `include/control/`, `src/control/`, `tests/control/` |
+
+`include/common/`, `src/pipeline/`, `CMakeLists.txt`, `config/`의 공용 YAML처럼 여러 컴포넌트가 함께 사용하는 파일은 충돌 가능성이 큽니다. 이런 파일을 바꿔야 하면 PR 설명에 변경 이유와 영향을 받는 컴포넌트를 적고, 관련 담당자에게 먼저 알립니다. 개인별 경로나 실험값은 공용 YAML 대신 `config/local/`을 사용합니다.
+
+### 커밋과 PR
+
+커밋에는 한 가지 목적의 변경만 담고, 작업이 끝나면 자기 브랜치를 push해서 팀 기준 브랜치로 PR을 만듭니다.
+
+```bash
+git status
+git add include/camera src/camera tests/camera
+git commit -m "feat: camera 입력 구현"
+git branch --show-current
+git push -u origin feature/camera-input
+```
+
+위 예시는 Camera 담당자의 경우입니다. 다른 담당자는 자기 컴포넌트 경로와 브랜치 이름으로 바꿉니다. 공용 파일을 의도적으로 수정했다면 해당 파일도 경로를 명시해 추가합니다.
+
+PR에는 다음 내용을 적습니다.
+
+- 담당 컴포넌트와 구현 내용
+- 공용 타입·pipeline·설정 변경 여부
+- 실행한 빌드 또는 테스트와 결과
+- 아직 구현하지 않았거나 다른 담당자가 이어서 처리할 부분
+
+다른 컴포넌트의 미완성 코드를 자기 PR에서 임의로 완성하거나 정리하지 않습니다. 공용 인터페이스 변경이 필요하면 먼저 작게 합의하고, 인터페이스 변경과 각 컴포넌트 적용을 가능한 한 별도 커밋 또는 PR로 나눕니다.
+
+### 최신 변경 반영과 충돌 처리
+
+PR 전에 팀 기준 브랜치의 최신 변경을 작업 브랜치에 반영합니다. 팀에서 별도 방식을 정하지 않았다면 아래처럼 merge하여 공유 브랜치의 커밋 기록을 임의로 다시 쓰지 않습니다.
+
+```bash
+git fetch origin
+read -r -p '팀 기준 브랜치 이름: ' base_branch
+git merge "origin/$base_branch"
+```
+
+충돌이 나면 자기 담당 파일은 직접 해결합니다. 공용 파일이나 다른 담당자의 컴포넌트에서 충돌하면 한쪽 내용을 임의로 삭제하지 말고 해당 담당자와 결과를 확인한 뒤 해결합니다. 이미 push해 공유 중인 브랜치에는 `git push --force`를 사용하지 않습니다.
 
 ## Docker 환경과 사용 방법
 
@@ -120,7 +204,7 @@ cmake --build build
 ./build/lwir_runtime
 ```
 
-실행 파일은 현재 작업 디렉터리의 `config/runtime.yaml`을 읽습니다. 현재 Camera는 실제 영상을 읽지 않아 `open()`이 실패하고 각 thread가 종료됩니다. 따라서 이 실행은 thread 연결·종료 흐름 확인용입니다.
+실행 파일은 별도 인자가 없으면 현재 작업 디렉터리의 `config/runtime.yaml`을 읽습니다. 개인 설정은 `./build/lwir_runtime config/local/runtime.yaml`처럼 경로를 전달합니다. 현재 Camera는 실제 영상을 읽지 않아 `open()`이 실패하고 각 thread가 종료됩니다. 따라서 이 실행은 thread 연결·종료 흐름 확인용입니다.
 
 ### 6. 이후 개발할 때 (Windows + WSL)
 
@@ -135,7 +219,7 @@ cmake --build build
    ```
 
    VS Code 왼쪽 아래에 `WSL: Ubuntu-22.04`가 표시되는지 확인합니다. 이후 **Terminal → New Terminal**을 열면 WSL 터미널이 열립니다. 터미널의 현재 위치가 `/home/<사용자명>/lwir-work/runtime`인지 `pwd`로 확인할 수 있습니다. 저장소는 Windows의 `C:\...`가 아니라 WSL의 `/home/...`에 있습니다.
-3. **새 작업을 시작할 때** VS Code의 WSL 터미널에서 팀 기준 브랜치를 최신 상태로 맞춘 다음 자기 작업 브랜치를 만듭니다. 아래 `read` 명령이 이름을 물으면 팀에서 정한 기준 브랜치와 자신의 새 작업 이름(예: `feature/camera-input`)을 입력합니다. 이 명령은 `user@...$`인 WSL 터미널에서 실행합니다.
+3. **새 작업을 시작할 때** VS Code의 WSL 터미널에서 위 [Git 작업 규칙](#git-작업-규칙)에 따라 팀 기준 브랜치를 최신 상태로 맞춘 다음 자기 컴포넌트의 작업 브랜치를 만듭니다. 아래 `read` 명령이 이름을 물으면 팀에서 정한 기준 브랜치와 자신의 새 작업 이름(예: `feature/camera-input`)을 입력합니다. 이 명령은 `user@...$`인 WSL 터미널에서 실행합니다.
 
    ```bash
    read -r -p '팀 기준 브랜치 이름: ' base_branch
@@ -173,13 +257,35 @@ cmake --build build
 
 ### 측정 모드
 
-[runtime.yaml](config/runtime.yaml)의 `measurement.enabled`를 `true`로 설정하면 각 worker가 프레임별 큐 대기 시간과 처리 시간을 기록합니다. Tracking과 Communication 행의 `e2e_ms`는 카메라 획득 완료부터 각각 추적 완료, `STM32Link::send()` 반환까지의 지연입니다. 현재 `send()`는 빈 구현이므로 Communication 값은 실제 STM32 전송 지연을 뜻하지 않습니다. 종료 후 `results/<모델명>_<시각>/`에 `metrics.csv`와 참조한 YAML의 사본을 저장합니다. 프로그램은 원본 YAML을 실행 중 수정하지 않습니다. 별도 측정 thread는 없으며, 기록은 stage당 최대 10,000건입니다. 현재 Camera가 프레임을 반환하지 않으므로 CSV에는 헤더만 생성됩니다.
+[runtime.yaml](config/runtime.yaml)의 `measurement.enabled`를 `true`로 설정하면 각 worker가 프레임별 큐 대기 시간과 처리 시간을 기록합니다. Tracking과 Control 행의 `e2e_ms`는 카메라 획득 완료부터 각각 추적 완료, `GimbalController::apply()` 반환까지의 지연입니다. 현재 `apply()`는 빈 구현이므로 Control 값은 실제 하드웨어 제어 지연을 뜻하지 않습니다. 종료 후 `results/<모델명>_<시각>/`에 `metrics.csv`와 참조한 YAML의 사본을 저장합니다. 프로그램은 원본 YAML을 실행 중 수정하지 않습니다. 별도 측정 thread는 없으며, 기록은 stage당 최대 10,000건입니다. 현재 Camera가 프레임을 반환하지 않으므로 CSV에는 헤더만 생성됩니다.
+
+제어 하드웨어를 연결하기 전에는 아래 조합으로 전체 탐지·추적 파이프라인만 측정합니다.
+
+```yaml
+control:
+  enabled: false
+  config: config/control.yaml
+
+measurement:
+  enabled: true
+```
+
+이 모드에서도 Control thread는 마지막 queue를 비워 정상 종료를 보장하지만 제어 함수와 하드웨어에는 접근하지 않습니다. 따라서 `metrics.csv`에는 Camera부터 Target selection까지의 측정값만 기록되고 Control 행은 생기지 않습니다. 나중에 실제 제어 성능까지 측정할 때만 `control.enabled`를 `true`로 바꿉니다.
+
+컴포넌트 테스트의 시간 측정은 알고리즘 자체의 처리비용을 비교할 때 사용합니다. 통합 측정은 queue 대기시간과 Camera 기준 `e2e_ms`를 포함하므로 두 결과를 대체하지 않습니다.
+
+| 확인 목적 | 사용할 방법 |
+|---|---|
+| 전처리·추론·후처리·추적 함수 자체의 처리시간 | 각 컴포넌트 테스트 |
+| thread와 queue를 포함한 단계별 처리시간·대기시간 | `measurement.enabled: true` 통합 실행 |
+| Camera부터 Tracking/Target selection까지 전체 지연 | 통합 실행의 `e2e_ms` |
+| 실제 짐벌 제어 호출과 제어 완료 시점까지의 지연 | 이후 `control.enabled: true`로 측정 |
 
 `results/`는 Git에서 제외됩니다. 측정 모드의 CSV는 **통합 실행 결과**이며, 컴포넌트 단독 테스트의 측정값은 현재 자동 저장하지 않습니다.
 
 ## 컴포넌트 테스트 예시
 
-[tests](tests)에는 구성요소별 작업 위치와 두 가지 예시가 있습니다. [TargetSelector 테스트](tests/target/test_target_selector.cpp)는 선택 ID의 동작을 검사하는 코드입니다. [ByteTrack 테스트](tests/tracking/test_bytetrack.cpp)는 아직 구현 전 골격이며, [프레임 목록](tests/tracking/data/frames.csv)과 [검출 예시](tests/tracking/data/detections.csv)를 넣어 두었습니다. `Detection` 필드와 ByteTrack 로직이 완성되면 CSV를 읽어 프레임 순서대로 `track()`을 호출하도록 채워야 합니다. 검출이 없는 4번 프레임도 빈 목록으로 호출해야 합니다.
+[tests](tests)는 구성요소별 디렉터리로 나뉘어 있습니다. 각 담당자는 자기 구성요소 디렉터리에 테스트를 추가하고, 다른 구성요소의 예시 파일을 공통 작업 파일처럼 복사해 수정하지 않습니다. [TargetSelector 테스트](tests/target/test_target_selector.cpp)는 선택 ID의 동작을 검사하는 코드입니다. [ByteTrack 테스트](tests/tracking/test_bytetrack.cpp)는 아직 구현 전 골격이며, [프레임 목록](tests/tracking/data/frames.csv)과 [검출 예시](tests/tracking/data/detections.csv)를 넣어 두었습니다. ByteTrack 담당자는 이 골격을 실제 테스트로 발전시킵니다. `Detection` 필드와 ByteTrack 로직이 완성되면 CSV를 읽어 프레임 순서대로 `track()`을 호출하도록 채워야 합니다. 검출이 없는 4번 프레임도 빈 목록으로 호출해야 합니다.
 
 현재 테스트 대상은 [CMakeLists.txt](CMakeLists.txt)에서 모두 주석 처리되어 있으므로 `ctest`로 실행되지 않습니다. 각 담당자가 자기 컴포넌트를 직접 호출해 동작을 검증하고, 단독 처리 시간이 필요하면 해당 호출 구간을 측정합니다. 통합 실행의 큐 대기·전체 지연은 위 측정 모드에서 확인합니다.
 
@@ -193,7 +299,7 @@ cmake --build build
 | Postprocess | `src/postprocess/yolov8_postprocessor.cpp`, `include/common/detection.hpp` | YOLO 출력 해석, 점수 필터와 NMS, Detection 생성 |
 | Tracking | `src/tracking/bytetrack_tracker.cpp`, `include/common/track.hpp` | ByteTrack 상태·ID 관리, Track 생성, 설정 적용 |
 | 대상 선택 | `src/target/target_selector.cpp`, `src/pipeline/target_selection_thread.cpp` | GUI 선택 ID를 현재 Track 목록에 적용하는 흐름 확인 |
-| STM32 통신 | `src/communication/stm32_link.cpp`, `src/pipeline/communication_thread.cpp` | 전송 형식과 연결, 대상 없음 상태 처리 |
+| 짐벌 제어 | `src/control/gimbal_controller.cpp`, `src/pipeline/control_thread.cpp` | Orange Pi의 하드웨어 제어 방식 연결, 대상 없음 상태 처리 |
 
 각 담당자는 자기 단계의 **입력 타입 → 처리 함수 → 출력 타입**을 먼저 확인하면 됩니다. `src/pipeline/*_thread.cpp`는 queue와 worker 실행 흐름을 담당합니다. 새 소스 파일을 추가하면 `CMakeLists.txt`의 빌드 대상도 확인해야 합니다.
 
@@ -201,6 +307,6 @@ cmake --build build
 
 ## 현재 구현 범위와 실험 방향
 
-thread·queue 연결, 프레임 ID 전달, 대상 선택 경계, 측정 모드 저장 구조는 마련되어 있고 `runtime-pc`에서 컴파일·링크가 됩니다. 현재 활성 설정은 YOLOv8 + ByteTrack 기준선이며, 모델 경로·전처리 조건·후처리 임계값은 YAML에서 관리합니다. 실제 Camera·YOLO 추론·후처리·ByteTrack·STM32 전송은 아직 골격이고 GUI 입력도 연결되지 않았습니다. DINO·KLT와 PPU 후처리는 현재 실행 설정에 연결되어 있지 않습니다.
+thread·queue 연결, 프레임 ID 전달, 대상 선택 경계, 측정 모드 저장 구조는 마련되어 있고 `runtime-pc`에서 컴파일·링크가 됩니다. 현재 활성 설정은 YOLOv8 + ByteTrack 기준선이며, 모델 경로·전처리 조건·후처리 임계값은 YAML에서 관리합니다. 실제 Camera·YOLO 추론·후처리·ByteTrack·Orange Pi 짐벌 제어는 아직 골격이고 GUI 입력도 연결되지 않았습니다. DINO·KLT와 PPU 후처리는 현재 실행 설정에 연결되어 있지 않습니다.
 
 첫 공동 목표는 **동일한 LWIR 입력에서 YOLO 검출과 ByteTrack ID가 끝까지 전달되는 기준선**을 만드는 것입니다. 이후 모델과 처리 방식을 바꿔 성능을 비교합니다. queue 적체 정책과 측정 범위 등 팀이 합의할 항목은 [discussion.md](discussion.md)에 정리되어 있습니다.

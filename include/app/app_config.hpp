@@ -41,7 +41,7 @@ struct TrackingConfig
 };
 
 
-struct CommunicationConfig
+struct ControlConfig
 {
     bool enabled;
     std::string config_path;
@@ -64,7 +64,7 @@ struct AppConfig
     PostprocessConfig postprocess;
 
     TrackingConfig tracking;
-    CommunicationConfig communication;
+    ControlConfig control;
     MeasurementConfig measurement;
 };
 

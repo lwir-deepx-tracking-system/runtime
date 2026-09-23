@@ -73,8 +73,8 @@ Application::Application(const std::string& config_path)
         config.detector.config_path,
         config.tracking.config_path
     };
-    if (config.communication.enabled)
-        config_snapshot_paths_.push_back(config.communication.config_path);
+    if (config.control.enabled)
+        config_snapshot_paths_.push_back(config.control.config_path);
 
     camera_ = std::make_unique<Camera>();
 
@@ -145,11 +145,12 @@ Application::Application(const std::string& config_path)
             measurement_enabled_
         );
 
-    // 선택 결과를 STM32 통신 단계에 연결
-    communication_thread_ =
-        std::make_unique<CommunicationThread>(
-            stm32_link_,
+    // 선택 결과를 Orange Pi 짐벌 제어 단계에 연결
+    control_thread_ =
+        std::make_unique<ControlThread>(
+            gimbal_controller_,
             target_selection_queue_,
+            config.control.enabled,
             measurement_enabled_
         );
 }
@@ -164,7 +165,7 @@ void Application::set_selected_track_id(int track_id)
 // Pipeline Worker를 실행한다.
 void Application::run()
 {
-    communication_thread_->start();
+    control_thread_->start();
     target_selection_thread_->start();
     // Tracking 스레디 시작
     tracking_thread_->start();
@@ -185,7 +186,7 @@ void Application::run()
     postprocess_thread_->join();
     tracking_thread_->join();
     target_selection_thread_->join();
-    communication_thread_->join();
+    control_thread_->join();
 
     if (!measurement_enabled_)
         return;
@@ -227,7 +228,7 @@ void Application::run()
     append_metrics(metrics_file, "postprocess", postprocess_thread_->metrics());
     append_metrics(metrics_file, "tracking", tracking_thread_->metrics());
     append_metrics(metrics_file, "target_selection", target_selection_thread_->metrics());
-    append_metrics(metrics_file, "communication", communication_thread_->metrics());
+    append_metrics(metrics_file, "control", control_thread_->metrics());
     metrics_file.close();
     if (!metrics_file)
         throw std::runtime_error("metrics.csv 파일을 저장하지 못했습니다");

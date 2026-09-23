@@ -94,18 +94,18 @@ AppConfig load_config(const std::string& config_path)
     config.tracking.config_path =
         require_string(tracking, "config", "tracking");
 
-    config.communication.enabled =
+    config.control.enabled =
         require_bool(
-            root["communication"],
+            root["control"],
             "enabled",
-            "communication"
+            "control"
         );
 
-    config.communication.config_path =
+    config.control.config_path =
         require_string(
-            root["communication"],
+            root["control"],
             "config",
-            "communication"
+            "control"
         );
 
     config.measurement.enabled =
