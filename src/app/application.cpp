@@ -48,16 +48,6 @@ Application::Application(const std::string& config_path)
     );
 
     Logger::debug(
-        "[Application] model_input_queue 크기: " +
-        std::to_string(model_input_queue_.size())
-    );
-
-    Logger::debug(
-        "[Application] model_output_queue 크기: " +
-        std::to_string(model_output_queue_.size())
-    );
-
-    Logger::debug(
         "[Application] track_queue 크기: " +
         std::to_string(track_queue_.size())
     );
@@ -78,14 +68,7 @@ Application::Application(const std::string& config_path)
 
     camera_ = std::make_unique<Camera>();
 
-    // Config → 실제 Preprocessor 구현체 생성
-    preprocessor_ = ComponentFactory::create_preprocessor(config);
-
-    // 추론 구현체 생성
-    inference_ = ComponentFactory::create_inference(config);
-    
-    // 후처리 구현체 생성
-    postprocessor_ = ComponentFactory::create_postprocessor(config);
+    detection_pipeline_ = ComponentFactory::create_detection_pipeline(config);
 
     // Tracking 구현체 생성
     tracker_ = ComponentFactory::create_tracker(config);
@@ -100,29 +83,10 @@ Application::Application(const std::string& config_path)
             measurement_enabled_
         );
 
-    // Preprocessor thread에 연결
-    preprocess_thread_ =
-        std::make_unique<PreprocessThread>(
-            *preprocessor_,
+    detection_thread_ =
+        std::make_unique<DetectionThread>(
+            *detection_pipeline_,
             frame_queue_,
-            model_input_queue_,
-            measurement_enabled_
-        );
-
-    // Inference Thread 에 연결
-    inference_thread_ =
-        std::make_unique<InferenceThread>(
-            *inference_,
-            model_input_queue_,
-            model_output_queue_,
-            measurement_enabled_
-        );
-
-    // Postprocessor Thread 에 연결
-    postprocess_thread_ =
-        std::make_unique<PostprocessThread>(
-            *postprocessor_,
-            model_output_queue_,
             detection_queue_,
             measurement_enabled_
         );
@@ -169,21 +133,14 @@ void Application::run()
     target_selection_thread_->start();
     // Tracking 스레디 시작
     tracking_thread_->start();
-    // 후처리 스레드 시작
-    postprocess_thread_->start();
-    // 추론 스레드 시작
-    inference_thread_->start();
-    // 전처리 스레드 시작
-    preprocess_thread_->start();
+    detection_thread_->start();
     // 마지막에 Frame 생산자 시작
     camera_thread_->start();
 
 
     // 각 Thread 종료 대기
     camera_thread_->join();
-    preprocess_thread_->join();
-    inference_thread_->join();
-    postprocess_thread_->join();
+    detection_thread_->join();
     tracking_thread_->join();
     target_selection_thread_->join();
     control_thread_->join();
@@ -223,9 +180,7 @@ void Application::run()
     metrics_file << "mode,frame_id,stage,queue_wait_ms,processing_ms,e2e_ms\n";
     metrics_file << std::fixed << std::setprecision(6);
     append_metrics(metrics_file, "camera", camera_thread_->metrics());
-    append_metrics(metrics_file, "preprocess", preprocess_thread_->metrics());
-    append_metrics(metrics_file, "inference", inference_thread_->metrics());
-    append_metrics(metrics_file, "postprocess", postprocess_thread_->metrics());
+    append_metrics(metrics_file, "detection", detection_thread_->metrics());
     append_metrics(metrics_file, "tracking", tracking_thread_->metrics());
     append_metrics(metrics_file, "target_selection", target_selection_thread_->metrics());
     append_metrics(metrics_file, "control", control_thread_->metrics());

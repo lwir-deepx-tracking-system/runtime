@@ -86,7 +86,7 @@ void CameraThread::run()
 
     camera_.close();
 
-    // PreprocessThread에 더 이상 Frame이 오지 않음을 알린다.
+    // DetectionThread에 더 이상 Frame이 오지 않음을 알린다.
     output_queue_.close();
 
     Logger::info("[CameraThread] 종료");

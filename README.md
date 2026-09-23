@@ -6,17 +6,15 @@ LWIR 영상에서 객체를 탐지하고 Track ID를 부여합니다. 사용자�
 
 ```mermaid
 flowchart LR
-    CameraThread --> PreprocessThread --> InferenceThread --> PostprocessThread --> TrackingThread --> TargetSelectionThread --> ControlThread
+    CameraThread --> DetectionThread --> TrackingThread --> TargetSelectionThread --> ControlThread
 ```
 
 각 상자는 별도 POSIX pthread입니다. thread 사이 데이터는 `ThreadSafeQueue`로 전달되며, [Application](src/app/application.cpp)이 구성요소와 thread를 연결하고 `Tracker` 객체를 소유합니다. `TrackingThread`는 `Tracker` 인터페이스를 통해 현재 `ByteTrackTracker`를 호출합니다.
 
 | 전달 단계 | 데이터 타입 | 담는 내용 |
 |---|---|---|
-| Camera → Preprocess | `Frame` | 프레임 ID, 획득 시각, 영상 |
-| Preprocess → Inference | `ModelInput` | 프레임 ID, 모델 입력 |
-| Inference → Postprocess | `ModelOutput` | 프레임 ID, 모델 출력 |
-| Postprocess → Tracking | `DetectionResult` | 프레임 ID, `vector<Detection>` |
+| Camera → Detection | `Frame` | 프레임 ID, 획득 시각, `CV_16UC1` 영상 |
+| Detection → Tracking | `DetectionResult` | 프레임 ID, 원본 영상 좌표의 `vector<Detection>` |
 | Tracking → Target selection | `TrackingResult` | 프레임 ID, `vector<Track>` |
 | Target selection → Control | `TargetSelection` | 선택 ID와 일치한 Track, 또는 일치 결과 없음 |
 
@@ -26,8 +24,8 @@ flowchart LR
 
 현재 브랜치의 실행 조합은 **YOLOv8 + ByteTrack**입니다. 코드나 파이프라인 연결이 달라지는 조합은 별도 브랜치에서 개발하고, 같은 구현 안에서 바꿀 모델 파일·입력 조건·임계값·측정 모드는 YAML로 관리합니다. 브랜치에서 개발한 기능이 실제 코드에 연결되기 전에는 YAML 값만 바꿔 실행할 수 없습니다.
 
-- [runtime.yaml](config/runtime.yaml): 실행 조합, 로그 레벨, 측정 모드와 각 구성요소 설정 파일 경로. 현재 Factory가 생성할 수 있는 것은 YOLOv8 CPU 전처리·후처리와 ByteTrack입니다.
-- [yolov8n.yaml](config/model/yolov8n.yaml): 모델 경로 `models/yolov8n.dxnn`, 입력 크기·전처리 조건·후처리 임계값.
+- [runtime.yaml](config/runtime.yaml): 실행 조합, 로그 레벨, 측정 모드와 구성요소 설정 파일 경로.
+- [yolov8n.yaml](config/model/yolov8n.yaml): 모델 경로, `CV_16UC1` 카메라 계약, clipping 범위, 입력 크기, letterbox와 후처리 설정.
 - [bytetrack.yaml](config/tracking/bytetrack.yaml): 추적 파라미터. 현재 ByteTrack 구현은 파일 경로만 보관하며 값을 적용하지 않습니다.
 
 컴파일된 `.dxnn`은 `models/`에 두도록 경로가 잡혀 있지만, 현재 모델 파일은 없고 `models/`는 Git에서 제외됩니다. `runtime.yaml`의 `control.enabled`가 `false`이면 Control thread는 queue 종료를 위해 선택 결과만 소비하고 `GimbalController::apply()`를 호출하지 않습니다.
@@ -72,9 +70,7 @@ git switch feature/camera-input
 | 담당 컴포넌트 | 주 작업 위치 |
 |---|---|
 | Camera | `include/camera/`, `src/camera/`, `tests/camera/` |
-| Preprocess | `include/preprocess/`, `src/preprocess/`, `tests/preprocess/` |
-| Inference | `include/inference/`, `src/inference/`, `tests/inference/` |
-| Postprocess | `include/postprocess/`, `src/postprocess/`, `tests/postprocess/` |
+| Detection | `include/detection/`, `src/detection/`, `tests/detection/` |
 | Tracking | `include/tracking/`, `src/tracking/`, `tests/tracking/` |
 | Target selection | `include/target/`, `src/target/`, `tests/target/` |
 | Gimbal control | `include/control/`, `src/control/`, `tests/control/` |
@@ -118,7 +114,26 @@ git merge "origin/$base_branch"
 
 ## Docker 환경과 사용 방법
 
-`runtime-pc`는 팀원이 같은 Linux 빌드 환경에서 C++ runtime을 개발하기 위한 컨테이너입니다. 소스는 호스트 저장소를 컨테이너에 연결하고, 빌드 결과는 Docker 볼륨 `runtime-build`에 보관합니다. `compiler-dx`는 모델 컴파일용, `runtime-opi`는 향후 Orange Pi 실행용 환경을 둘 위치입니다. 현재 `docker/runtime-opi/`는 자리만 준비되어 있고, Compose에는 `runtime-pc`만 정의되어 있습니다.
+`runtime-pc`는 팀원이 같은 Linux 빌드 환경에서 C++ runtime을 개발하기 위한 프로젝트 전용 컨테이너입니다. 상위 DX-AllSuite workspace에 의존하지 않도록 저장소 자체를 `/workspace/lwir-runtime`에 연결하며, 빌드 결과는 Docker 볼륨 `runtime-build`에 보관합니다.
+
+기반 이미지는 `DX_RUNTIME_IMAGE` 빌드 인자로 교체할 수 있습니다. 팀 배포 환경에서는 `.env.example`을 참고하여 사내 registry의 immutable digest를 지정하는 방식을 권장합니다. 로컬 태그를 사용할 경우 새 PC에서 먼저 동일한 DX-AllSuite 커밋으로 기반 이미지를 준비해야 합니다.
+
+### 독립 저장소의 dx_app 의존성
+
+CPU-only 빌드는 dx_app 없이 다음 명령으로 검증할 수 있습니다.
+
+```bash
+./scripts/verify_cpu.sh
+```
+
+실제 dx_app 연동은 공식 `DEEPX-AI/dx_app` 저장소의 `v3.2.2` 커밋 `01b77271c3cf9f59c3440a953fe56d99adfbda12`를 `third_party/dx_app` Git submodule로 고정하여 사용합니다. submodule 등록 후 다음처럼 의존성 연결을 활성화합니다.
+
+```bash
+git submodule update --init --recursive
+cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON
+```
+
+외부 체크아웃이나 설치본을 사용할 때는 `-DDX_APP_ROOT=/경로`를 추가합니다. CMake는 dx_app 헤더와 DX-RT 헤더·라이브러리가 없으면 구성 단계에서 명확히 실패합니다. 이 옵션은 현재 의존성 발견과 링크 경계까지만 준비하며, DXNN 로딩과 실제 NPU runner 연결은 아직 구현되지 않았습니다.
 
 ### 0. 실행 환경과 저장소 준비
 
@@ -175,10 +190,10 @@ cd ../runtime
 
 ### 2. 프로젝트 이미지 준비
 
-이 저장소의 `compose.yaml`에는 `image: lwir-runtime-pc:dxas-5749ab70-ubuntu22.04`만 있고 자동 이미지 빌드 설정은 없습니다. 이 이미지가 없으면 **이 저장소 루트**에서 같은 태그로 빌드합니다.
+`compose.yaml`에는 프로젝트 이미지의 자동 빌드 설정이 포함되어 있습니다. 기반 이미지가 준비된 저장소 루트에서 실행합니다.
 
 ```bash
-docker build -t lwir-runtime-pc:dxas-5749ab70-ubuntu22.04 -f docker/runtime-pc/Dockerfile .
+docker compose build runtime-pc
 ```
 
 ### 3. Docker 컨테이너 열기
@@ -189,7 +204,7 @@ docker build -t lwir-runtime-pc:dxas-5749ab70-ubuntu22.04 -f docker/runtime-pc/D
 docker compose run --rm runtime-pc
 ```
 
-컨테이너의 작업 디렉터리는 `/workspace/lwir-deepx-tracking-system`입니다.
+컨테이너의 작업 디렉터리는 `/workspace/lwir-runtime`입니다.
 
 ### 4. 컨테이너 안에서 빌드
 
@@ -237,7 +252,7 @@ cmake --build build
    docker compose run --rm runtime-pc
    ```
 
-   `root@...:/workspace/lwir-deepx-tracking-system#`처럼 프롬프트가 바뀌면 컨테이너 안입니다. 여기에서 빌드하고 실행합니다.
+   `root@...:/workspace/lwir-runtime#`처럼 프롬프트가 바뀌면 컨테이너 안입니다. 여기에서 빌드하고 실행합니다.
 
    ```bash
    cmake -S . -B build
@@ -253,7 +268,7 @@ cmake --build build
 
 - **Ubuntu:** Docker Engine과 Compose가 있으면 위 방식으로 Linux 컨테이너를 사용할 수 있습니다. 이 저장소의 빌드·실행 명령은 Ubuntu 호스트에서 확인했습니다. [Docker의 Ubuntu 설치 문서](https://docs.docker.com/engine/install/ubuntu/)
 - **Windows:** 위 Bash 절차는 WSL 2 Ubuntu 배포판과 Docker Desktop의 WSL 연동을 전제로 합니다. PowerShell에서 `./docker_build.sh`를 그대로 실행할 수 없습니다. Windows 호스트에서 WSL 2 Ubuntu 22.04와 Docker Desktop을 사용해 위 절차를 실행했습니다. 현재 이미지는 `linux/amd64`입니다. [Docker Desktop의 Windows 설치 문서](https://docs.docker.com/desktop/setup/install/windows-install/)
-- **DEEPX:** 현재 `runtime-pc` 이미지에서 DX-RT C++ API의 컴파일·링크·버전 조회를 확인했습니다. DX-RT는 기반 `dx-runtime` 이미지에서 상속합니다. **현재 프로젝트 CMake는 DX-RT를 링크하지 않고, `Inference`도 NPU 호출을 하지 않습니다.** `compose.yaml`에도 NPU 장치 전달 설정이 없어 실제 하드웨어 실행은 확인되지 않았습니다.
+- **DEEPX:** CPU-only 기본 빌드는 DX-RT를 링크하지 않습니다. `LWIR_ENABLE_DX_APP=ON`은 향후 연동을 위한 dx_app/DX-RT 의존성 경계를 활성화하지만, 현재 `DxAppDetectionPipeline`은 실제 NPU 호출을 하지 않습니다. `compose.yaml`에도 NPU 장치 전달 설정이 없어 DXNN 로딩·추론·tensor 검증과 NPU 성능은 모두 미검증입니다.
 
 ### 측정 모드
 
@@ -287,16 +302,14 @@ measurement:
 
 [tests](tests)는 구성요소별 디렉터리로 나뉘어 있습니다. 각 담당자는 자기 구성요소 디렉터리에 테스트를 추가하고, 다른 구성요소의 예시 파일을 공통 작업 파일처럼 복사해 수정하지 않습니다. [TargetSelector 테스트](tests/target/test_target_selector.cpp)는 선택 ID의 동작을 검사하는 코드입니다. [ByteTrack 테스트](tests/tracking/test_bytetrack.cpp)는 아직 구현 전 골격이며, [프레임 목록](tests/tracking/data/frames.csv)과 [검출 예시](tests/tracking/data/detections.csv)를 넣어 두었습니다. ByteTrack 담당자는 이 골격을 실제 테스트로 발전시킵니다. `Detection` 필드와 ByteTrack 로직이 완성되면 CSV를 읽어 프레임 순서대로 `track()`을 호출하도록 채워야 합니다. 검출이 없는 4번 프레임도 빈 목록으로 호출해야 합니다.
 
-현재 테스트 대상은 [CMakeLists.txt](CMakeLists.txt)에서 모두 주석 처리되어 있으므로 `ctest`로 실행되지 않습니다. 각 담당자가 자기 컴포넌트를 직접 호출해 동작을 검증하고, 단독 처리 시간이 필요하면 해당 호출 구간을 측정합니다. 통합 실행의 큐 대기·전체 지연은 위 측정 모드에서 확인합니다.
+현재 설정, LWIR 전처리, DetectionThread, TargetSelector 테스트가 CTest에 등록되어 있습니다. `./scripts/verify_cpu.sh`로 CPU-only 전체 빌드와 테스트를 실행합니다. ByteTrack 테스트는 아직 구현 전 골격이므로 CTest에 등록하지 않습니다.
 
 ## 구현할 내용과 수정 위치
 
 | 담당 단계 | 주요 파일 | 구현할 내용 |
 |---|---|---|
 | Camera | `src/camera/camera.cpp`, `include/common/frame.hpp` | LWIR 프레임 획득, 이미지 형식과 버퍼 수명 확인 |
-| Preprocess | `src/preprocess/yolov8_preprocessor.cpp`, `include/common/model_input.hpp` | 모델 YAML에 맞는 영상 변환과 입력 텐서 구성 |
-| Inference | `src/inference/inference.cpp`, `include/common/model_output.hpp` | DX-RT 모델 로드·실행, 출력 텐서와 소유권 정의 |
-| Postprocess | `src/postprocess/yolov8_postprocessor.cpp`, `include/common/detection.hpp` | YOLO 출력 해석, 점수 필터와 NMS, Detection 생성 |
+| Detection | `src/detection/`, `src/pipeline/detection_thread.cpp` | LWIR 전처리, dx_app 비동기 추론 연결, 원본 좌표 Detection 생성 |
 | Tracking | `src/tracking/bytetrack_tracker.cpp`, `include/common/track.hpp` | ByteTrack 상태·ID 관리, Track 생성, 설정 적용 |
 | 대상 선택 | `src/target/target_selector.cpp`, `src/pipeline/target_selection_thread.cpp` | GUI 선택 ID를 현재 Track 목록에 적용하는 흐름 확인 |
 | 짐벌 제어 | `src/control/gimbal_controller.cpp`, `src/pipeline/control_thread.cpp` | Orange Pi의 하드웨어 제어 방식 연결, 대상 없음 상태 처리 |

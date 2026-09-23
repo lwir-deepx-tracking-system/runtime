@@ -4,22 +4,16 @@
 #include <string>
 
 #include "common/frame.hpp"
-#include "common/model_input.hpp"
-#include "common/model_output.hpp"
 #include "common/threadsafequeue.hpp"
 #include "common/detection.hpp"
 #include "common/track.hpp"
 
 #include "camera/camera.hpp"
-#include "preprocess/preprocessor.hpp"
-#include "inference/inference.hpp"
-#include "postprocess/postprocessor.hpp"
+#include "detection/dxapp_detection_pipeline.hpp"
 #include "tracking/tracker.hpp"
 
 #include "pipeline/camera_thread.hpp"
-#include "pipeline/preprocess_thread.hpp"
-#include "pipeline/inference_thread.hpp"
-#include "pipeline/postprocess_thread.hpp"
+#include "pipeline/detection_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
 #include "pipeline/target_selection_thread.hpp"
 #include "pipeline/control_thread.hpp"
@@ -31,12 +25,6 @@ class Application
 private:
     // Stage 사이에서 Frame 전달
     ThreadSafeQueue<Frame> frame_queue_;
-
-    // Preprocess 결과를 다음 Stage로 전달
-    ThreadSafeQueue<ModelInput> model_input_queue_;
-
-    // Inference 결과를 다음 Stage로 전달
-    ThreadSafeQueue<ModelOutput> model_output_queue_;
 
     // Detection 목록 다음 Stage로 전달
     ThreadSafeQueue<DetectionResult> detection_queue_;
@@ -58,23 +46,8 @@ private:
     // Camera pthread
     std::unique_ptr<CameraThread> camera_thread_;
 
-    // YAML로 생성된 Preprocessor 
-    std::unique_ptr<Preprocessor> preprocessor_;
-
-    // Preprocess pthread 
-    std::unique_ptr<PreprocessThread> preprocess_thread_;
-
-    // Inference 객체
-    std::unique_ptr<Inference> inference_;
-
-    // Inference pthread
-    std::unique_ptr<InferenceThread> inference_thread_;
-
-    // Postprocessor 객체
-    std::unique_ptr<Postprocessor> postprocessor_;
-
-    // Postprcoess pthread
-    std::unique_ptr<PostprocessThread> postprocess_thread_;
+    std::unique_ptr<DetectionPipeline> detection_pipeline_;
+    std::unique_ptr<DetectionThread> detection_thread_;
 
     // 현재 사용하는 Tracker 객체를 Application이 소유한다.
     std::unique_ptr<Tracker> tracker_;

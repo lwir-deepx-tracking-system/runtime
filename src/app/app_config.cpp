@@ -1,147 +1,91 @@
 #include "app/app_config.hpp"
 #include "common/logger.hpp"
 
+#include <limits>
 #include <stdexcept>
-#include <string>
-
 #include <yaml-cpp/yaml.h>
 
-
-// 필수 string 설정 값을 읽고, 누락되거나 타입이 잘못되면 예외를 발생시킨다.
-static std::string require_string(
-    const YAML::Node& node,
-    const std::string& key,
-    const std::string& path)
+namespace {
+template <typename T>
+T required(const YAML::Node& node, const char* key, const std::string& path)
 {
-    if (!node || !node[key])
-        throw std::runtime_error("설정 항목이 없습니다: " + path + "." + key);
-
-    try
-    {
-        return node[key].as<std::string>();
-    }
-    catch (const YAML::Exception&)
-    {
-        throw std::runtime_error("문자열 설정값이 올바르지 않습니다: " + path + "." + key);
+    if (!node || !node[key]) throw std::runtime_error("missing configuration: " + path + "." + key);
+    try { return node[key].as<T>(); }
+    catch (const YAML::Exception& e) {
+        throw std::runtime_error("invalid configuration: " + path + "." + key + " (" + e.what() + ")");
     }
 }
 
-
-// 필수 bool 설정 값을 읽고, 누락되거나 타입이 잘못되면 예외를 발생시킨다.
-static bool require_bool(
-    const YAML::Node& node,
-    const std::string& key,
-    const std::string& path)
+YAML::Node load_yaml(const std::string& path)
 {
-    if (!node || !node[key])
-        throw std::runtime_error("설정 항목이 없습니다: " + path + "." + key);
-
-    try
-    {
-        return node[key].as<bool>();
-    }
-    catch (const YAML::Exception&)
-    {
-        throw std::runtime_error("참/거짓 설정값이 올바르지 않습니다: " + path + "." + key);
+    try { return YAML::LoadFile(path); }
+    catch (const YAML::Exception& e) {
+        throw std::runtime_error("cannot read configuration " + path + ": " + e.what());
     }
 }
+}
 
-
-// runtime.yaml을 읽어 전체 실행 설정을 AppConfig로 변환한다.
-AppConfig load_config(const std::string& config_path)
+ModelConfig load_model_config(const std::string& path)
 {
-    YAML::Node root;
+    const YAML::Node root = load_yaml(path);
+    ModelConfig c;
+    c.name = required<std::string>(root["model"], "name", "model");
+    c.path = required<std::string>(root["model"], "path", "model");
+    const YAML::Node camera = root["camera_input"];
+    c.camera_input.opencv_type = required<std::string>(camera, "opencv_type", "camera_input");
+    c.camera_input.width = required<int>(camera, "width", "camera_input");
+    c.camera_input.height = required<int>(camera, "height", "camera_input");
+    const int clip_min = required<int>(camera, "clip_min", "camera_input");
+    const int clip_max = required<int>(camera, "clip_max", "camera_input");
+    c.camera_input.channel_mode = required<std::string>(camera, "channel_mode", "camera_input");
+    c.input.width = required<int>(root["input"], "width", "input");
+    c.input.height = required<int>(root["input"], "height", "input");
+    c.preprocess.resize = required<std::string>(root["preprocess"], "resize", "preprocess");
+    c.preprocess.normalize = required<bool>(root["preprocess"], "normalize", "preprocess");
+    c.preprocess.pad_value = required<int>(root["preprocess"], "pad_value", "preprocess");
+    const YAML::Node post = root["postprocess"];
+    c.postprocess.confidence_threshold = required<float>(post, "confidence_threshold", "postprocess");
+    c.postprocess.nms_threshold = required<float>(post, "nms_threshold", "postprocess");
+    c.postprocess.num_classes = required<int>(post, "num_classes", "postprocess");
+    c.postprocess.class_names = required<std::vector<std::string>>(post, "class_names", "postprocess");
 
-    try
-    {
-        root = YAML::LoadFile(config_path);
-    }
-    catch (const YAML::Exception& e)
-    {
-        throw std::runtime_error(
-            "설정 파일을 읽지 못했습니다: " + config_path + " / " + e.what()
-        );
-    }
+    if (c.camera_input.opencv_type != "CV_16UC1") throw std::runtime_error("camera_input.opencv_type must be CV_16UC1");
+    if (c.camera_input.width <= 0 || c.camera_input.height <= 0 || c.input.width <= 0 || c.input.height <= 0)
+        throw std::runtime_error("camera and model dimensions must be positive");
+    if (clip_min < 0 || clip_max > std::numeric_limits<std::uint16_t>::max() || clip_min >= clip_max)
+        throw std::runtime_error("camera_input clip range must satisfy 0 <= clip_min < clip_max <= 65535");
+    c.camera_input.clip_min = static_cast<std::uint16_t>(clip_min);
+    c.camera_input.clip_max = static_cast<std::uint16_t>(clip_max);
+    if (c.camera_input.channel_mode != "replicate_gray_to_rgb") throw std::runtime_error("unsupported camera_input.channel_mode");
+    if (c.preprocess.resize != "letterbox" || c.preprocess.normalize)
+        throw std::runtime_error("only letterbox with normalize=false is supported");
+    if (c.preprocess.pad_value < 0 || c.preprocess.pad_value > 255)
+        throw std::runtime_error("preprocess.pad_value must be in [0, 255]");
+    if (c.postprocess.num_classes <= 0 || static_cast<int>(c.postprocess.class_names.size()) != c.postprocess.num_classes)
+        throw std::runtime_error("postprocess.class_names size must equal num_classes");
+    return c;
+}
 
-    AppConfig config;
-
-    config.logging.level =
-        require_string(root["logging"], "level", "logging");
-
-    // 이후 설정 및 구성 요소 로그에 YAML의 출력 레벨을 적용한다.
-    Logger::set_level(config.logging.level);
-
-    config.detector.type =
-        require_string(root["detector"], "type", "detector");
-
-    config.detector.config_path =
-        require_string(root["detector"], "config", "detector");
-
-    config.preprocess.backend =
-        require_string(root["preprocess"], "backend", "preprocess");
-
-    config.inference.backend =
-        require_string(root["inference"], "backend", "inference");
-
-    config.postprocess.backend =
-        require_string(root["postprocess"], "backend", "postprocess");
-
-    const YAML::Node tracking = root["tracking"];
-
-    config.tracking.type =
-        require_string(tracking, "type", "tracking");
-
-    config.tracking.config_path =
-        require_string(tracking, "config", "tracking");
-
-    config.control.enabled =
-        require_bool(
-            root["control"],
-            "enabled",
-            "control"
-        );
-
-    config.control.config_path =
-        require_string(
-            root["control"],
-            "config",
-            "control"
-        );
-
-    config.measurement.enabled =
-        require_bool(root["measurement"], "enabled", "measurement");
-
-    Logger::info("[Config] runtime 설정을 읽었습니다");
-
-    Logger::debug(
-        "[Config] detector.type: " +
-        config.detector.type
-    );
-
-    Logger::debug(
-        "[Config] detector.config: " +
-        config.detector.config_path
-    );
-
-    Logger::debug(
-        "[Config] preprocess.backend: " +
-        config.preprocess.backend
-    );
-
-    Logger::debug(
-        "[Config] inference.backend: " +
-        config.inference.backend
-    );
-
-    Logger::debug(
-        "[Config] postprocess.backend: " +
-        config.postprocess.backend
-    );
-
-    Logger::debug(
-        "[Config] tracking.type: " +
-        config.tracking.type
-    );
-
-    return config;
+AppConfig load_config(const std::string& path)
+{
+    const YAML::Node root = load_yaml(path);
+    AppConfig c;
+    c.logging.level = required<std::string>(root["logging"], "level", "logging");
+    Logger::set_level(c.logging.level);
+    c.detector.type = required<std::string>(root["detector"], "type", "detector");
+    c.detector.config_path = required<std::string>(root["detector"], "config", "detector");
+    c.detection.backend = required<std::string>(root["detection"], "backend", "detection");
+    const int max_inflight = required<int>(root["detection"], "max_inflight", "detection");
+    if (max_inflight <= 0) throw std::runtime_error("detection.max_inflight must be positive");
+    c.detection.max_inflight = static_cast<std::size_t>(max_inflight);
+    c.tracking.type = required<std::string>(root["tracking"], "type", "tracking");
+    c.tracking.config_path = required<std::string>(root["tracking"], "config", "tracking");
+    c.control.enabled = required<bool>(root["control"], "enabled", "control");
+    c.control.config_path = required<std::string>(root["control"], "config", "control");
+    c.measurement.enabled = required<bool>(root["measurement"], "enabled", "measurement");
+    if (c.detector.type != "yolov8" || c.detection.backend != "dx_app_async")
+        throw std::runtime_error("only yolov8 with dx_app_async is supported");
+    c.model = load_model_config(c.detector.config_path);
+    Logger::info("[Config] runtime and model configuration loaded");
+    return c;
 }

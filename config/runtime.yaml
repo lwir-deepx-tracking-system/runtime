@@ -5,14 +5,9 @@ detector:
   type: yolov8
   config: config/model/yolov8n.yaml
 
-preprocess:
-  backend: cpu
-
-inference:
-  backend: deepx
-
-postprocess:
-  backend: cpu
+detection:
+  backend: dx_app_async
+  max_inflight: 4
 
 tracking:
   type: bytetrack

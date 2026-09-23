@@ -2,6 +2,14 @@ model:
   name: yolov8n
   path: models/yolov8n.dxnn
 
+camera_input:
+  opencv_type: CV_16UC1
+  width: 640
+  height: 480
+  clip_min: 0
+  clip_max: 65535
+  channel_mode: replicate_gray_to_rgb
+
 input:
   width: 640
   height: 640
@@ -9,7 +17,10 @@ input:
 preprocess:
   resize: letterbox
   normalize: false
+  pad_value: 114
 
 postprocess:
   confidence_threshold: 0.25
   nms_threshold: 0.45
+  num_classes: 1
+  class_names: [target]
