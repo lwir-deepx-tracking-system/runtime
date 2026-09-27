@@ -23,6 +23,7 @@ constexpr std::size_t kMaxStageMetrics = 10000;
 inline void record_stage_metric(
     std::vector<StageMetric>& metrics,
     const FrameMetadata& metadata,
+    std::chrono::steady_clock::time_point enqueued_at,
     std::chrono::steady_clock::time_point started_at,
     std::chrono::steady_clock::time_point finished_at,
     bool include_e2e = false)
@@ -34,9 +35,9 @@ inline void record_stage_metric(
     metric.frame_id = metadata.frame_id;
     metric.processing_ms =
         std::chrono::duration<double, std::milli>(finished_at - started_at).count();
-    if (metadata.enqueued_at != std::chrono::steady_clock::time_point{})
+    if (enqueued_at != std::chrono::steady_clock::time_point{})
         metric.queue_wait_ms =
-            std::chrono::duration<double, std::milli>(started_at - metadata.enqueued_at).count();
+            std::chrono::duration<double, std::milli>(started_at - enqueued_at).count();
     if (include_e2e && metadata.captured_at != std::chrono::steady_clock::time_point{})
         metric.e2e_ms =
             std::chrono::duration<double, std::milli>(finished_at - metadata.captured_at).count();

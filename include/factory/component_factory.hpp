@@ -3,24 +3,15 @@
 #include <memory>
 
 #include "app/app_config.hpp"
-#include "preprocess/preprocessor.hpp"
-#include "camera/camera.hpp"
-#include "inference/inference.hpp"
-#include "postprocess/postprocessor.hpp"
+#include "detection/detector.hpp"
 #include "tracking/tracker.hpp"
 
 class ComponentFactory
 {
 public:
     
-    // 전처리 객체 생성
-    static std::unique_ptr<Preprocessor> create_preprocessor(const AppConfig& config);
-
-    // 추론 객체 생성
-    static std::unique_ptr<Inference> create_inference(const AppConfig& config);
-
-    // 후처리 객체 생성
-    static std::unique_ptr<Postprocessor> create_postprocessor(const AppConfig& config);
+    // 전처리, DX 추론, 후처리를 소유하는 통합 Detection 객체 생성
+    static std::unique_ptr<Detector> create_detector(const AppConfig& config);
 
     // Tracking 객체 생성
     static std::unique_ptr<Tracker> create_tracker(const AppConfig& config);

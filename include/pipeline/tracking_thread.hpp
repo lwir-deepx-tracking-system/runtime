@@ -9,13 +9,14 @@
 #include "common/threadsafequeue.hpp"
 #include "tracking/tracker.hpp"
 
-// Detection 목록을 받아 Tracking을 수행하고 Track 목록을 전달한다.
+// Detection을 Tracking하고 같은 결과를 GUI와 제어 경로에 분기한다.
 class TrackingThread
 {
 private:
     Tracker& tracker_;
     ThreadSafeQueue<DetectionResult>& input_queue_;
-    ThreadSafeQueue<TrackingResult>& output_queue_;
+    ThreadSafeQueue<TrackingResultPtr>& control_output_queue_;
+    ThreadSafeQueue<TrackingResultPtr>& gui_output_queue_;
     pthread_t thread_;
     bool measurement_enabled_;
     std::vector<StageMetric> metrics_;
@@ -27,7 +28,8 @@ public:
     TrackingThread(
         Tracker& tracker,
         ThreadSafeQueue<DetectionResult>& input_queue,
-        ThreadSafeQueue<TrackingResult>& output_queue,
+        ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
+        ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
         bool measurement_enabled
     );
 

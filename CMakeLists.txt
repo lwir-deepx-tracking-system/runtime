@@ -23,11 +23,7 @@ add_executable(lwir_runtime
 
     src/camera/camera.cpp
 
-    src/preprocess/yolov8_preprocessor.cpp
-
-    src/inference/inference.cpp
-
-    src/postprocess/yolov8_postprocessor.cpp
+    src/detection/deepx_yolov8_detector.cpp
 
     src/tracking/bytetrack_tracker.cpp
 
@@ -35,9 +31,7 @@ add_executable(lwir_runtime
     src/control/gimbal_controller.cpp
 
     src/pipeline/camera_thread.cpp
-    src/pipeline/preprocess_thread.cpp
-    src/pipeline/inference_thread.cpp
-    src/pipeline/postprocess_thread.cpp
+    src/pipeline/detection_thread.cpp
     src/pipeline/tracking_thread.cpp
     src/pipeline/target_selection_thread.cpp
     src/pipeline/control_thread.cpp
@@ -56,15 +50,35 @@ target_link_libraries(lwir_runtime PRIVATE
     ${OpenCV_LIBS}
 )
 
-# 컴포넌트 테스트 예시. 담당 구현이 준비되면 필요한 대상만 주석 해제한다.
-# enable_testing()
-# add_executable(test_target_selector
-#     tests/target/test_target_selector.cpp
-#     src/target/target_selector.cpp
-# )
-# target_include_directories(test_target_selector PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-# add_test(NAME target_selector COMMAND test_target_selector)
-#
+# 구현이 준비된 컴포넌트만 테스트 대상으로 등록한다.
+enable_testing()
+add_executable(test_target_selector
+    tests/target/test_target_selector.cpp
+    src/target/target_selector.cpp
+)
+target_include_directories(test_target_selector PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(test_target_selector PRIVATE ${OpenCV_LIBS})
+add_test(NAME target_selector COMMAND test_target_selector)
+
+add_executable(test_shared_frame_pipeline
+    tests/pipeline/test_shared_frame_pipeline.cpp
+    src/common/logger.cpp
+    src/pipeline/detection_thread.cpp
+    src/pipeline/tracking_thread.cpp
+)
+target_include_directories(test_shared_frame_pipeline PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(test_shared_frame_pipeline PRIVATE
+    Threads::Threads
+    ${OpenCV_LIBS}
+)
+add_test(NAME shared_frame_pipeline COMMAND test_shared_frame_pipeline)
+
 # add_executable(test_bytetrack
 #     tests/tracking/test_bytetrack.cpp
 #     src/tracking/bytetrack_tracker.cpp

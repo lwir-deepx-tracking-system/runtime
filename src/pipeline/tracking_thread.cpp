@@ -9,11 +9,13 @@
 TrackingThread::TrackingThread(
     Tracker& tracker,
     ThreadSafeQueue<DetectionResult>& input_queue,
-    ThreadSafeQueue<TrackingResult>& output_queue,
+    ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
+    ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
     bool measurement_enabled)
     : tracker_(tracker),
       input_queue_(input_queue),
-      output_queue_(output_queue),
+      control_output_queue_(control_output_queue),
+      gui_output_queue_(gui_output_queue),
       measurement_enabled_(measurement_enabled)
 {
 }
@@ -42,26 +44,35 @@ void TrackingThread::run()
 
     while (input_queue_.pop(detections))
     {
+        if (!detections.frame)
+            continue;
+
         const auto started_at = measurement_enabled_ ?
             std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
-        TrackingResult tracks;
-        tracks.tracks = tracker_.track(detections.detections);
-        tracks.metadata = detections.metadata;
+        auto tracks = std::make_shared<TrackingResult>();
+        tracks->frame = detections.frame;
+        tracks->tracks = tracker_.track(detections.detections);
 
         if (measurement_enabled_)
         {
             // 추적 완료 지점에서 카메라 획득 이후 전체 지연을 기록한다.
-            record_stage_metric(metrics_, detections.metadata, started_at,
+            record_stage_metric(metrics_, detections.frame->metadata,
+                detections.enqueued_at, started_at,
                 std::chrono::steady_clock::now(), true);
-            tracks.metadata.enqueued_at = std::chrono::steady_clock::now();
+            tracks->enqueued_at = std::chrono::steady_clock::now();
         }
 
-        if (!output_queue_.push(std::move(tracks)))
+        TrackingResultPtr shared_result = std::move(tracks);
+
+        // 제어 경로는 모든 결과를 받고, GUI는 오래된 화면이 쌓이지 않게
+        // 최신 두 결과만 유지한다.
+        if (!control_output_queue_.push(shared_result))
             break;
+        gui_output_queue_.push_latest(std::move(shared_result), 2);
     }
 
-    // 마지막 결과까지 소비한 후 다음 stage를 종료한다.
-    output_queue_.close();
+    control_output_queue_.close();
+    gui_output_queue_.close();
     Logger::info("[TrackingThread] 종료");
 }

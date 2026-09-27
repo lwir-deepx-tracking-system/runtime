@@ -8,7 +8,7 @@
 
 CameraThread::CameraThread(
     Camera& camera,
-    ThreadSafeQueue<Frame>& output_queue,
+    ThreadSafeQueue<FrameMessage>& output_queue,
     bool measurement_enabled)
     : camera_(camera),
       output_queue_(output_queue),
@@ -64,29 +64,32 @@ void CameraThread::run()
 
     while (true)
     {
-        Frame frame;
+        auto frame = std::make_shared<FrameContext>();
         const auto started_at = measurement_enabled_ ?
             std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-        if (!camera_.read(frame))
+        if (!camera_.read(*frame))
             break;
         const auto finished_at = std::chrono::steady_clock::now();
 
         // Camera에서 부여한 정보를 이후 모든 stage가 그대로 전달한다.
-        frame.metadata.frame_id = next_frame_id++;
-        frame.metadata.captured_at = finished_at;
+        frame->metadata.frame_id = next_frame_id++;
+        frame->metadata.captured_at = finished_at;
+        FrameMessage message;
+        message.frame = std::move(frame);
         if (measurement_enabled_)
         {
-            record_stage_metric(metrics_, frame.metadata, started_at, finished_at);
-            frame.metadata.enqueued_at = std::chrono::steady_clock::now();
+            record_stage_metric(
+                metrics_, message.frame->metadata, {}, started_at, finished_at);
+            message.enqueued_at = std::chrono::steady_clock::now();
         }
 
-        if (!output_queue_.push(std::move(frame)))
+        if (!output_queue_.push(std::move(message)))
             break;
     }
 
     camera_.close();
 
-    // PreprocessThread에 더 이상 Frame이 오지 않음을 알린다.
+    // DetectionThread에 더 이상 Frame이 오지 않음을 알린다.
     output_queue_.close();
 
     Logger::info("[CameraThread] 종료");

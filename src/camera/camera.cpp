@@ -15,7 +15,7 @@ bool Camera::open()
 }
 
 
-bool Camera::read(Frame& frame)
+bool Camera::read(FrameContext& frame)
 {
     // i3system SDK에서 raw frame 획득
 
@@ -23,7 +23,8 @@ bool Camera::read(Frame& frame)
     //     ↓
     // 640 x 480 x 2 byte
     //     ↓
-    // frame.image에 연결 또는 복사
+    // frame.image가 SDK의 재사용 버퍼를 가리키지 않도록 소유 가능한 cv::Mat으로 복사한다.
+    // 그래야 shared_ptr<FrameContext>가 GUI 송신 완료까지 영상 수명을 보장할 수 있다.
 
 
     // 실제 실행전이니까 false (카메라 연결하고 실행할때는 true로 돌리면 됨요!!!)

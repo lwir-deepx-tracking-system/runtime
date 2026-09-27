@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <optional>
 #include <vector>
 
@@ -9,9 +10,10 @@
 // 한 프레임에서 선택한 ID가 관측되었는지 나타낸다.
 struct TargetSelection
 {
-    FrameMetadata metadata;
+    FrameContextPtr frame;
     int selected_id = -1;
     std::optional<Track> matched_track;
+    std::chrono::steady_clock::time_point enqueued_at{};
 };
 
 // GUI가 선택한 ID를 보관하고 현재 Track 목록에서 일치하는 대상을 찾는다.

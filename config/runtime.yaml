@@ -3,16 +3,8 @@ logging:
 
 detector:
   type: yolov8
-  config: config/model/yolov8n.yaml
-
-preprocess:
-  backend: cpu
-
-inference:
   backend: deepx
-
-postprocess:
-  backend: cpu
+  config: config/model/yolov8n.yaml
 
 tracking:
   type: bytetrack

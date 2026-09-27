@@ -7,10 +7,11 @@
 1. **Queue가 밀릴 때의 처리 방식**  
    각 stage의 queue 크기 제한과, 가득 찼을 때 대기할지 오래된 프레임을 버릴지 정한다.  
    **이유:** 처리량이 높아도 오래된 프레임이 쌓이면 화면과 짐벌의 반응이 늦어진다. 실험마다 정책이 다르면 지연·FPS 비교도 어려워진다.
+   GUI 송신 queue는 최신 결과 두 개만 남기도록 결정했으며, Detection과 제어 경로의 정책은 추가로 정한다.
 
-2. **프레임 식별자와 시각 정보의 전달 범위**  
-   카메라에서 부여한 frame ID와 획득 시각을 어느 결과까지 함께 전달할지 정한다.  
-   **이유:** 검출·추적 결과를 원본 프레임과 연결하고, stage별·전체 지연을 측정하려면 필요하다.
+2. **GUI 전송 형식과 통신 방식**
+   `TrackingResult`의 원본 프레임을 어떤 형식으로 압축하고 Track 목록과 함께 전송할지 정한다.
+   **현재 결정:** 원본 영상과 식별 정보는 `shared_ptr<const FrameContext>`로 GUI 분기까지 유지하고, GUI queue는 최신 결과 두 개만 보관한다.
 
 3. **기준선의 완료 조건과 측정 항목**  
    같은 LWIR 입력으로 검출·Track ID 결과를 재현할 수 있는 상태를 기준선으로 삼을지, 어떤 정확도·지연·FPS·queue 지표를 기록할지 정한다.  
@@ -22,6 +23,8 @@
 
 ## 현재 구조에서 유지할 경계
 
-`Camera → Preprocess → Inference → Postprocess → Tracking → 대상 선택 → Orange Pi 짐벌 제어`
+`Camera → Detection → Tracking → GUI / 대상 선택 → Orange Pi 짐벌 제어`
+
+DX-AllSuite의 구조에 맞춰 전처리, NPU 추론, 후처리는 `Detection` 컴포넌트가 내부에서 처리한다. 이 세 작업을 runtime의 독립 thread로 다시 나누지 않는다.
 
 Tracking은 모든 객체의 Track을 만들고, 대상 선택 단계는 GUI에서 지정한 ID를 찾는다. Orange Pi의 실제 하드웨어 제어 방식과 ID가 사라졌을 때의 제어 정책은 이번 구조 합의와 분리해 결정한다.

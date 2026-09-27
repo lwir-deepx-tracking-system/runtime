@@ -8,12 +8,12 @@
 #include "common/threadsafequeue.hpp"
 
 
-// Camera에서 Frame을 읽어 Frame Queue에 전달한다.
+// Camera에서 FrameContext를 만들고 shared_ptr로 Detection에 전달한다.
 class CameraThread
 {
 private:
     Camera& camera_;
-    ThreadSafeQueue<Frame>& output_queue_;
+    ThreadSafeQueue<FrameMessage>& output_queue_;
     pthread_t thread_;
     bool measurement_enabled_;
     std::vector<StageMetric> metrics_;
@@ -24,7 +24,7 @@ private:
 public:
     CameraThread(
         Camera& camera,
-        ThreadSafeQueue<Frame>& output_queue,
+        ThreadSafeQueue<FrameMessage>& output_queue,
         bool measurement_enabled
     );
 

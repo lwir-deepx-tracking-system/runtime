@@ -1,8 +1,10 @@
 #pragma once
 
+#include <chrono>
+#include <memory>
 #include <vector>
 
-#include "common/frame_metadata.hpp"
+#include "common/frame.hpp"
 
 
 // Tracker가 생성한 객체의 Tracking 결과를 저장한다.
@@ -24,9 +26,13 @@ struct Track
     float confidence = 0.0f;
 };
 
-// 한 프레임의 추적 목록과 프레임 정보를 함께 전달한다.
+// 한 프레임의 추적 목록과 GUI 표시에 필요한 원본 프레임을 함께 전달한다.
 struct TrackingResult
 {
-    FrameMetadata metadata;
+    FrameContextPtr frame;
     std::vector<Track> tracks;
+    std::chrono::steady_clock::time_point enqueued_at{};
 };
+
+// GUI 경로와 제어 경로가 같은 결과를 복사 없이 공유한다.
+using TrackingResultPtr = std::shared_ptr<const TrackingResult>;

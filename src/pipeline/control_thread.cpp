@@ -44,11 +44,15 @@ void ControlThread::run()
     {
         if (control_enabled_)
         {
+            if (!selection.frame)
+                continue;
+
             const auto started_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
             controller_.apply(selection);
             if (measurement_enabled_)
-                record_stage_metric(metrics_, selection.metadata, started_at,
+                record_stage_metric(metrics_, selection.frame->metadata,
+                    selection.enqueued_at, started_at,
                     std::chrono::steady_clock::now(), true);
         }
     }

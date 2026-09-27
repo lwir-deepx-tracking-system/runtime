@@ -61,6 +61,29 @@ public:
         return true;
     }
 
+    // 최신 상태가 중요한 GUI 경로에서 사용한다.
+    // max_size를 넘으면 가장 오래된 항목을 제거하고 새 항목을 넣는다.
+    bool push_latest(T data, std::size_t max_size)
+    {
+        pthread_mutex_lock(&mutex_);
+
+        if (closed_ || max_size == 0)
+        {
+            pthread_mutex_unlock(&mutex_);
+            return false;
+        }
+
+        while (queue_.size() >= max_size)
+            queue_.pop();
+
+        queue_.push(std::move(data));
+
+        pthread_mutex_unlock(&mutex_);
+
+        pthread_cond_signal(&cond_);
+        return true;
+    }
+
     // Queue에서 데이터를 하나 꺼낸다.
     // Queue가 비어 있으면 데이터가 들어오거나 close()될 때까지 대기한다.
     // true  : 정상적으로 데이터를 꺼냄

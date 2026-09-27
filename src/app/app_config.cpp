@@ -74,17 +74,11 @@ AppConfig load_config(const std::string& config_path)
     config.detector.type =
         require_string(root["detector"], "type", "detector");
 
+    config.detector.backend =
+        require_string(root["detector"], "backend", "detector");
+
     config.detector.config_path =
         require_string(root["detector"], "config", "detector");
-
-    config.preprocess.backend =
-        require_string(root["preprocess"], "backend", "preprocess");
-
-    config.inference.backend =
-        require_string(root["inference"], "backend", "inference");
-
-    config.postprocess.backend =
-        require_string(root["postprocess"], "backend", "postprocess");
 
     const YAML::Node tracking = root["tracking"];
 
@@ -124,18 +118,8 @@ AppConfig load_config(const std::string& config_path)
     );
 
     Logger::debug(
-        "[Config] preprocess.backend: " +
-        config.preprocess.backend
-    );
-
-    Logger::debug(
-        "[Config] inference.backend: " +
-        config.inference.backend
-    );
-
-    Logger::debug(
-        "[Config] postprocess.backend: " +
-        config.postprocess.backend
+        "[Config] detector.backend: " +
+        config.detector.backend
     );
 
     Logger::debug(

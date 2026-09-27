@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orange Pi–PC GUI 파이프라인</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 32px; color: #10213f; background: #f6f8fc; }
+    main { max-width: 1440px; margin: auto; }
+    h1 { text-align: center; margin: 0 0 24px; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .lane { margin: 16px 0; padding: 20px; border: 2px solid; border-radius: 18px; }
+    .runtime { border-color: #1976d2; background: #eaf6ff; }
+    .gui { border-color: #8e44d6; background: #f7efff; }
+    .row { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+    .box { min-width: 150px; padding: 18px 16px; text-align: center; border: 2px solid; border-radius: 12px; background: white; font-weight: 700; }
+    .detect { min-width: 260px; border-color: #1976d2; }
+    .track { border-color: #1976d2; }
+    .display { border-color: #ef8c00; background: #fff8e8; }
+    .select { border-color: #8e44d6; background: #faf4ff; }
+    .control { border-color: #43a047; background: #f0fbf2; }
+    .arrow { font-size: 26px; font-weight: 700; color: #52637e; }
+    .label { max-width: 180px; text-align: center; color: #52637e; font-size: 13px; }
+    .branches { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 22px; }
+    .branch { padding: 18px; border-radius: 14px; background: rgba(255,255,255,.7); }
+    .branch h3 { text-align: center; margin-top: 0; }
+    .note { margin: 20px 0 0; padding: 16px; border-radius: 12px; background: #fff; line-height: 1.6; }
+    code { color: #5e1786; }
+    @media (max-width: 900px) { .branches { grid-template-columns: 1fr; } body { padding: 16px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Orange Pi–PC GUI 파이프라인</h1>
+
+  <section class="lane runtime">
+    <h2>Orange Pi Runtime</h2>
+    <div class="row">
+      <div class="box track">CameraThread</div>
+      <div class="arrow">→</div>
+      <div class="box detect">DetectionThread<br><small>DX preprocess + inference + postprocess</small></div>
+      <div class="arrow">→</div>
+      <div class="box track">TrackingThread</div>
+      <div class="arrow">→</div>
+      <div class="box track">TrackingResult 분기</div>
+    </div>
+    <div class="row">
+      <div class="label"><code>shared_ptr&lt;const FrameContext&gt;</code>가 Detection과 Tracking을 통과하며 원본 영상을 유지</div>
+    </div>
+
+    <div class="branches">
+      <div class="branch">
+        <h3>PC GUI 송신 경로</h3>
+        <div class="row">
+          <div class="box display">최신 결과 queue<br><small>최대 2개, 오래된 항목 삭제</small></div>
+          <div class="arrow">→</div>
+          <div class="box display">프레임 encoder</div>
+          <div class="arrow">→</div>
+          <div class="box display">DisplayPacket<br><small>압축 프레임 + Track 목록</small></div>
+        </div>
+      </div>
+
+      <div class="branch">
+        <h3>대상 선택 및 제어 경로</h3>
+        <div class="row">
+          <div class="box select">selected_track_id</div>
+          <div class="arrow">+</div>
+          <div class="box control">TargetSelectionThread</div>
+          <div class="arrow">→</div>
+          <div class="box control">ControlThread</div>
+          <div class="arrow">→</div>
+          <div class="box control">GimbalController</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="row"><div class="arrow">↕</div><div class="label">Ethernet / Wi-Fi</div></div>
+
+  <section class="lane gui">
+    <h2>PC GUI</h2>
+    <div class="row">
+      <div class="box select">DisplayPacket 수신</div>
+      <div class="arrow">→</div>
+      <div class="box select">프레임 표시<br><small>Bounding box + Track ID</small></div>
+      <div class="arrow">→</div>
+      <div class="box select">사용자가 Track ID 선택</div>
+      <div class="arrow">→</div>
+      <div class="box select">SelectionCommand 전송</div>
+    </div>
+  </section>
+
+  <p class="note">
+    PC는 표시와 대상 선택만 담당합니다. 탐지, 추적, 대상 매칭, 짐벌 제어는 Orange Pi 내부에서 수행하므로
+    GUI나 네트워크가 느려져도 실시간 제어 경로가 오래된 화면 때문에 지연되지 않습니다.
+  </p>
+</main>
+</body>
+</html>

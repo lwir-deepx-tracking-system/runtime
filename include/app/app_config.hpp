@@ -12,25 +12,8 @@ struct LoggingConfig
 struct DetectorConfig
 {
     std::string type;
+    std::string backend;
     std::string config_path;
-};
-
-
-struct PreprocessConfig
-{
-    std::string backend;
-};
-
-
-struct InferenceConfig
-{
-    std::string backend;
-};
-
-
-struct PostprocessConfig
-{
-    std::string backend;
 };
 
 
@@ -58,11 +41,6 @@ struct AppConfig
     LoggingConfig logging;
 
     DetectorConfig detector;
-
-    PreprocessConfig preprocess;
-    InferenceConfig inference;
-    PostprocessConfig postprocess;
-
     TrackingConfig tracking;
     ControlConfig control;
     MeasurementConfig measurement;

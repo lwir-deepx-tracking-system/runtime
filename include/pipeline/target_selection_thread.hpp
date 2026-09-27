@@ -12,7 +12,7 @@ class TargetSelectionThread
 {
 private:
     TargetSelector& selector_;
-    ThreadSafeQueue<TrackingResult>& input_queue_;
+    ThreadSafeQueue<TrackingResultPtr>& input_queue_;
     ThreadSafeQueue<TargetSelection>& output_queue_;
     pthread_t thread_;
     bool measurement_enabled_;
@@ -24,7 +24,7 @@ private:
 public:
     TargetSelectionThread(
         TargetSelector& selector,
-        ThreadSafeQueue<TrackingResult>& input_queue,
+        ThreadSafeQueue<TrackingResultPtr>& input_queue,
         ThreadSafeQueue<TargetSelection>& output_queue,
         bool measurement_enabled
     );
