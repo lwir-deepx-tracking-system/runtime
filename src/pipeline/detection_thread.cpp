@@ -7,6 +7,7 @@
 
 #include "common/logger.hpp"
 
+// Detection 구현과 shared Frame 입출력 queue를 worker에 연결한다.
 DetectionThread::DetectionThread(
     DetectionPipeline& pipeline,
     ThreadSafeQueue<FrameMessage>& input_queue,
@@ -19,16 +20,19 @@ DetectionThread::DetectionThread(
 {
 }
 
+// pthread가 정적 trampoline을 통해 이 객체의 run()을 실행하게 한다.
 void DetectionThread::start()
 {
     pthread_create(&thread_, nullptr, &DetectionThread::thread_func, this);
 }
 
+// Detection queue 종료까지 worker가 완전히 끝나기를 기다린다.
 void DetectionThread::join()
 {
     pthread_join(thread_, nullptr);
 }
 
+// C 함수 포인터 형태가 필요한 pthread와 C++ 객체 메서드를 연결한다.
 void* DetectionThread::thread_func(void* arg)
 {
     static_cast<DetectionThread*>(arg)->run();
@@ -44,6 +48,7 @@ void DetectionThread::run()
         FrameMessage input;
         while (input_queue_.pop(input))
         {
+            // 비어 있는 메시지는 downstream으로 전달하지 않는다.
             if (!input.frame)
                 continue;
 
@@ -52,6 +57,7 @@ void DetectionThread::run()
                 std::chrono::steady_clock::time_point{};
 
             DetectionResult result;
+            // image를 복사하지 않고 Camera가 만든 동일한 FrameContext를 결과에 연결한다.
             result.frame = input.frame;
             result.detections = pipeline_.detect(*input.frame);
 
@@ -70,6 +76,7 @@ void DetectionThread::run()
     }
     catch (const std::exception& e)
     {
+        // Detection 실패 시 downstream이 영원히 기다리지 않도록 queue를 닫고 종료한다.
         Logger::error(std::string("[DetectionThread] ") + e.what());
     }
 

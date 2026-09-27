@@ -6,6 +6,7 @@
 #include <yaml-cpp/yaml.h>
 
 namespace {
+// 필수 키가 없거나 요청한 타입으로 변환되지 않으면 경로가 포함된 오류를 만든다.
 template <typename T>
 T required(const YAML::Node& node, const char* key, const std::string& path)
 {
@@ -16,6 +17,7 @@ T required(const YAML::Node& node, const char* key, const std::string& path)
     }
 }
 
+// yaml-cpp 예외가 파일 경로를 잃지 않도록 runtime 오류로 변환한다.
 YAML::Node load_yaml(const std::string& path)
 {
     try { return YAML::LoadFile(path); }
@@ -25,6 +27,7 @@ YAML::Node load_yaml(const std::string& path)
 }
 }
 
+// 모델 YAML 전체를 typed config로 변환한다.
 ModelConfig load_model_config(const std::string& path)
 {
     const YAML::Node root = load_yaml(path);
@@ -49,6 +52,7 @@ ModelConfig load_model_config(const std::string& path)
     c.postprocess.num_classes = required<int>(post, "num_classes", "postprocess");
     c.postprocess.class_names = required<std::vector<std::string>>(post, "class_names", "postprocess");
 
+    // 현재 LWIR 전처리 구현이 안전하게 처리할 수 있는 계약만 허용한다.
     if (c.camera_input.opencv_type != "CV_16UC1") throw std::runtime_error("camera_input.opencv_type must be CV_16UC1");
     if (c.camera_input.width <= 0 || c.camera_input.height <= 0 || c.input.width <= 0 || c.input.height <= 0)
         throw std::runtime_error("camera and model dimensions must be positive");
@@ -66,6 +70,7 @@ ModelConfig load_model_config(const std::string& path)
     return c;
 }
 
+// 실행 단계 선택을 읽고 해당 Detector가 참조하는 모델 설정까지 한 번에 준비한다.
 AppConfig load_config(const std::string& path)
 {
     const YAML::Node root = load_yaml(path);
@@ -83,6 +88,8 @@ AppConfig load_config(const std::string& path)
     c.control.enabled = required<bool>(root["control"], "enabled", "control");
     c.control.config_path = required<std::string>(root["control"], "config", "control");
     c.measurement.enabled = required<bool>(root["measurement"], "enabled", "measurement");
+
+    // 아직 factory에 연결되지 않은 조합을 실행 중에 늦게 발견하지 않도록 차단한다.
     if (c.detector.type != "yolov8" || c.detection.backend != "dx_app_async")
         throw std::runtime_error("only yolov8 with dx_app_async is supported");
     c.model = load_model_config(c.detector.config_path);

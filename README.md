@@ -11,13 +11,29 @@ LWIR 카메라 영상에서 객체를 검출하고 추적한 뒤, 같은 프레�
 
 ## 파이프라인
 
-```text
-Camera
-  └─ shared_ptr<FrameContext>
-       └─ Detection (preprocess + inference + postprocess)
-            └─ Tracking
-                 ├─ GUI: 원본 Frame + Track 목록
-                 └─ Target selection → Control
+```mermaid
+flowchart LR
+    Camera["CameraThread<br/>LWIR CV_16UC1"]
+
+    subgraph Detection["DetectionThread · 단일 Detection 단계"]
+        direction LR
+        Preprocess["LWIR 전처리<br/>16-bit → RGB · letterbox"]
+        Inference["DEEPX NPU 추론<br/>dx_app 연동 예정"]
+        Postprocess["YOLOv8 후처리<br/>원본 영상 좌표"]
+        Preprocess --> Inference --> Postprocess
+    end
+
+    Tracking["TrackingThread<br/>ByteTrack"]
+    GUI["GUI 송신<br/>원본 Frame + Track 목록"]
+    Selection["TargetSelectionThread<br/>선택 ID 매칭"]
+    Control["ControlThread<br/>Orange Pi 짐벌 제어"]
+
+    Camera -->|"FrameMessage<br/>shared_ptr&lt;const FrameContext&gt;"| Preprocess
+    Postprocess -->|"DetectionResult<br/>동일 FrameContextPtr"| Tracking
+    Tracking -->|"TrackingResultPtr"| GUI
+    Tracking -->|"동일 TrackingResultPtr"| Selection
+    GUI -.->|"selected track_id"| Selection
+    Selection -->|"TargetSelection"| Control
 ```
 
 Camera에서 만든 `FrameContext`는 복사하지 않고 `shared_ptr`로 Detection, Tracking, GUI까지 전달합니다. 따라서 GUI는 Track 결과가 생성된 정확한 원본 프레임을 사용할 수 있습니다.
