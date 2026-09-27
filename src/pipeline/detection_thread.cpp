@@ -1,16 +1,18 @@
 #include "pipeline/detection_thread.hpp"
 
 #include <chrono>
+#include <exception>
+#include <string>
 #include <utility>
 
 #include "common/logger.hpp"
 
 DetectionThread::DetectionThread(
-    Detector& detector,
+    DetectionPipeline& pipeline,
     ThreadSafeQueue<FrameMessage>& input_queue,
     ThreadSafeQueue<DetectionResult>& output_queue,
     bool measurement_enabled)
-    : detector_(detector),
+    : pipeline_(pipeline),
       input_queue_(input_queue),
       output_queue_(output_queue),
       measurement_enabled_(measurement_enabled)
@@ -37,30 +39,38 @@ void DetectionThread::run()
 {
     Logger::info("[DetectionThread] 시작");
 
-    FrameMessage input;
-    while (input_queue_.pop(input))
+    try
     {
-        if (!input.frame)
-            continue;
-
-        const auto started_at = measurement_enabled_ ?
-            std::chrono::steady_clock::now() :
-            std::chrono::steady_clock::time_point{};
-
-        DetectionResult result;
-        result.frame = input.frame;
-        result.detections = detector_.detect(*input.frame);
-
-        if (measurement_enabled_)
+        FrameMessage input;
+        while (input_queue_.pop(input))
         {
-            record_stage_metric(
-                metrics_, input.frame->metadata, input.enqueued_at, started_at,
-                std::chrono::steady_clock::now());
-            result.enqueued_at = std::chrono::steady_clock::now();
-        }
+            if (!input.frame)
+                continue;
 
-        if (!output_queue_.push(std::move(result)))
-            break;
+            const auto started_at = measurement_enabled_ ?
+                std::chrono::steady_clock::now() :
+                std::chrono::steady_clock::time_point{};
+
+            DetectionResult result;
+            result.frame = input.frame;
+            result.detections = pipeline_.detect(*input.frame);
+
+            if (measurement_enabled_)
+            {
+                const auto finished_at = std::chrono::steady_clock::now();
+                record_stage_metric(
+                    metrics_, input.frame->metadata, input.enqueued_at,
+                    started_at, finished_at);
+                result.enqueued_at = finished_at;
+            }
+
+            if (!output_queue_.push(std::move(result)))
+                break;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        Logger::error(std::string("[DetectionThread] ") + e.what());
     }
 
     output_queue_.close();

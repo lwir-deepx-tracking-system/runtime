@@ -10,7 +10,7 @@
 #include "common/track.hpp"
 
 #include "camera/camera.hpp"
-#include "detection/detector.hpp"
+#include "detection/dxapp_detection_pipeline.hpp"
 #include "tracking/tracker.hpp"
 
 #include "pipeline/camera_thread.hpp"
@@ -49,7 +49,7 @@ private:
     std::unique_ptr<CameraThread> camera_thread_;
 
     // DX 전처리, 추론, 후처리를 소유하는 통합 Detection 단계
-    std::unique_ptr<Detector> detector_;
+    std::unique_ptr<DetectionPipeline> detection_pipeline_;
     std::unique_ptr<DetectionThread> detection_thread_;
 
     // 현재 사용하는 Tracker 객체를 Application이 소유한다.

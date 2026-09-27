@@ -1,12 +1,17 @@
 services:
   runtime-pc:
     image: lwir-runtime-pc:dxas-5749ab70-ubuntu22.04
+    build:
+      context: .
+      dockerfile: docker/runtime-pc/Dockerfile
+      args:
+        DX_RUNTIME_IMAGE: ${DX_RUNTIME_IMAGE:-dx-runtime:dxas-5749ab70-ubuntu22.04}
 
     volumes:
-      - .:/workspace/lwir-deepx-tracking-system
-      - runtime-build:/workspace/lwir-deepx-tracking-system/build
+      - .:/workspace/lwir-runtime
+      - runtime-build:/workspace/lwir-runtime/build
 
-    working_dir: /workspace/lwir-deepx-tracking-system
+    working_dir: /workspace/lwir-runtime
 
     entrypoint: /bin/bash
 

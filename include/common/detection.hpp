@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <string>
 #include <vector>
 
 #include "common/frame.hpp"
@@ -14,6 +15,7 @@ struct Detection
     float height = 0.0f;
     int class_id = -1;
     float confidence = 0.0f;
+    std::string class_name;
 };
 
 // 통합 Detection 단계의 출력. 원본 영상은 복사하지 않는다.

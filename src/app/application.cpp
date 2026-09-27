@@ -78,8 +78,8 @@ Application::Application(const std::string& config_path)
 
     camera_ = std::make_unique<Camera>();
 
-    // DX 전처리, 추론, 후처리를 포함하는 Detection 구현체 생성
-    detector_ = ComponentFactory::create_detector(config);
+    // dx_app 구조처럼 전처리, 추론, 후처리를 한 Detection 객체가 소유한다.
+    detection_pipeline_ = ComponentFactory::create_detection_pipeline(config);
 
     // Tracking 구현체 생성
     tracker_ = ComponentFactory::create_tracker(config);
@@ -96,7 +96,7 @@ Application::Application(const std::string& config_path)
 
     detection_thread_ =
         std::make_unique<DetectionThread>(
-            *detector_,
+            *detection_pipeline_,
             frame_queue_,
             detection_queue_,
             measurement_enabled_
@@ -150,6 +150,7 @@ void Application::run()
     target_selection_thread_->start();
     tracking_thread_->start();
     detection_thread_->start();
+    // 마지막에 Frame 생산자 시작
     camera_thread_->start();
 
 

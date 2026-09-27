@@ -3,8 +3,11 @@ logging:
 
 detector:
   type: yolov8
-  backend: deepx
   config: config/model/yolov8n.yaml
+
+detection:
+  backend: dx_app_async
+  max_inflight: 4
 
 tracking:
   type: bytetrack

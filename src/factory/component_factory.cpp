@@ -2,24 +2,15 @@
 
 #include <stdexcept>
 
-#include "detection/deepx_yolov8_detector.hpp"
+#include "detection/dxapp_detection_pipeline.hpp"
 #include "tracking/bytetrack_tracker.hpp"
 
-std::unique_ptr<Detector>
-ComponentFactory::create_detector(const AppConfig& config)
+std::unique_ptr<DetectionPipeline>
+ComponentFactory::create_detection_pipeline(const AppConfig& config)
 {
-    if (config.detector.backend == "deepx" &&
-        config.detector.type == "yolov8")
-    {
-        return std::make_unique<DeepxYoloV8Detector>(
-            config.detector.config_path
-        );
-    }
-
-    throw std::runtime_error(
-        "지원하지 않는 Detection 조합: " +
-        config.detector.backend + "/" + config.detector.type
-    );
+    if (config.detection.backend == "dx_app_async" && config.detector.type == "yolov8")
+        return std::make_unique<DxAppDetectionPipeline>(config);
+    throw std::runtime_error("unsupported detection pipeline");
 }
 
 // 현재 기준선의 ByteTrack 객체를 생성한다.

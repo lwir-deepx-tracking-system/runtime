@@ -6,12 +6,12 @@
 #include "common/detection.hpp"
 #include "common/frame.hpp"
 #include "common/threadsafequeue.hpp"
-#include "detection/detector.hpp"
+#include "detection/dxapp_detection_pipeline.hpp"
 #include "pipeline/detection_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
 #include "tracking/tracker.hpp"
 
-class FakeDetector : public Detector
+class FakeDetectionPipeline : public DetectionPipeline
 {
 public:
     std::vector<Detection> detect(const FrameContext&) override
@@ -58,7 +58,7 @@ int main()
     ThreadSafeQueue<TrackingResultPtr> control_queue;
     ThreadSafeQueue<TrackingResultPtr> gui_queue;
 
-    FakeDetector detector;
+    FakeDetectionPipeline detector;
     FakeTracker tracker;
     DetectionThread detection_thread(
         detector, frame_queue, detection_queue, false);

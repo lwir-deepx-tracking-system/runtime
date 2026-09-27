@@ -7,13 +7,13 @@
 #include "common/frame.hpp"
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
-#include "detection/detector.hpp"
+#include "detection/dxapp_detection_pipeline.hpp"
 
 // Frame을 받아 DX 전처리, 추론, 후처리를 한 단계에서 수행한다.
 class DetectionThread
 {
 private:
-    Detector& detector_;
+    DetectionPipeline& pipeline_;
     ThreadSafeQueue<FrameMessage>& input_queue_;
     ThreadSafeQueue<DetectionResult>& output_queue_;
     pthread_t thread_;
@@ -25,7 +25,7 @@ private:
 
 public:
     DetectionThread(
-        Detector& detector,
+        DetectionPipeline& pipeline,
         ThreadSafeQueue<FrameMessage>& input_queue,
         ThreadSafeQueue<DetectionResult>& output_queue,
         bool measurement_enabled);
