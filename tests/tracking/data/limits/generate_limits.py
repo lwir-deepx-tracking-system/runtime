@@ -19,12 +19,13 @@
 케이스 폴더마다
   detections.csv : frame_id, x, y, width, height, confidence, class_id, gt_id
   frames.csv     : Tracker를 호출하는 프레임 (fd 항목은 누락된 프레임이 빠져 있음)
-  expected.txt   : ideal_idsw, ideal_missed  (완벽한 Tracker라면 나와야 할 값)
+  expected.txt   : ideal_idsw, ideal_false, ideal_missed  (완벽한 Tracker라면 나와야 할 값)
   README.txt     : 상황 설명
   baseline.txt   : 현재 ByteTrack 결과 (test_bytetrack_limits --update-baseline 으로 기록)
 
 이상적인 값
   ideal_idsw   = 0  (같은 물체는 끝까지 같은 ID)
+  ideal_false  = 0  (정답과 겹치지 않는 헛출력 없음)
   ideal_missed = 1프레임이 아닌 시점에 처음 나타난 물체 수 (새 Track 확정 대기는 피할 수 없음)
 """
 import csv
@@ -128,7 +129,7 @@ def build(name, n_frames, objs, note, cam=None, drop=(), freeze=(), jitter=0.0, 
     with open(os.path.join(out, "frames.csv"), "w", newline="") as fh:
         fh.write("frame_id\n" + "".join(f"{i}\n" for i in frames))
     with open(os.path.join(out, "expected.txt"), "w") as fh:
-        fh.write(f"ideal_idsw=0\nideal_missed={ideal_missed}\n")
+        fh.write(f"ideal_idsw=0\nideal_false=0\nideal_missed={ideal_missed}\n")
     with open(os.path.join(out, "README.txt"), "w") as fh:
         fh.write(note.strip() + "\n\n")
         fh.write(f"전체 {n_frames}프레임 중 Tracker 호출 {len(frames)}프레임, 물체 {len(objs)}개")
@@ -138,7 +139,7 @@ def build(name, n_frames, objs, note, cam=None, drop=(), freeze=(), jitter=0.0, 
             fh.write(f", 정지 프레임 {len(freeze)}개")
         if jitter:
             fh.write(f", 검출 흔들림 σ={jitter}px")
-        fh.write(f"\n이상적인 결과: IDSW 0, 누락 {ideal_missed}\n")
+        fh.write(f"\n이상적인 결과: IDSW 0, 헛출력 0, 누락 {ideal_missed}\n")
     CASES.append(name)
 
 

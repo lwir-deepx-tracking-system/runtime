@@ -16,15 +16,22 @@
 //
 // tests/tracking/data/limits/ 아래 40개 케이스(generate_limits.py로 생성)를 실행한다.
 // ByteTrack이 원래 약한 상황이라, 합격 기준 대신 두 값과 비교한다.
-//   ideal    (expected.txt) : 완벽한 Tracker라면 나올 값. IDSW 0, 피할 수 없는 확정 대기만 누락
+//   ideal    (expected.txt) : 완벽한 Tracker라면 나올 값. IDSW 0, 헛출력 0, 피할 수 없는 확정 대기만 누락
 //   baseline (baseline.txt) : 지금 ByteTrack이 낸 값
+//
+// 지표 (표에는 (IDSW, 헛출력, 누락) 순서로 표시)
+//   IDSW   : 같은 물체의 ID가 바뀐 횟수
+//   헛출력 : Tracker가 출력했지만 어떤 정답과도 IoU 0.5 이상 겹치지 않는 박스 수.
+//            짐벌이 표적이 없는 곳을 따라가게 만드는 출력이다. (= 출력 수 - 맞힌 수)
+//   누락   : 화면에 보이는 정답 중 Tracker가 맞히지 못한 박스 수 (= 정답 수 - 맞힌 수)
 //
 // 판정
 //   IDEAL      이상적인 값과 같음
 //   WEAK       이상적인 값보다 나쁘지만 기준선과 같음 (알려진 한계)
 //   IMPROVED   기준선보다 좋아짐 → --update-baseline 으로 새 기준선 기록 권장
 //   REGRESSED  기준선보다 나빠짐 → 테스트 실패
-// 비교 순서: IDSW가 먼저, 같으면 누락(miss) 수
+// 비교 순서: IDSW → 헛출력 → 누락. 누락은 짐벌이 잠깐 멈추는 정도지만
+//            헛출력은 짐벌을 엉뚱한 곳으로 움직이므로 더 나쁘게 본다.
 //
 // 사용법
 //   test_bytetrack_limits                     전체 실행, 요약 표
@@ -40,8 +47,9 @@ namespace
 struct Score
 {
     int idsw = -1;
+    int false_out = -1;  // 헛출력
     int missed = -1;
-    bool valid() const { return idsw >= 0 && missed >= 0; }
+    bool valid() const { return idsw >= 0 && false_out >= 0 && missed >= 0; }
 };
 
 // a가 b보다 나쁘면 양수, 좋으면 음수, 같으면 0
@@ -49,6 +57,8 @@ int compare(const Score& a, const Score& b)
 {
     if (a.idsw != b.idsw)
         return a.idsw - b.idsw;
+    if (a.false_out != b.false_out)
+        return a.false_out - b.false_out;
     return a.missed - b.missed;
 }
 
@@ -61,6 +71,8 @@ Score read_score(const fs::path& file, const std::string& prefix)
     {
         if (line.rfind(prefix + "_idsw=", 0) == 0)
             s.idsw = std::stoi(line.substr(prefix.size() + 6));
+        else if (line.rfind(prefix + "_false=", 0) == 0)
+            s.false_out = std::stoi(line.substr(prefix.size() + 7));
         else if (line.rfind(prefix + "_missed=", 0) == 0)
             s.missed = std::stoi(line.substr(prefix.size() + 8));
     }
@@ -94,6 +106,8 @@ CaseResult run_case(const fs::path& dir, bool verbose)
     CaseResult r;
     r.name = dir.filename().string();
     r.ideal = read_score(dir / "expected.txt", "ideal");
+    if (r.ideal.false_out < 0)
+        r.ideal.false_out = 0;  // 이상적인 Tracker는 헛출력이 없다
     r.baseline = read_score(dir / "baseline.txt", "baseline");
 
     test_csv::Sequence seq;
@@ -119,7 +133,7 @@ CaseResult run_case(const fs::path& dir, bool verbose)
             print_frame(f, seq.by_frame[f], tracks);
     }
     const auto m = metrics.finish();
-    r.actual = {m.idsw, m.gt_count - m.matched};
+    r.actual = {m.idsw, m.pred_count - m.matched, m.gt_count - m.matched};
     r.idf1 = m.idf1;
     if (verbose)
         for (const auto& e : m.idsw_events)
@@ -180,16 +194,17 @@ int main(int argc, char** argv)
     for (const auto& d : dirs)
         results.push_back(run_case(d, verbose));
 
-    std::printf("\n[ByteTrack 한계 케이스 %zu개]  (idsw, miss) 비교. ideal = 완벽한 Tracker, base = 현재 기준선\n",
+    std::printf("\n[ByteTrack 한계 케이스 %zu개]  (IDSW, 헛출력, 누락) 비교. ideal = 완벽한 Tracker, base = 현재 기준선\n",
                 results.size());
-    std::printf("  %-7s %11s %11s %11s %7s  %s\n", "case", "actual", "ideal", "base", "IDF1", "verdict");
-    std::printf("  %s\n", std::string(62, '-').c_str());
+    std::printf("  %-7s %14s %14s %14s %7s  %s\n", "case", "actual", "ideal", "base", "IDF1", "verdict");
+    std::printf("  %s\n", std::string(71, '-').c_str());
 
     std::map<std::string, int> counts;
     std::map<std::string, std::pair<int, int>> by_group;  // 항목 → (IDEAL 수, 전체)
     int failures = 0;
     auto fmt = [](const Score& s) {
-        return s.valid() ? "(" + std::to_string(s.idsw) + ", " + std::to_string(s.missed) + ")"
+        return s.valid() ? "(" + std::to_string(s.idsw) + ", " + std::to_string(s.false_out) + ", " +
+                               std::to_string(s.missed) + ")"
                          : std::string("-");
     };
     for (const auto& r : results)
@@ -207,13 +222,14 @@ int main(int argc, char** argv)
             ++g.first;
         if (r.verdict == "REGRESSED")
             ++failures;
-        std::printf("  %-7s %11s %11s %11s %7.3f  %s\n", r.name.c_str(), fmt(r.actual).c_str(),
+        std::printf("  %-7s %14s %14s %14s %7.3f  %s\n", r.name.c_str(), fmt(r.actual).c_str(),
                     fmt(r.ideal).c_str(), fmt(r.baseline).c_str(), r.idf1, r.verdict.c_str());
 
         if (update)
         {
             std::ofstream out(root / r.name / "baseline.txt");
-            out << "baseline_idsw=" << r.actual.idsw << "\nbaseline_missed=" << r.actual.missed << "\n";
+            out << "baseline_idsw=" << r.actual.idsw << "\nbaseline_false=" << r.actual.false_out
+                << "\nbaseline_missed=" << r.actual.missed << "\n";
         }
     }
 
