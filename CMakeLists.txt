@@ -60,6 +60,7 @@ add_library(lwir_core
     src/detection/dxapp_detection_pipeline.cpp
 
     # 컴포넌트 생성
+    src/detection/yolov8_postprocessor.cpp
     src/factory/component_factory.cpp
 
     # 객체 추적
@@ -219,4 +220,10 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
+endif()
+    add_executable(test_yolov8_postprocessor tests/detection/test_yolov8_postprocessor.cpp)
+    target_link_libraries(test_yolov8_postprocessor PRIVATE lwir_core)
+    add_test(NAME yolov8_postprocessor COMMAND test_yolov8_postprocessor)
+
+    set_tests_properties(app_config lwir_preprocessor PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
