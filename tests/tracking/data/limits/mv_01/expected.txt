@@ -1,0 +1,2 @@
+ideal_idsw=0
+ideal_missed=0

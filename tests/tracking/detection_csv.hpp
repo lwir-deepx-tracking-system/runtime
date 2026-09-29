@@ -4,6 +4,7 @@
 // 폴더 안의 detections.csv / frames.csv를 첫 줄의 열 이름으로 읽는다.
 //   detections.csv: frame_id, x, y, width, height, confidence, (class_id), (gt_id)
 //                   gt_id가 있으면 정답 박스로도 읽는다 (1 이상: 정답 물체 번호, -1: 오검출)
+//                   (gt_x, gt_y, gt_width, gt_height)가 있으면 정답 박스는 그 값을 쓴다
 //   frames.csv    : frame_id   (검출이 없는 프레임도 포함한 전체 순서)
 
 #include <algorithm>
@@ -118,6 +119,12 @@ inline std::string load_sequence(const std::string& dir, Sequence& seq)
     const int c_score = det.col({"confidence", "score", "conf"});
     const int c_class = det.col({"class_id", "class", "cls"});
     const int c_gt = det.col({"gt_id"});
+    // 정답 박스 열(선택). 없으면 검출 박스를 정답으로 쓴다. 검출 흔들림 테스트에서 사용.
+    const int c_gx = det.col({"gt_x"});
+    const int c_gy = det.col({"gt_y"});
+    const int c_gw = det.col({"gt_width"});
+    const int c_gh = det.col({"gt_height"});
+    const bool has_gt_box = c_gx >= 0 && c_gy >= 0 && c_gw >= 0 && c_gh >= 0;
     seq.has_gt = c_gt >= 0;
 
     if (c_frame < 0 || c_x < 0 || c_y < 0 || c_w < 0 || c_h < 0 || c_score < 0)
@@ -144,10 +151,14 @@ inline std::string load_sequence(const std::string& dir, Sequence& seq)
         if (seq.has_gt)
         {
             const int gt_id = std::stoi(row.at(c_gt));
+            GtBox box{gt_id, d.x, d.y, d.width, d.height};
+            if (has_gt_box)
+                box = {gt_id, std::stof(row.at(c_gx)), std::stof(row.at(c_gy)),
+                       std::stof(row.at(c_gw)), std::stof(row.at(c_gh))};
             if (gt_id > 0)
-                seq.gt_by_frame[frame].push_back({gt_id, d.x, d.y, d.width, d.height});
+                seq.gt_by_frame[frame].push_back(box);
             else if (gt_id < 0)
-                seq.fp_by_frame[frame].push_back({gt_id, d.x, d.y, d.width, d.height});
+                seq.fp_by_frame[frame].push_back(box);
         }
     }
 

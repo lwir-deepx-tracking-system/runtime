@@ -227,6 +227,19 @@ if(BUILD_TESTING)
         COMMAND test_bytetrack_cases
     )
 
+    add_executable(
+        test_bytetrack_limits
+        tests/tracking/test_bytetrack_limits.cpp
+    )
+    target_link_libraries(
+        test_bytetrack_limits
+        PRIVATE lwir_core
+    )
+    add_test(
+        NAME bytetrack_limits
+        COMMAND test_bytetrack_limits
+    )
+
 
     # --------------------------------------------------------------------------
     # YOLOv8 후처리 테스트
