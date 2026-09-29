@@ -8,6 +8,7 @@
 #include "common/detection.hpp"
 #include "common/frame.hpp"
 #include "detection/lwir_preprocessor.hpp"
+#include "detection/yolov8_postprocessor.hpp"
 
 // dx_app과 같은 방식으로 전처리, 추론, 후처리를 한 객체 안에서 수행한다.
 class DetectionPipeline
@@ -27,6 +28,7 @@ public:
 
 private:
     LwirPreprocessor preprocessor_;
+    Yolov8Postprocessor postprocessor_;
     std::string model_path_;
     std::size_t max_inflight_;
 };
