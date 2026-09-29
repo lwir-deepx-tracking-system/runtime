@@ -62,5 +62,14 @@ if(BUILD_TESTING)
     target_link_libraries(test_shared_frame_pipeline PRIVATE lwir_core)
     add_test(NAME shared_frame_pipeline COMMAND test_shared_frame_pipeline)
 
+    add_executable(test_bytetrack tests/tracking/test_bytetrack.cpp)
+    target_link_libraries(test_bytetrack PRIVATE lwir_core)
+    add_test(NAME bytetrack COMMAND test_bytetrack)
+    set_tests_properties(bytetrack PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+    add_executable(test_bytetrack_scenarios tests/tracking/test_bytetrack_scenarios.cpp)
+    target_link_libraries(test_bytetrack_scenarios PRIVATE lwir_core)
+    add_test(NAME bytetrack_scenarios COMMAND test_bytetrack_scenarios)
+
     set_tests_properties(app_config lwir_preprocessor PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
