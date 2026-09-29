@@ -201,12 +201,36 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-    add_executable(
+        add_executable(
         test_bytetrack_scenarios
         tests/tracking/test_bytetrack_scenarios.cpp
     )
-    target_link_libraries(test_bytetrack_scenarios PRIVATE lwir_core)
-    add_test(NAME bytetrack_scenarios COMMAND test_bytetrack_scenarios)
+    target_link_libraries(
+        test_bytetrack_scenarios
+        PRIVATE lwir_core
+    )
+    add_test(
+        NAME bytetrack_scenarios
+        COMMAND test_bytetrack_scenarios
+    )
+
+
+    # --------------------------------------------------------------------------
+    # YOLOv8 후처리 테스트
+    # --------------------------------------------------------------------------
+
+    add_executable(
+        test_yolov8_postprocessor
+        tests/detection/test_yolov8_postprocessor.cpp
+    )
+    target_link_libraries(
+        test_yolov8_postprocessor
+        PRIVATE lwir_core
+    )
+    add_test(
+        NAME yolov8_postprocessor
+        COMMAND test_yolov8_postprocessor
+    )
 
 
     # --------------------------------------------------------------------------
@@ -216,14 +240,9 @@ if(BUILD_TESTING)
     set_tests_properties(
         app_config
         lwir_preprocessor
+        yolov8_postprocessor
         PROPERTIES
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-endif()
-    add_executable(test_yolov8_postprocessor tests/detection/test_yolov8_postprocessor.cpp)
-    target_link_libraries(test_yolov8_postprocessor PRIVATE lwir_core)
-    add_test(NAME yolov8_postprocessor COMMAND test_yolov8_postprocessor)
-
-    set_tests_properties(app_config lwir_preprocessor PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
