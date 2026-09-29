@@ -127,3 +127,56 @@ application.pop_gui_result(result);
 - 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리, ByteTrack 내부 로직, 짐벌 통신
 
 전체 흐름은 `docs/pipeline.html`, 논의가 필요한 항목은 `discussion.md`에서 확인할 수 있습니다.
+
+## 테스트 실행
+
+테스트를 포함해 빌드하려면 `BUILD_TESTING=ON`으로 설정합니다.
+
+```bash
+cmake -S . -B build/test \
+    -DBUILD_TESTING=ON \
+    -DLWIR_ENABLE_DX_APP=OFF
+
+cmake --build build/test -j
+```
+
+등록된 테스트 목록은 다음 명령으로 확인합니다.
+
+```bash
+ctest --test-dir build/test -N
+```
+
+전체 테스트를 실행합니다.
+
+```bash
+ctest --test-dir build/test --output-on-failure
+```
+
+특정 영역의 테스트만 실행할 수도 있습니다.
+
+```bash
+# ByteTrack 테스트
+ctest --test-dir build/test -R bytetrack --output-on-failure
+
+# Detection 테스트
+ctest --test-dir build/test -R detection --output-on-failure
+
+# LWIR 전처리 테스트
+ctest --test-dir build/test -R lwir_preprocessor --output-on-failure
+
+# Target Selector 테스트
+ctest --test-dir build/test -R target_selector --output-on-failure
+
+# Shared Frame 파이프라인 테스트
+ctest --test-dir build/test -R shared_frame_pipeline --output-on-failure
+```
+
+테스트가 필요하지 않은 일반 빌드에서는 다음과 같이 비활성화할 수 있습니다.
+
+```bash
+cmake -S . -B build/cpu \
+    -DBUILD_TESTING=OFF \
+    -DLWIR_ENABLE_DX_APP=OFF
+
+cmake --build build/cpu -j
+```
