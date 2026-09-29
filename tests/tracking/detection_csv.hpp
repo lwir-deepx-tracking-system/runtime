@@ -2,7 +2,8 @@
 
 // Tracking 테스트용 CSV 로더.
 // 폴더 안의 detections.csv / frames.csv를 첫 줄의 열 이름으로 읽는다.
-//   detections.csv: frame_id, x, y, width, height, confidence, (class_id)
+//   detections.csv: frame_id, x, y, width, height, confidence, (class_id), (gt_id)
+//                   gt_id가 있으면 정답 박스로도 읽는다 (1 이상: 정답 물체 번호, -1: 오검출)
 //   frames.csv    : frame_id   (검출이 없는 프레임도 포함한 전체 순서)
 
 #include <algorithm>
@@ -83,10 +84,22 @@ inline std::string tracking_test_dir()
     return pos == std::string::npos ? std::string(".") : file.substr(0, pos);
 }
 
+// 정답 박스 (IDSW·IDF1 계산용). 좌표는 Detection과 같은 TLWH.
+struct GtBox
+{
+    int id = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+};
+
 struct Sequence
 {
     std::vector<int> frames;                        // 호출 순서
     std::map<int, std::vector<Detection>> by_frame; // 없는 프레임은 빈 목록
+    std::map<int, std::vector<GtBox>> gt_by_frame;  // gt_id 열이 있을 때만 채워짐
+    bool has_gt = false;
 };
 
 // 성공하면 빈 문자열, 실패하면 오류 메시지를 반환한다.
@@ -103,6 +116,8 @@ inline std::string load_sequence(const std::string& dir, Sequence& seq)
     const int c_h = det.col({"height", "h"});
     const int c_score = det.col({"confidence", "score", "conf"});
     const int c_class = det.col({"class_id", "class", "cls"});
+    const int c_gt = det.col({"gt_id"});
+    seq.has_gt = c_gt >= 0;
 
     if (c_frame < 0 || c_x < 0 || c_y < 0 || c_w < 0 || c_h < 0 || c_score < 0)
     {
@@ -122,7 +137,15 @@ inline std::string load_sequence(const std::string& dir, Sequence& seq)
         d.confidence = std::stof(row.at(c_score));
         if (c_class >= 0 && c_class < static_cast<int>(row.size()))
             d.class_id = std::stoi(row[c_class]);
-        seq.by_frame[std::stoi(row.at(c_frame))].push_back(d);
+        const int frame = std::stoi(row.at(c_frame));
+        seq.by_frame[frame].push_back(d);
+
+        if (seq.has_gt)
+        {
+            const int gt_id = std::stoi(row.at(c_gt));
+            if (gt_id > 0)
+                seq.gt_by_frame[frame].push_back({gt_id, d.x, d.y, d.width, d.height});
+        }
     }
 
     Csv fr;

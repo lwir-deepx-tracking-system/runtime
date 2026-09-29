@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <iostream>
 #include <map>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "detection_csv.hpp"
+#include "tracking_metrics.hpp"
 
 // ByteTrack 시나리오 테스트.
 // 데이터: tests/tracking/data/scenarios/<시나리오>/  (generate.py로 재생성 가능)
@@ -19,6 +21,8 @@
 //   track_buffer   : track_buffer 안에서는 ID 복구, 넘으면 새 ID인가
 //   low_score      : 가려져 점수가 떨어진 구간에도 ID가 유지되는가 (2차 매칭)
 //   performance    : 검출 50개 x 300프레임에서 track() 처리 시간 (코드에서 생성)
+//
+// 시나리오마다 IDSW, IDF1을 함께 출력한다 (정답: CSV의 gt_id 열, 계산: tracking_metrics.hpp).
 //
 // 사용법:
 //   test_bytetrack_scenarios                  전체 시나리오, 요약만 출력 (CTest 기본)
@@ -32,6 +36,14 @@ using FrameTracks = std::map<int, std::vector<Track>>;
 
 int g_failures = 0;
 bool g_verbose = false;
+std::map<std::string, tracking_metrics::Result> g_metrics;  // 시나리오 이름 → 지표
+
+void print_metrics(const tracking_metrics::Result& m)
+{
+    std::cout << "  지표 " << tracking_metrics::summary(m) << "\n";
+    for (const auto& e : m.idsw_events)
+        std::cout << "    ID 변경: " << e << "\n";
+}
 
 // 한 프레임의 검출과 Track 결과를 한 줄씩 출력한다.
 void print_frame(int f, const std::vector<Detection>& dets, const std::vector<Track>& tracks)
@@ -66,11 +78,23 @@ bool run(const std::string& name, FrameTracks& out)
 
     // YAML 튜닝에 영향받지 않도록 기본값(공식 ByteTrack 값)으로 고정한다.
     ByteTrackTracker tracker("test-defaults", ByteTrackConfig{});
+    tracking_metrics::Accumulator metrics;
     for (int f : seq.frames)
     {
         out[f] = tracker.track(seq.by_frame[f]);
         if (g_verbose)
             print_frame(f, seq.by_frame[f], out[f]);
+        metrics.add_frame(f, seq.gt_by_frame[f], out[f]);
+    }
+
+    if (seq.has_gt)
+    {
+        g_metrics[name] = metrics.finish();
+        print_metrics(g_metrics[name]);
+    }
+    else
+    {
+        std::cout << "  지표: gt_id 열이 없어 계산하지 않음\n";
     }
     return true;
 }
@@ -253,14 +277,19 @@ void test_performance()
     ByteTrackTracker tracker("test-defaults", ByteTrackConfig{});
     std::vector<double> ms;
     size_t max_tracks = 0;
+    tracking_metrics::Accumulator metrics;
 
     for (int f = 0; f < kFrames; ++f)
     {
         std::vector<Detection> dets;
-        for (auto& o : objs)
+        std::vector<test_csv::GtBox> gt;
+        for (size_t k = 0; k < objs.size(); ++k)
         {
+            auto& o = objs[k];
             o.x = std::clamp(o.x + o.vx, 0.0f, 600.0f);
             o.y = std::clamp(o.y + o.vy, 0.0f, 420.0f);
+            // 정답은 검출 누락과 관계없이 물체의 실제 위치
+            gt.push_back({static_cast<int>(k) + 1, o.x, o.y, o.w, o.h});
             if (unit(rng) < 0.05f)  // 5% 확률로 검출 누락
                 continue;
             Detection d;
@@ -278,6 +307,7 @@ void test_performance()
         const auto t1 = std::chrono::steady_clock::now();
         ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
         max_tracks = std::max(max_tracks, tracks.size());
+        metrics.add_frame(f + 1, gt, tracks);
     }
 
     double sum = 0;
@@ -287,6 +317,14 @@ void test_performance()
     std::cout << "  검출 " << kObjects << "개 x " << kFrames << "프레임: 평균 "
               << sum / ms.size() << " ms, p99 " << ms[ms.size() * 99 / 100]
               << " ms, 최대 " << ms.back() << " ms, 최대 Track 수 " << max_tracks << "\n";
+
+    // 무작위로 움직이는 물체 50개라 교차가 잦다. 지표는 참고용으로만 출력한다.
+    g_metrics["performance"] = metrics.finish();
+    std::cout << "  지표 " << tracking_metrics::summary(g_metrics["performance"])
+              << " (참고용, 합격 기준 없음)\n";
+    if (g_verbose)
+        for (const auto& e : g_metrics["performance"].idsw_events)
+            std::cout << "    ID 변경: " << e << "\n";
 
     // 처리 시간은 PC마다 다르므로 실패 조건으로 쓰지 않는다. (30fps 예산 = 33 ms)
     check(max_tracks <= static_cast<size_t>(kObjects) + 5, "performance",
@@ -332,6 +370,34 @@ int main(int argc, char** argv)
     for (const auto& s : scenarios)
         if (selected.empty() || selected.count(s.first))
             s.second();
+
+    // 시나리오별 IDSW 기대값. track_buffer는 A가 track_buffer(30)를 넘겨 새 ID를 받는 것이
+    // 설계대로의 동작이므로 1회가 정답이다.
+    const std::map<std::string, int> expected_idsw = {
+        {"crossing", 0}, {"false_positive", 0}, {"track_buffer", 1}, {"low_score", 0}};
+    // 요약 표. 한글은 터미널에서 2칸을 차지해 정렬이 어긋나므로 열 제목은 영문으로 쓴다.
+    std::cout << "\n[지표 요약]  IoU 0.5 기준, IDSW 기대값과 다르면 FAIL\n";
+    std::printf("  %-15s %5s %5s %7s %7s %7s %7s  %s\n",
+                "scenario", "IDSW", "exp", "IDF1", "IDTP", "GT", "pred", "result");
+    std::printf("  %s\n", std::string(66, '-').c_str());
+    for (const auto& kv : g_metrics)
+    {
+        const auto& m = kv.second;
+        const auto it = expected_idsw.find(kv.first);
+        std::string expected = "-";
+        std::string result = "info";  // 기대값이 없는 시나리오 (performance)
+        if (it != expected_idsw.end())
+        {
+            expected = std::to_string(it->second);
+            const bool ok = m.idsw == it->second;
+            result = ok ? "PASS" : "FAIL";
+            if (!ok)
+                ++g_failures;
+        }
+        std::printf("  %-15s %5d %5s %7.3f %7d %7d %7d  %s\n", kv.first.c_str(), m.idsw,
+                    expected.c_str(), m.idf1, m.idtp, m.gt_count, m.pred_count, result.c_str());
+    }
+    std::cout << "\n";
 
     if (g_failures > 0)
     {
