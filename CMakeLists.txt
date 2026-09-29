@@ -20,6 +20,7 @@ add_library(lwir_core
     src/camera/camera.cpp
     src/detection/lwir_preprocessor.cpp
     src/detection/dxapp_detection_pipeline.cpp
+    src/detection/yolov8_postprocessor.cpp
     src/factory/component_factory.cpp
     src/tracking/bytetrack_tracker.cpp
     src/target/target_selector.cpp
@@ -61,6 +62,19 @@ if(BUILD_TESTING)
     add_executable(test_shared_frame_pipeline tests/pipeline/test_shared_frame_pipeline.cpp)
     target_link_libraries(test_shared_frame_pipeline PRIVATE lwir_core)
     add_test(NAME shared_frame_pipeline COMMAND test_shared_frame_pipeline)
+
+    add_executable(test_bytetrack tests/tracking/test_bytetrack.cpp)
+    target_link_libraries(test_bytetrack PRIVATE lwir_core)
+    add_test(NAME bytetrack COMMAND test_bytetrack)
+    set_tests_properties(bytetrack PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+    add_executable(test_bytetrack_scenarios tests/tracking/test_bytetrack_scenarios.cpp)
+    target_link_libraries(test_bytetrack_scenarios PRIVATE lwir_core)
+    add_test(NAME bytetrack_scenarios COMMAND test_bytetrack_scenarios)
+
+    add_executable(test_yolov8_postprocessor tests/detection/test_yolov8_postprocessor.cpp)
+    target_link_libraries(test_yolov8_postprocessor PRIVATE lwir_core)
+    add_test(NAME yolov8_postprocessor COMMAND test_yolov8_postprocessor)
 
     set_tests_properties(app_config lwir_preprocessor PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
