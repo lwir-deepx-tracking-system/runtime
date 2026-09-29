@@ -129,6 +129,23 @@ Application::Application(const std::string& config_path)
             config.control.enabled,
             measurement_enabled_
         );
+
+    if (config.gui.enabled)
+    {
+        gui_sender_ = std::make_unique<GuiSender>(
+            config.gui.video,
+            config.model.camera_input.clip_min,
+            config.model.camera_input.clip_max);
+        gui_sender_thread_ = std::make_unique<GuiSenderThread>(
+            *gui_sender_, gui_track_queue_);
+
+        if (config.gui.command.enabled)
+        {
+            gui_receiver_ = std::make_unique<GuiReceiver>(config.gui.command);
+            gui_receiver_thread_ = std::make_unique<GuiReceiverThread>(
+                *gui_receiver_, target_selector_);
+        }
+    }
 }
 
 // GUI 입력을 대상 선택 단계에 전달한다.
@@ -146,6 +163,11 @@ bool Application::pop_gui_result(TrackingResultPtr& result)
 // Pipeline Worker를 실행한다.
 void Application::run()
 {
+    // 수신기는 pipeline보다 먼저 열어 GUI가 언제든 선택 명령을 보낼 수 있게
+    // 하고, 송신기는 Tracking 결과 queue를 기다리도록 먼저 시작한다.
+    if (gui_receiver_thread_) gui_receiver_thread_->start();
+    if (gui_sender_thread_) gui_sender_thread_->start();
+
     control_thread_->start();
     target_selection_thread_->start();
     tracking_thread_->start();
@@ -158,8 +180,17 @@ void Application::run()
     camera_thread_->join();
     detection_thread_->join();
     tracking_thread_->join();
+    if (gui_sender_thread_) gui_sender_thread_->join();
     target_selection_thread_->join();
     control_thread_->join();
+
+    // TCP receiver는 외부 GUI 연결을 기다릴 수 있으므로 명시적으로 stop해
+    // poll/recv를 깨운 뒤 join한다.
+    if (gui_receiver_thread_)
+    {
+        gui_receiver_thread_->stop();
+        gui_receiver_thread_->join();
+    }
 
     if (!measurement_enabled_)
         return;

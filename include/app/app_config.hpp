@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "gui/gui_config.hpp"
+
 // runtime.yaml에서 읽는 실행 단계별 설정.
 struct LoggingConfig { std::string level; };
 struct DetectorConfig { std::string type; std::string config_path; };
@@ -55,6 +57,7 @@ struct AppConfig {
     TrackingConfig tracking;
     ControlConfig control;
     MeasurementConfig measurement;
+    GuiConfig gui;
     ModelConfig model;
 };
 

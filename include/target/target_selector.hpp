@@ -1,9 +1,10 @@
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <optional>
 #include <vector>
+
+#include <pthread.h>
 
 #include "common/track.hpp"
 
@@ -21,9 +22,16 @@ class TargetSelector
 {
 private:
     // GUI는 set_selected_id()를 통해 선택을 갱신한다. -1은 선택 해제.
-    std::atomic<int> selected_id_{-1};
+    int selected_id_ = -1;
+    mutable pthread_mutex_t selected_id_mutex_{};
 
 public:
+    TargetSelector();
+    ~TargetSelector();
+
+    TargetSelector(const TargetSelector&) = delete;
+    TargetSelector& operator=(const TargetSelector&) = delete;
+
     void set_selected_id(int track_id);
     // 일치하는 Track이 없으면 matched_track은 비어 있다.
     TargetSelection select(const std::vector<Track>& tracks) const;

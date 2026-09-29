@@ -15,5 +15,20 @@ int main()
 
     // 전처리 padding과 class 개수가 후처리 설정까지 전달되는지 확인한다.
     if (config.model.preprocess.pad_value != 114 || config.model.postprocess.num_classes != 1) return 5;
+
+    // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
+    if (config.gui.enabled ||
+        config.gui.video.host != "127.0.0.1" ||
+        config.gui.video.port != 5000 ||
+        config.gui.video.codec != GuiVideoCodec::H264 ||
+        config.gui.video.encoder != "x264enc" ||
+        config.gui.video.bitrate_kbps != 3000 ||
+        config.gui.video.fps != 30 ||
+        config.gui.video.rtp_mtu != 1200 ||
+        !config.gui.command.enabled ||
+        config.gui.command.bind_address != "0.0.0.0" ||
+        config.gui.command.port != 5001 ||
+        config.gui.command.receive_timeout_ms != 1000)
+        return 6;
     return 0;
 }

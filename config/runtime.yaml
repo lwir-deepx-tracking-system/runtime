@@ -19,3 +19,22 @@ control:
 
 measurement:
   enabled: false
+
+gui:
+  # GUI 프로그램이 준비되기 전에는 통신 worker를 시작하지 않는다.
+  enabled: false
+  # Orange Pi -> GUI: 실시간 표시 영상용 RTP/UDP 채널
+  video:
+    host: 127.0.0.1
+    port: 5000
+    codec: h264
+    encoder: x264enc
+    bitrate_kbps: 3000
+    fps: 30
+    rtp_mtu: 1200
+  # GUI -> Orange Pi: 선택한 track_id를 보내는 TCP 명령 채널
+  command:
+    enabled: true
+    bind_address: 0.0.0.0
+    port: 5001
+    receive_timeout_ms: 1000

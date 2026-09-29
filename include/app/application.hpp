@@ -11,6 +11,8 @@
 
 #include "camera/camera.hpp"
 #include "detection/dxapp_detection_pipeline.hpp"
+#include "gui/gui_receiver.hpp"
+#include "gui/gui_sender.hpp"
 #include "tracking/tracker.hpp"
 
 #include "pipeline/camera_thread.hpp"
@@ -18,6 +20,8 @@
 #include "pipeline/tracking_thread.hpp"
 #include "pipeline/target_selection_thread.hpp"
 #include "pipeline/control_thread.hpp"
+#include "pipeline/gui_receiver_thread.hpp"
+#include "pipeline/gui_sender_thread.hpp"
 
 // 프로그램의 구성 요소를 생성하고
 // Pipeline 실행을 관리하는 최상위 Application 클래스
@@ -63,6 +67,14 @@ private:
 
     GimbalController gimbal_controller_;
     std::unique_ptr<ControlThread> control_thread_;
+
+    // Application이 GUI 통신 객체의 전체 수명을 소유한다. Sender 내부의
+    // GStreamer pipeline과 Receiver 내부의 TCP socket은 각 객체가 RAII로
+    // 정리하고, worker는 실행 thread만 담당한다.
+    std::unique_ptr<GuiSender> gui_sender_;
+    std::unique_ptr<GuiSenderThread> gui_sender_thread_;
+    std::unique_ptr<GuiReceiver> gui_receiver_;
+    std::unique_ptr<GuiReceiverThread> gui_receiver_thread_;
 
 
 public:

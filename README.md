@@ -8,6 +8,12 @@ LWIR 카메라 영상에서 객체를 검출하고 추적한 뒤, 같은 프레�
 - Detection: YOLOv8 + DEEPX `dx_app` 구조
 - Tracking: ByteTrack
 - 실행 구조: POSIX pthread + thread-safe queue
+- 동기화/통신: POSIX pthread mutex와 POSIX socket API
+
+런타임에서 직접 소유하는 thread, mutex, socket은 POSIX API로 통일합니다.
+`std::thread`, `std::mutex`, `std::atomic`은 사용하지 않습니다. GStreamer는 영상
+pipeline 내부 구현을 위해 GLib을 사용하지만 애플리케이션 worker와 socket의
+소유권은 POSIX 경계에 유지합니다.
 
 ## 파이프라인
 
@@ -97,12 +103,22 @@ cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON -DDX_APP_ROOT=/path/to/dx_app
 
 ## 설정
 
-- `config/runtime.yaml`: Detection backend, Tracking, Control, 측정 설정
+- `config/runtime.yaml`: Detection backend, Tracking, Control, GUI, 측정 설정
 - `config/model/yolov8n.yaml`: LWIR 입력 범위, 모델 입력 크기, letterbox와 후처리 설정
 - `config/tracking/bytetrack.yaml`: ByteTrack 설정
 - `config/control.yaml`: 제어 설정
 
 모델별 값은 `config/model/*.yaml`에 두고, YAML 파싱과 검증은 `AppConfig`에서 담당합니다. Detection 결과 좌표는 원본 LWIR 프레임 기준이어야 합니다.
+
+GUI 설정도 `config/runtime.yaml`의 `gui` 항목에서 관리합니다. `gui.video`는
+H.264/RTP/UDP 영상 송신 설정이고, `gui.command`는 대상 선택 TCP 명령 수신
+설정입니다. GUI 컴포넌트는 YAML을 직접 읽지 않고 `AppConfig::gui`로 전달된
+검증 완료 설정만 사용합니다.
+
+현재 송신 구현은 GStreamer `x264enc` 소프트웨어 encoder를 사용합니다. GUI
+장치의 IP는 `gui.video.host`, 영상 UDP 포트는 `gui.video.port`, Orange Pi의
+명령 TCP listen 포트는 `gui.command.port`에서 변경합니다. Orange Pi 전용
+하드웨어 H.264 encoder는 장치의 GStreamer plugin을 확인한 뒤 추가해야 합니다.
 
 ## GUI 연결 경계
 
@@ -120,11 +136,17 @@ application.pop_gui_result(result);
 ```
 
 `result->frame->image`와 `result->tracks`는 동일한 프레임에 대응합니다. GUI queue는 화면 지연 누적을 막기 위해 최신 결과 두 개만 유지합니다.
+`gui.enabled: true`이면 내부 `GuiSenderThread`가 이 queue를 소비하므로,
+`pop_gui_result()`는 내장 송신기를 사용하지 않는 별도 GUI 통합에서만 호출해야
+합니다.
 
 ## 현재 구현 상태
 
 - 구현됨: thread/queue 연결, shared Frame 수명 관리, LWIR 전처리, 설정 검증, GUI/제어 결과 분기
-- 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리, ByteTrack 내부 로직, 짐벌 통신
+- 구현됨: GStreamer `x264enc` 기반 H.264/RTP/UDP 영상 송신, GUI TCP 명령
+  수신·재접속·종료 처리
+- 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리, ByteTrack 내부 로직,
+  Orange Pi 하드웨어 H.264 encoder, 짐벌 통신
 
 전체 흐름은 `docs/pipeline.html`, 논의가 필요한 항목은 `discussion.md`에서 확인할 수 있습니다.
 

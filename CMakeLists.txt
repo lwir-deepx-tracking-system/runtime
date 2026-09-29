@@ -18,10 +18,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Threads REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(PkgConfig REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS
     core
     imgproc
     videoio
+)
+pkg_check_modules(
+    GSTREAMER
+    REQUIRED
+    IMPORTED_TARGET
+    gstreamer-1.0>=1.16
+    gstreamer-app-1.0>=1.16
 )
 
 
@@ -71,12 +79,20 @@ add_library(lwir_core
     # 짐벌 제어
     src/control/gimbal_controller.cpp
 
+    # GUI 통신 경계
+    # GStreamer RTP/UDP 영상 송신과 TCP 선택 명령 수신을 포함한다.
+    src/gui/gui_protocol.cpp
+    src/gui/gui_sender.cpp
+    src/gui/gui_receiver.cpp
+
     # 파이프라인
     src/pipeline/camera_thread.cpp
     src/pipeline/detection_thread.cpp
     src/pipeline/tracking_thread.cpp
     src/pipeline/target_selection_thread.cpp
     src/pipeline/control_thread.cpp
+    src/pipeline/gui_sender_thread.cpp
+    src/pipeline/gui_receiver_thread.cpp
 )
 
 target_include_directories(lwir_core
@@ -89,6 +105,7 @@ target_link_libraries(lwir_core
     PUBLIC
         Threads::Threads
         yaml-cpp
+        PkgConfig::GSTREAMER
         ${OpenCV_LIBS}
 )
 
@@ -138,6 +155,27 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_app_config PRIVATE lwir_core)
     add_test(NAME app_config COMMAND test_app_config)
+
+    add_executable(
+        test_gui_protocol
+        tests/gui/test_gui_protocol.cpp
+    )
+    target_link_libraries(test_gui_protocol PRIVATE lwir_core)
+    add_test(NAME gui_protocol COMMAND test_gui_protocol)
+
+    add_executable(
+        test_gui_receiver
+        tests/gui/test_gui_receiver.cpp
+    )
+    target_link_libraries(test_gui_receiver PRIVATE lwir_core)
+    add_test(NAME gui_receiver COMMAND test_gui_receiver)
+
+    add_executable(
+        test_gui_sender
+        tests/gui/test_gui_sender.cpp
+    )
+    target_link_libraries(test_gui_sender PRIVATE lwir_core)
+    add_test(NAME gui_sender COMMAND test_gui_sender)
 
 
     # --------------------------------------------------------------------------

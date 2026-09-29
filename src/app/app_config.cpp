@@ -25,6 +25,65 @@ YAML::Node load_yaml(const std::string& path)
         throw std::runtime_error("cannot read configuration " + path + ": " + e.what());
     }
 }
+
+GuiVideoCodec parse_gui_video_codec(const std::string& value)
+{
+    if (value == "h264") return GuiVideoCodec::H264;
+    throw std::runtime_error("only gui.video.codec=h264 is currently supported");
+}
+
+std::uint16_t parse_port(
+    const YAML::Node& node,
+    const char* key,
+    const std::string& path)
+{
+    const int port = required<int>(node, key, path);
+    if (port <= 0 || port > std::numeric_limits<std::uint16_t>::max())
+        throw std::runtime_error(path + "." + key + " must be in [1, 65535]");
+    return static_cast<std::uint16_t>(port);
+}
+
+GuiConfig load_gui_config(const YAML::Node& node)
+{
+    GuiConfig c;
+    c.enabled = required<bool>(node, "enabled", "gui");
+
+    // 영상 전송 설정: Orange Pi -> GUI 방향의 RTP/UDP 채널이다.
+    const YAML::Node video = node["video"];
+    c.video.host = required<std::string>(video, "host", "gui.video");
+    c.video.port = parse_port(video, "port", "gui.video");
+    c.video.codec = parse_gui_video_codec(
+        required<std::string>(video, "codec", "gui.video"));
+    c.video.encoder = required<std::string>(video, "encoder", "gui.video");
+    c.video.bitrate_kbps = required<int>(video, "bitrate_kbps", "gui.video");
+    c.video.fps = required<int>(video, "fps", "gui.video");
+    c.video.rtp_mtu = required<int>(video, "rtp_mtu", "gui.video");
+    if (c.video.host.empty())
+        throw std::runtime_error("gui.video.host must not be empty");
+    if (c.video.encoder != "x264enc")
+        throw std::runtime_error(
+            "only gui.video.encoder=x264enc is currently supported");
+    if (c.video.bitrate_kbps <= 0)
+        throw std::runtime_error("gui.video.bitrate_kbps must be positive");
+    if (c.video.fps <= 0)
+        throw std::runtime_error("gui.video.fps must be positive");
+    if (c.video.rtp_mtu < 576 || c.video.rtp_mtu > 65507)
+        throw std::runtime_error("gui.video.rtp_mtu must be in [576, 65507]");
+
+    // 명령 설정: GUI -> Orange Pi 방향의 작은 TCP 제어 채널이다.
+    const YAML::Node command = node["command"];
+    c.command.enabled = required<bool>(command, "enabled", "gui.command");
+    c.command.bind_address = required<std::string>(
+        command, "bind_address", "gui.command");
+    c.command.port = parse_port(command, "port", "gui.command");
+    c.command.receive_timeout_ms = required<int>(
+        command, "receive_timeout_ms", "gui.command");
+    if (c.command.bind_address.empty())
+        throw std::runtime_error("gui.command.bind_address must not be empty");
+    if (c.command.receive_timeout_ms <= 0)
+        throw std::runtime_error("gui.command.receive_timeout_ms must be positive");
+    return c;
+}
 }
 
 // 모델 YAML 전체를 typed config로 변환한다.
@@ -88,6 +147,7 @@ AppConfig load_config(const std::string& path)
     c.control.enabled = required<bool>(root["control"], "enabled", "control");
     c.control.config_path = required<std::string>(root["control"], "config", "control");
     c.measurement.enabled = required<bool>(root["measurement"], "enabled", "measurement");
+    c.gui = load_gui_config(root["gui"]);
 
     // 아직 factory에 연결되지 않은 조합을 실행 중에 늦게 발견하지 않도록 차단한다.
     if (c.detector.type != "yolov8" || c.detection.backend != "dx_app_async")
