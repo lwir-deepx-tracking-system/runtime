@@ -213,6 +213,19 @@ if(BUILD_TESTING)
         NAME bytetrack_scenarios
         COMMAND test_bytetrack_scenarios
     )
+    
+    add_executable(
+        test_bytetrack_cases
+        tests/tracking/test_bytetrack_cases.cpp
+    )
+    target_link_libraries(
+        test_bytetrack_cases
+        PRIVATE lwir_core
+    )
+    add_test(
+        NAME bytetrack_cases
+        COMMAND test_bytetrack_cases
+    )
 
 
     # --------------------------------------------------------------------------

@@ -99,6 +99,7 @@ struct Sequence
     std::vector<int> frames;                        // 호출 순서
     std::map<int, std::vector<Detection>> by_frame; // 없는 프레임은 빈 목록
     std::map<int, std::vector<GtBox>> gt_by_frame;  // gt_id 열이 있을 때만 채워짐
+    std::map<int, std::vector<GtBox>> fp_by_frame;  // gt_id -1 (오검출) 박스
     bool has_gt = false;
 };
 
@@ -145,6 +146,8 @@ inline std::string load_sequence(const std::string& dir, Sequence& seq)
             const int gt_id = std::stoi(row.at(c_gt));
             if (gt_id > 0)
                 seq.gt_by_frame[frame].push_back({gt_id, d.x, d.y, d.width, d.height});
+            else if (gt_id < 0)
+                seq.fp_by_frame[frame].push_back({gt_id, d.x, d.y, d.width, d.height});
         }
     }
 
