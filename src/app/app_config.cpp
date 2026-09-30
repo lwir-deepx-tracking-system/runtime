@@ -45,7 +45,7 @@ std::uint16_t parse_port(
 
 GuiConfig load_gui_config(const YAML::Node& node)
 {
-    GuiConfig c;
+    GuiConfig c{};
     c.enabled = required<bool>(node, "enabled", "gui");
 
     // 영상 전송 설정: Orange Pi -> GUI 방향의 RTP/UDP 채널이다.
@@ -69,6 +69,20 @@ GuiConfig load_gui_config(const YAML::Node& node)
         throw std::runtime_error("gui.video.fps must be positive");
     if (c.video.rtp_mtu < 576 || c.video.rtp_mtu > 65507)
         throw std::runtime_error("gui.video.rtp_mtu must be in [576, 65507]");
+
+    // Track metadata는 영상과 다른 UDP 포트로 보내 GUI가 bbox를 직접 그린다.
+    const YAML::Node metadata = node["metadata"];
+    c.metadata.enabled = required<bool>(metadata, "enabled", "gui.metadata");
+    c.metadata.host = required<std::string>(metadata, "host", "gui.metadata");
+    c.metadata.port = parse_port(metadata, "port", "gui.metadata");
+    const int max_packet_bytes = required<int>(
+        metadata, "max_packet_bytes", "gui.metadata");
+    if (c.metadata.host.empty())
+        throw std::runtime_error("gui.metadata.host must not be empty");
+    if (max_packet_bytes < 64 || max_packet_bytes > 65507)
+        throw std::runtime_error(
+            "gui.metadata.max_packet_bytes must be in [64, 65507]");
+    c.metadata.max_packet_bytes = static_cast<std::size_t>(max_packet_bytes);
 
     // 명령 설정: GUI -> Orange Pi 방향의 작은 TCP 제어 채널이다.
     const YAML::Node command = node["command"];

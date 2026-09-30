@@ -25,6 +25,10 @@ int main()
         config.gui.video.bitrate_kbps != 3000 ||
         config.gui.video.fps != 30 ||
         config.gui.video.rtp_mtu != 1200 ||
+        !config.gui.metadata.enabled ||
+        config.gui.metadata.host != "127.0.0.1" ||
+        config.gui.metadata.port != 5002 ||
+        config.gui.metadata.max_packet_bytes != 1200 ||
         !config.gui.command.enabled ||
         config.gui.command.bind_address != "0.0.0.0" ||
         config.gui.command.port != 5001 ||

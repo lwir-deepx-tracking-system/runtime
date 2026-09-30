@@ -1,5 +1,7 @@
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <vector>
 
 #include "gui/gui_protocol.hpp"
 
@@ -32,6 +34,43 @@ int main()
     const auto invalid_packet = encode_gui_command(invalid);
     if (decode_gui_command(invalid_packet.data(), invalid_packet.size(), decoded))
         return 4;
+
+    GuiTrackingMetadata metadata;
+    metadata.frame_id = 42;
+    metadata.rtp_timestamp = 9000;
+    metadata.width = 640;
+    metadata.height = 480;
+    Track track;
+    track.track_id = 7;
+    track.class_id = 1;
+    track.confidence = 0.75F;
+    track.x = 10.0F;
+    track.y = 20.0F;
+    track.width = 30.0F;
+    track.height = 40.0F;
+    metadata.tracks.push_back(track);
+
+    std::vector<std::uint8_t> metadata_packet;
+    if (!encode_tracking_metadata(metadata, 1200, metadata_packet)) return 5;
+
+    GuiTrackingMetadata decoded_metadata;
+    if (!decode_tracking_metadata(
+            metadata_packet.data(), metadata_packet.size(), decoded_metadata) ||
+        decoded_metadata.frame_id != 42 ||
+        decoded_metadata.rtp_timestamp != 9000 ||
+        decoded_metadata.width != 640 ||
+        decoded_metadata.height != 480 || decoded_metadata.tracks.size() != 1)
+        return 6;
+    const Track& decoded_track = decoded_metadata.tracks.front();
+    if (decoded_track.track_id != 7 || decoded_track.class_id != 1 ||
+        std::fabs(decoded_track.confidence - 0.75F) > 1e-6F ||
+        std::fabs(decoded_track.x - 10.0F) > 1e-6F ||
+        std::fabs(decoded_track.y - 20.0F) > 1e-6F ||
+        std::fabs(decoded_track.width - 30.0F) > 1e-6F ||
+        std::fabs(decoded_track.height - 40.0F) > 1e-6F)
+        return 7;
+
+    if (encode_tracking_metadata(metadata, 32, metadata_packet)) return 8;
 
     return 0;
 }

@@ -110,15 +110,20 @@ cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON -DDX_APP_ROOT=/path/to/dx_app
 
 모델별 값은 `config/model/*.yaml`에 두고, YAML 파싱과 검증은 `AppConfig`에서 담당합니다. Detection 결과 좌표는 원본 LWIR 프레임 기준이어야 합니다.
 
-GUI 설정도 `config/runtime.yaml`의 `gui` 항목에서 관리합니다. `gui.video`는
-H.264/RTP/UDP 영상 송신 설정이고, `gui.command`는 대상 선택 TCP 명령 수신
-설정입니다. GUI 컴포넌트는 YAML을 직접 읽지 않고 `AppConfig::gui`로 전달된
-검증 완료 설정만 사용합니다.
+GUI 설정도 `config/runtime.yaml`의 `gui` 항목에서 관리합니다.
+
+- `gui.video`: bbox가 그려지지 않은 H.264/RTP/UDP 영상
+- `gui.metadata`: `frame_id`, Track ID와 원본 좌표 bbox를 보내는 별도 UDP 채널
+- `gui.command`: GUI가 선택한 Track ID를 받는 TCP 채널
+
+GUI 컴포넌트는 YAML을 직접 읽지 않고 `AppConfig::gui`로 전달된 검증 완료
+설정만 사용합니다.
 
 현재 송신 구현은 GStreamer `x264enc` 소프트웨어 encoder를 사용합니다. GUI
 장치의 IP는 `gui.video.host`, 영상 UDP 포트는 `gui.video.port`, Orange Pi의
-명령 TCP listen 포트는 `gui.command.port`에서 변경합니다. Orange Pi 전용
-하드웨어 H.264 encoder는 장치의 GStreamer plugin을 확인한 뒤 추가해야 합니다.
+metadata UDP 포트는 `gui.metadata.port`, 명령 TCP listen 포트는
+`gui.command.port`에서 변경합니다. Orange Pi 전용 하드웨어 H.264 encoder는
+장치의 GStreamer plugin을 확인한 뒤 추가해야 합니다.
 
 ## GUI 연결 경계
 
@@ -143,8 +148,8 @@ application.pop_gui_result(result);
 ## 현재 구현 상태
 
 - 구현됨: thread/queue 연결, shared Frame 수명 관리, LWIR 전처리, 설정 검증, GUI/제어 결과 분기
-- 구현됨: GStreamer `x264enc` 기반 H.264/RTP/UDP 영상 송신, GUI TCP 명령
-  수신·재접속·종료 처리
+- 구현됨: GStreamer `x264enc` 기반 H.264/RTP/UDP 영상 송신, 별도 Track
+  metadata UDP 송신, GUI TCP 명령 수신·재접속·종료 처리
 - 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리, ByteTrack 내부 로직,
   Orange Pi 하드웨어 H.264 encoder, 짐벌 통신
 

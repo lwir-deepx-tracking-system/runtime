@@ -83,7 +83,8 @@ void* receive_command(void* argument)
 
 int main()
 {
-    GuiCommandConfig config;
+    GuiCommandConfig config{};
+    config.enabled = true;
     config.bind_address = "127.0.0.1";
     config.port = find_available_loopback_port();
     config.receive_timeout_ms = 20;

@@ -32,6 +32,12 @@ gui:
     bitrate_kbps: 3000
     fps: 30
     rtp_mtu: 1200
+  # Orange Pi -> GUI: frame_id와 bbox를 보내는 별도 UDP 채널
+  metadata:
+    enabled: true
+    host: 127.0.0.1
+    port: 5002
+    max_packet_bytes: 1200
   # GUI -> Orange Pi: 선택한 track_id를 보내는 TCP 명령 채널
   command:
     enabled: true

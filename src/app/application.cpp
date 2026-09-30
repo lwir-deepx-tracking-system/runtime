@@ -134,6 +134,7 @@ Application::Application(const std::string& config_path)
     {
         gui_sender_ = std::make_unique<GuiSender>(
             config.gui.video,
+            config.gui.metadata,
             config.model.camera_input.clip_min,
             config.model.camera_input.clip_max);
         gui_sender_thread_ = std::make_unique<GuiSenderThread>(
