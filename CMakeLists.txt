@@ -67,9 +67,6 @@ add_library(lwir_core
     src/detection/lwir_preprocessor.cpp
     src/detection/dxapp_detection_pipeline.cpp
 
-    # 컴포넌트 생성
-    src/factory/component_factory.cpp
-
     # 객체 추적
     src/tracking/bytetrack_tracker.cpp
 
@@ -89,7 +86,6 @@ add_library(lwir_core
     src/pipeline/camera_thread.cpp
     src/pipeline/detection_thread.cpp
     src/pipeline/tracking_thread.cpp
-    src/pipeline/target_selection_thread.cpp
     src/pipeline/control_thread.cpp
     src/pipeline/gui_sender_thread.cpp
     src/pipeline/gui_receiver_thread.cpp
@@ -198,7 +194,7 @@ if(BUILD_TESTING)
 
 
     # --------------------------------------------------------------------------
-    # 추적 대상 선택 테스트
+    # 선택 ID 상태 테스트
     # --------------------------------------------------------------------------
 
     add_executable(
@@ -207,6 +203,13 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_target_selector PRIVATE lwir_core)
     add_test(NAME target_selector COMMAND test_target_selector)
+
+    add_executable(
+        test_control_thread
+        tests/control/test_control_thread.cpp
+    )
+    target_link_libraries(test_control_thread PRIVATE lwir_core)
+    add_test(NAME control_thread COMMAND test_control_thread)
 
 
     # --------------------------------------------------------------------------

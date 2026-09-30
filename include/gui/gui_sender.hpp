@@ -4,8 +4,8 @@
 
 #include <sys/socket.h>
 
+#include "app/app_config.hpp"
 #include "common/track.hpp"
-#include "gui/gui_config.hpp"
 
 struct _GstAppSrc;
 struct _GstElement;

@@ -31,15 +31,15 @@ flowchart LR
 
     Tracking["TrackingThread<br/>ByteTrack"]
     GUI["GUI 송신<br/>원본 Frame + Track 목록"]
-    Selection["TargetSelectionThread<br/>선택 ID 매칭"]
+    Selection["TargetSelector<br/>선택 ID 상태"]
     Control["ControlThread<br/>Orange Pi 짐벌 제어"]
 
     Camera -->|"FrameMessage<br/>shared_ptr&lt;const FrameContext&gt;"| Preprocess
     Postprocess -->|"DetectionResult<br/>동일 FrameContextPtr"| Tracking
     Tracking -->|"TrackingResultPtr"| GUI
-    Tracking -->|"동일 TrackingResultPtr"| Selection
+    Tracking -->|"동일 TrackingResultPtr"| Control
     GUI -.->|"selected track_id"| Selection
-    Selection -->|"TargetSelection"| Control
+    Selection -.->|"get_selected_id()"| Control
 ```
 
 Camera에서 만든 `FrameContext`는 복사하지 않고 `shared_ptr`로 Detection, Tracking, GUI까지 전달합니다. 따라서 GUI는 Track 결과가 생성된 정확한 원본 프레임을 사용할 수 있습니다.
@@ -103,12 +103,13 @@ cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON -DDX_APP_ROOT=/path/to/dx_app
 
 ## 설정
 
-- `config/runtime.yaml`: Detection backend, Tracking, Control, GUI, 측정 설정
+- `config/runtime.yaml`: Detection, ByteTrack, Control, GUI, 측정 설정
 - `config/model/yolov8n.yaml`: LWIR 입력 범위, 모델 입력 크기, letterbox와 후처리 설정
-- `config/tracking/bytetrack.yaml`: ByteTrack 설정
-- `config/control.yaml`: 제어 설정
 
-모델별 값은 `config/model/*.yaml`에 두고, YAML 파싱과 검증은 `AppConfig`에서 담당합니다. Detection 결과 좌표는 원본 LWIR 프레임 기준이어야 합니다.
+모델별 값만 `config/model/*.yaml`에 분리하고 나머지 실행 설정은
+`config/runtime.yaml`에서 관리합니다. YAML 파싱과 검증은 모두 `AppConfig`가
+담당하며 각 처리 컴포넌트는 검증된 typed config만 전달받습니다. Detection 결과
+좌표는 원본 LWIR 프레임 기준이어야 합니다.
 
 GUI 설정도 `config/runtime.yaml`의 `gui` 항목에서 관리합니다.
 
@@ -125,32 +126,13 @@ metadata UDP 포트는 `gui.metadata.port`, 명령 TCP listen 포트는
 `gui.command.port`에서 변경합니다. Orange Pi 전용 하드웨어 H.264 encoder는
 장치의 GStreamer plugin을 확인한 뒤 추가해야 합니다.
 
-## GUI 연결 경계
-
-GUI에서 선택한 Track ID는 다음 함수로 전달합니다.
-
-```cpp
-application.set_selected_track_id(track_id);
-```
-
-GUI로 보낼 최신 프레임과 Track 결과는 다음 함수에서 가져옵니다.
-
-```cpp
-TrackingResultPtr result;
-application.pop_gui_result(result);
-```
-
-`result->frame->image`와 `result->tracks`는 동일한 프레임에 대응합니다. GUI queue는 화면 지연 누적을 막기 위해 최신 결과 두 개만 유지합니다.
-`gui.enabled: true`이면 내부 `GuiSenderThread`가 이 queue를 소비하므로,
-`pop_gui_result()`는 내장 송신기를 사용하지 않는 별도 GUI 통합에서만 호출해야
-합니다.
-
 ## 현재 구현 상태
 
-- 구현됨: thread/queue 연결, shared Frame 수명 관리, LWIR 전처리, 설정 검증, GUI/제어 결과 분기
+- 구현됨: thread/queue 연결, shared Frame 수명 관리, LWIR 전처리, 설정 검증,
+  ByteTrack, GUI/제어 결과 분기
 - 구현됨: GStreamer `x264enc` 기반 H.264/RTP/UDP 영상 송신, 별도 Track
   metadata UDP 송신, GUI TCP 명령 수신·재접속·종료 처리
-- 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리, ByteTrack 내부 로직,
+- 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리,
   Orange Pi 하드웨어 H.264 encoder, 짐벌 통신
 
 전체 흐름은 `docs/pipeline.html`, 논의가 필요한 항목은 `discussion.md`에서 확인할 수 있습니다.

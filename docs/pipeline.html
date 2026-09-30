@@ -64,11 +64,9 @@
       <div class="branch">
         <h3>대상 선택 및 제어 경로</h3>
         <div class="row">
-          <div class="box select">selected_track_id</div>
+          <div class="box select">TargetSelector<br><small>selected_track_id 상태</small></div>
           <div class="arrow">+</div>
-          <div class="box control">TargetSelectionThread</div>
-          <div class="arrow">→</div>
-          <div class="box control">ControlThread</div>
+          <div class="box control">ControlThread<br><small>TrackingResult에서 ID 검색</small></div>
           <div class="arrow">→</div>
           <div class="box control">GimbalController</div>
         </div>

@@ -43,6 +43,60 @@ std::uint16_t parse_port(
     return static_cast<std::uint16_t>(port);
 }
 
+LoggingConfig load_logging_config(const YAML::Node& node)
+{
+    LoggingConfig c;
+    c.level = required<std::string>(node, "level", "logging");
+    return c;
+}
+
+DetectionConfig load_detection_config(const YAML::Node& node)
+{
+    DetectionConfig c;
+    const int max_inflight = required<int>(
+        node, "max_inflight", "detection");
+    if (max_inflight <= 0)
+        throw std::runtime_error("detection.max_inflight must be positive");
+    c.max_inflight = static_cast<std::size_t>(max_inflight);
+    return c;
+}
+
+TrackingConfig load_tracking_config(const YAML::Node& node)
+{
+    TrackingConfig c;
+    c.track_threshold = required<float>(
+        node, "track_threshold", "tracking");
+    c.match_threshold = required<float>(
+        node, "match_threshold", "tracking");
+    c.track_buffer = required<int>(
+        node, "track_buffer", "tracking");
+
+    if (c.track_threshold <= 0.0F || c.track_threshold > 1.0F)
+        throw std::runtime_error("tracking.track_threshold must be in (0, 1]");
+    if (c.match_threshold <= 0.0F || c.match_threshold > 1.0F)
+        throw std::runtime_error("tracking.match_threshold must be in (0, 1]");
+    if (c.track_buffer <= 0)
+        throw std::runtime_error("tracking.track_buffer must be positive");
+    return c;
+}
+
+ControlConfig load_control_config(const YAML::Node& node)
+{
+    ControlConfig c;
+    c.enabled = required<bool>(node, "enabled", "control");
+    c.driver = required<std::string>(node, "driver", "control");
+    if (c.driver.empty())
+        throw std::runtime_error("control.driver must not be empty");
+    return c;
+}
+
+MeasurementConfig load_measurement_config(const YAML::Node& node)
+{
+    MeasurementConfig c;
+    c.enabled = required<bool>(node, "enabled", "measurement");
+    return c;
+}
+
 GuiConfig load_gui_config(const YAML::Node& node)
 {
     GuiConfig c{};
@@ -143,30 +197,24 @@ ModelConfig load_model_config(const std::string& path)
     return c;
 }
 
-// 실행 단계 선택을 읽고 해당 Detector가 참조하는 모델 설정까지 한 번에 준비한다.
+// runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
 AppConfig load_config(const std::string& path)
 {
     const YAML::Node root = load_yaml(path);
     AppConfig c;
-    c.logging.level = required<std::string>(root["logging"], "level", "logging");
+    c.logging = load_logging_config(root["logging"]);
     Logger::set_level(c.logging.level);
-    c.detector.type = required<std::string>(root["detector"], "type", "detector");
-    c.detector.config_path = required<std::string>(root["detector"], "config", "detector");
-    c.detection.backend = required<std::string>(root["detection"], "backend", "detection");
-    const int max_inflight = required<int>(root["detection"], "max_inflight", "detection");
-    if (max_inflight <= 0) throw std::runtime_error("detection.max_inflight must be positive");
-    c.detection.max_inflight = static_cast<std::size_t>(max_inflight);
-    c.tracking.type = required<std::string>(root["tracking"], "type", "tracking");
-    c.tracking.config_path = required<std::string>(root["tracking"], "config", "tracking");
-    c.control.enabled = required<bool>(root["control"], "enabled", "control");
-    c.control.config_path = required<std::string>(root["control"], "config", "control");
-    c.measurement.enabled = required<bool>(root["measurement"], "enabled", "measurement");
-    c.gui = load_gui_config(root["gui"]);
 
-    // 아직 factory에 연결되지 않은 조합을 실행 중에 늦게 발견하지 않도록 차단한다.
-    if (c.detector.type != "yolov8" || c.detection.backend != "dx_app_async")
-        throw std::runtime_error("only yolov8 with dx_app_async is supported");
-    c.model = load_model_config(c.detector.config_path);
+    c.model_config_path = required<std::string>(root["model"], "config", "model");
+    if (c.model_config_path.empty())
+        throw std::runtime_error("model.config must not be empty");
+    c.model = load_model_config(c.model_config_path);
+
+    c.detection = load_detection_config(root["detection"]);
+    c.tracking = load_tracking_config(root["tracking"]);
+    c.control = load_control_config(root["control"]);
+    c.measurement = load_measurement_config(root["measurement"]);
+    c.gui = load_gui_config(root["gui"]);
     Logger::info("[Config] runtime and model configuration loaded");
     return c;
 }

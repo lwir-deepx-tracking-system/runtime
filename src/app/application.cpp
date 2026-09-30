@@ -2,7 +2,8 @@
 #include "common/logger.hpp"
 
 #include "app/app_config.hpp"
-#include "factory/component_factory.hpp"
+#include "detection/dxapp_detection_pipeline.hpp"
+#include "tracking/bytetrack_tracker.hpp"
 
 #include <chrono>
 #include <ctime>
@@ -62,27 +63,20 @@ Application::Application(const std::string& config_path)
         std::to_string(gui_track_queue_.size())
     );
 
-    Logger::debug(
-        "[Application] target_selection_queue 크기: " +
-        std::to_string(target_selection_queue_.size())
-    );
-
     // 결과 폴더에는 실행 당시 참조한 YAML을 사본으로 남긴다.
     config_snapshot_paths_ = {
         config_path_,
-        config.detector.config_path,
-        config.tracking.config_path
+        config.model_config_path
     };
-    if (config.control.enabled)
-        config_snapshot_paths_.push_back(config.control.config_path);
 
     camera_ = std::make_unique<Camera>();
 
-    // dx_app 구조처럼 전처리, 추론, 후처리를 한 Detection 객체가 소유한다.
-    detection_pipeline_ = ComponentFactory::create_detection_pipeline(config);
+    // 이 런타임의 고정 조합인 YOLOv8 + DX App pipeline을 생성한다.
+    detection_pipeline_ = std::make_unique<DxAppDetectionPipeline>(
+        config.model, config.detection);
 
-    // Tracking 구현체 생성
-    tracker_ = ComponentFactory::create_tracker(config);
+    // AppConfig가 검증한 runtime 설정으로 고정 ByteTrack 구현체를 생성한다.
+    tracker_ = std::make_unique<ByteTrackTracker>(config.tracking);
 
     
     // Camera Thread에 연결
@@ -112,20 +106,12 @@ Application::Application(const std::string& config_path)
             measurement_enabled_
         );
 
-    // Tracking 결과와 GUI 선택 ID를 대상 선택 단계에 연결
-    target_selection_thread_ =
-        std::make_unique<TargetSelectionThread>(
-            target_selector_,
-            control_track_queue_,
-            target_selection_queue_,
-            measurement_enabled_
-        );
-
-    // 선택 결과를 Orange Pi 짐벌 제어 단계에 연결
+    // Tracking 결과와 GUI 선택 ID를 Orange Pi 짐벌 제어 단계에 직접 연결한다.
     control_thread_ =
         std::make_unique<ControlThread>(
             gimbal_controller_,
-            target_selection_queue_,
+            target_selector_,
+            control_track_queue_,
             config.control.enabled,
             measurement_enabled_
         );
@@ -149,18 +135,6 @@ Application::Application(const std::string& config_path)
     }
 }
 
-// GUI 입력을 대상 선택 단계에 전달한다.
-void Application::set_selected_track_id(int track_id)
-{
-    target_selector_.set_selected_id(track_id);
-}
-
-bool Application::pop_gui_result(TrackingResultPtr& result)
-{
-    return gui_track_queue_.pop(result);
-}
-
-
 // Pipeline Worker를 실행한다.
 void Application::run()
 {
@@ -170,7 +144,6 @@ void Application::run()
     if (gui_sender_thread_) gui_sender_thread_->start();
 
     control_thread_->start();
-    target_selection_thread_->start();
     tracking_thread_->start();
     detection_thread_->start();
     // 마지막에 Frame 생산자 시작
@@ -182,7 +155,6 @@ void Application::run()
     detection_thread_->join();
     tracking_thread_->join();
     if (gui_sender_thread_) gui_sender_thread_->join();
-    target_selection_thread_->join();
     control_thread_->join();
 
     // TCP receiver는 외부 GUI 연결을 기다릴 수 있으므로 명시적으로 stop해
@@ -230,7 +202,6 @@ void Application::run()
     append_metrics(metrics_file, "camera", camera_thread_->metrics());
     append_metrics(metrics_file, "detection", detection_thread_->metrics());
     append_metrics(metrics_file, "tracking", tracking_thread_->metrics());
-    append_metrics(metrics_file, "target_selection", target_selection_thread_->metrics());
     append_metrics(metrics_file, "control", control_thread_->metrics());
     metrics_file.close();
     if (!metrics_file)

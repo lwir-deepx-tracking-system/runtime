@@ -49,10 +49,10 @@
         <mxCell id="selection-receiver" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#8e24aa;fontStyle=1;" value="Selection Receiver" vertex="1">
           <mxGeometry height="60" width="190" x="95" y="600" as="geometry" />
         </mxCell>
-        <mxCell id="selected-id" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#f3e5f5;strokeColor=#8e24aa;" value="선택된&lt;br&gt;selected_track_id" vertex="1">
+        <mxCell id="selected-id" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#f3e5f5;strokeColor=#8e24aa;" value="TargetSelector&lt;br&gt;selected_track_id" vertex="1">
           <mxGeometry height="80" width="210" x="385" y="590" as="geometry" />
         </mxCell>
-        <mxCell id="target-selection" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#43a047;fontStyle=1;" value="TargetSelectionThread" vertex="1">
+        <mxCell id="target-selection" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#e8f5e9;strokeColor=#43a047;fontStyle=1;" value="control_track_queue_&lt;br&gt;TrackingResultPtr" vertex="1">
           <mxGeometry height="60" width="205" x="770" y="600" as="geometry" />
         </mxCell>
         <mxCell id="control-thread" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#43a047;fontStyle=1;" value="ControlThread" vertex="1">
@@ -97,7 +97,7 @@
         <mxCell id="e-encoder-packet" edge="1" parent="1" source="encoder" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#fb8c00;" target="display-packet">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e-fork-select" edge="1" parent="1" source="fork" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#43a047;strokeWidth=2;" target="target-selection" value="Track 목록만 전달">
+        <mxCell id="e-fork-select" edge="1" parent="1" source="fork" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#43a047;strokeWidth=2;" target="target-selection" value="동일 TrackingResultPtr">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="1530" y="210" />
@@ -110,10 +110,10 @@
         <mxCell id="e-rx-id" edge="1" parent="1" source="selection-receiver" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8e24aa;" target="selected-id" value="selected_track_id 갱신">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e-id-select" edge="1" parent="1" source="selected-id" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8e24aa;" target="target-selection" value="매 프레임 현재 값 조회">
+        <mxCell id="e-id-select" edge="1" parent="1" source="selected-id" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8e24aa;" target="control-thread" value="get_selected_id()">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e-select-control" edge="1" parent="1" source="target-selection" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#43a047;" target="control-thread" value="TargetSelection">
+        <mxCell id="e-select-control" edge="1" parent="1" source="target-selection" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#43a047;" target="control-thread" value="TrackingResultPtr">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e-control-gimbal" edge="1" parent="1" source="control-thread" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#43a047;" target="gimbal">

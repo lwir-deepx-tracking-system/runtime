@@ -22,7 +22,9 @@ public:
 class DxAppDetectionPipeline final : public DetectionPipeline
 {
 public:
-    explicit DxAppDetectionPipeline(const AppConfig& config);
+    DxAppDetectionPipeline(
+        const ModelConfig& model_config,
+        const DetectionConfig& detection_config);
     std::vector<Detection> detect(const FrameContext& frame) override;
 
 private:

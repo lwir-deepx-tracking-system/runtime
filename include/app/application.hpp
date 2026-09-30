@@ -13,12 +13,12 @@
 #include "detection/dxapp_detection_pipeline.hpp"
 #include "gui/gui_receiver.hpp"
 #include "gui/gui_sender.hpp"
+#include "target/target_selector.hpp"
 #include "tracking/tracker.hpp"
 
 #include "pipeline/camera_thread.hpp"
 #include "pipeline/detection_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
-#include "pipeline/target_selection_thread.hpp"
 #include "pipeline/control_thread.hpp"
 #include "pipeline/gui_receiver_thread.hpp"
 #include "pipeline/gui_sender_thread.hpp"
@@ -37,9 +37,6 @@ private:
     // 같은 TrackingResult를 제어와 GUI 경로가 공유한다.
     ThreadSafeQueue<TrackingResultPtr> control_track_queue_;
     ThreadSafeQueue<TrackingResultPtr> gui_track_queue_;
-
-    // 선택 ID의 관측 결과를 Orange Pi 짐벌 제어 단계로 전달
-    ThreadSafeQueue<TargetSelection> target_selection_queue_;
 
     std::string config_path_;
     std::vector<std::string> config_snapshot_paths_;
@@ -63,7 +60,6 @@ private:
     std::unique_ptr<TrackingThread> tracking_thread_;
 
     TargetSelector target_selector_;
-    std::unique_ptr<TargetSelectionThread> target_selection_thread_;
 
     GimbalController gimbal_controller_;
     std::unique_ptr<ControlThread> control_thread_;
@@ -80,13 +76,6 @@ private:
 public:
     // YAML 설정을 읽고 필요한 객체를 생성
     explicit Application(const std::string& config_path);
-
-    // GUI가 선택한 Track ID를 전달한다. -1은 선택 해제.
-    void set_selected_track_id(int track_id);
-
-    // GUI 송신 worker가 최신 TrackingResult를 가져가는 경계.
-    // queue가 닫히고 남은 결과가 없으면 false를 반환한다.
-    bool pop_gui_result(TrackingResultPtr& result);
 
     // Pipeline Worker 실행
     void run();

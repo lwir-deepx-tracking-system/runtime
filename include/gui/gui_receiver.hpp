@@ -5,7 +5,7 @@
 
 #include <pthread.h>
 
-#include "gui/gui_config.hpp"
+#include "app/app_config.hpp"
 #include "gui/gui_protocol.hpp"
 
 // GUI가 TCP로 보낸 제어 명령을 받는 경계 클래스.

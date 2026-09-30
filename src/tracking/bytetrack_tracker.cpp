@@ -2,13 +2,9 @@
 
 #include <algorithm>
 #include <limits>
-#include <set>
 #include <sstream>
-#include <stdexcept>
 #include <unordered_set>
 #include <utility>
-
-#include <yaml-cpp/yaml.h>
 
 #include "common/logger.hpp"
 
@@ -247,128 +243,23 @@ void remove_duplicates(
 }  // namespace
 
 
-// ByteTrack 설정 YAML을 읽고 검증한다.
-ByteTrackConfig load_bytetrack_config(const std::string& path)
+ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
+    : config_(config),
+      new_track_threshold_(std::min(config.track_threshold + 0.1F, 1.0F))
 {
-    const std::string where = "[ByteTrack 설정] " + path + ": ";
-
-    YAML::Node root;
-    try
-    {
-        root = YAML::LoadFile(path);
-    }
-    catch (const YAML::Exception& e)
-    {
-        throw std::runtime_error(where + "파일을 읽을 수 없습니다 (" + e.what() + ")");
-    }
-    if (!root.IsMap())
-        throw std::runtime_error(where + "최상위가 key: value 형식이 아닙니다");
-
-    // 오타로 값이 조용히 무시되지 않도록 모르는 키는 오류로 처리한다.
-    const std::set<std::string> known = {
-        "track_threshold", "match_threshold", "track_buffer",
-        "low_threshold", "new_track_threshold", "frame_rate"};
-    for (const auto& kv : root)
-    {
-        const std::string key = kv.first.as<std::string>();
-        if (!known.count(key))
-            throw std::runtime_error(where + "알 수 없는 키 '" + key + "'");
-    }
-
-    auto read_float = [&](const char* key, bool required, float fallback)
-    {
-        if (!root[key])
-        {
-            if (required)
-                throw std::runtime_error(where + "필수 키 '" + key + "'가 없습니다");
-            return fallback;
-        }
-        try
-        {
-            return root[key].as<float>();
-        }
-        catch (const YAML::Exception&)
-        {
-            throw std::runtime_error(where + "'" + key + "' 값이 숫자가 아닙니다");
-        }
-    };
-    auto read_int = [&](const char* key, bool required, int fallback)
-    {
-        if (!root[key])
-        {
-            if (required)
-                throw std::runtime_error(where + "필수 키 '" + key + "'가 없습니다");
-            return fallback;
-        }
-        try
-        {
-            return root[key].as<int>();
-        }
-        catch (const YAML::Exception&)
-        {
-            throw std::runtime_error(where + "'" + key + "' 값이 정수가 아닙니다");
-        }
-    };
-
-    ByteTrackConfig c;
-    c.track_thresh = read_float("track_threshold", true, c.track_thresh);
-    c.match_thresh = read_float("match_threshold", true, c.match_thresh);
-    c.track_buffer = read_int("track_buffer", true, c.track_buffer);
-    c.low_thresh = read_float("low_threshold", false, c.low_thresh);
-    c.new_track_thresh = read_float(
-        "new_track_threshold", false, std::min(c.track_thresh + 0.1f, 1.0f));
-    c.frame_rate = read_int("frame_rate", false, c.frame_rate);
-
-    auto require = [&](bool ok, const std::string& message)
-    {
-        if (!ok)
-            throw std::runtime_error(where + message);
-    };
-    require(c.track_thresh > 0.0f && c.track_thresh <= 1.0f,
-            "track_threshold는 0 초과 1 이하여야 합니다");
-    require(c.low_thresh >= 0.0f && c.low_thresh < c.track_thresh,
-            "low_threshold는 0 이상, track_threshold 미만이어야 합니다");
-    require(c.new_track_thresh >= c.track_thresh && c.new_track_thresh <= 1.0f,
-            "new_track_threshold는 track_threshold 이상 1 이하여야 합니다");
-    require(c.match_thresh > 0.0f && c.match_thresh <= 1.0f,
-            "match_threshold는 0 초과 1 이하여야 합니다 (1 - IoU 기준)");
-    require(c.track_buffer >= 1, "track_buffer는 1 이상이어야 합니다");
-    require(c.frame_rate >= 1, "frame_rate는 1 이상이어야 합니다");
-    return c;
-}
-
-
-ByteTrackTracker::ByteTrackTracker(
-    std::string config_path)
-    : ByteTrackTracker(config_path, load_bytetrack_config(config_path))
-{
-}
-
-
-ByteTrackTracker::ByteTrackTracker(
-    std::string config_path,
-    const ByteTrackConfig& config)
-    : config_path_(std::move(config_path)),
-      config_(config)
-{
-    max_time_lost_ = static_cast<int>(
-        config_.frame_rate / 30.0 * config_.track_buffer);
+    max_time_lost_ = config_.track_buffer;
 
     Logger::info(
         "[Tracking] ByteTrackTracker 생성 완료"
     );
 
     std::ostringstream values;
-    values << "track_threshold=" << config_.track_thresh
-           << ", low_threshold=" << config_.low_thresh
-           << ", new_track_threshold=" << config_.new_track_thresh
-           << ", match_threshold=" << config_.match_thresh
+    values << "track_threshold=" << config_.track_threshold
+           << ", low_threshold=" << kLowThreshold
+           << ", new_track_threshold=" << new_track_threshold_
+           << ", match_threshold=" << config_.match_threshold
            << ", track_buffer=" << config_.track_buffer
-           << ", frame_rate=" << config_.frame_rate
            << " (Lost 유지 " << max_time_lost_ << "프레임)";
-    Logger::debug(
-        "[Tracking] ByteTrack 설정 파일: " + config_path_
-    );
     Logger::debug(
         "[Tracking] ByteTrack 설정 값: " + values.str()
     );
@@ -419,9 +310,9 @@ std::vector<Track> ByteTrackTracker::track(
         det->score = d.confidence;
         det->class_id = d.class_id;
 
-        if (d.confidence >= config_.track_thresh)
+        if (d.confidence >= config_.track_threshold)
             high_dets.push_back(std::move(det));
-        else if (d.confidence > config_.low_thresh)
+        else if (d.confidence > kLowThreshold)
             low_dets.push_back(std::move(det));
     }
 
@@ -449,7 +340,7 @@ std::vector<Track> ByteTrackTracker::track(
     // 3-1. 1차 Association: 모든 Track ↔ high detection
     const auto m1 = linear_assignment(
         iou_distance(pool, high_dets), pool.size(), high_dets.size(),
-        config_.match_thresh);
+        config_.match_threshold);
     for (const auto& [r, c] : m1.matches)
         on_match(pool[r], high_dets[c]);
 
@@ -499,7 +390,7 @@ std::vector<Track> ByteTrackTracker::track(
     for (size_t c : m3.unmatched_cols)
     {
         auto& det = remain_high[c];
-        if (det->score < config_.new_track_thresh)
+        if (det->score < new_track_threshold_)
             continue;
         activate(*det);
         activated.push_back(det);
