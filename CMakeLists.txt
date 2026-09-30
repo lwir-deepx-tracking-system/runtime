@@ -281,3 +281,13 @@ if(BUILD_TESTING)
     )
 
 endif()
+
+# MOT17 공개 데이터 실행 도구 (ctest 미등록)
+    add_executable(
+        bench_mot17
+        tests/tracking/bench_mot17.cpp
+    )
+    target_link_libraries(
+        bench_mot17
+        PRIVATE lwir_core
+    )
