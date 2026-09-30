@@ -240,6 +240,15 @@ if(BUILD_TESTING)
         COMMAND test_bytetrack_limits
     )
 
+    add_executable(
+        bench_bytetrack_sweep
+        tests/tracking/bench_bytetrack_sweep.cpp
+    )
+    target_link_libraries(
+        bench_bytetrack_sweep
+        PRIVATE lwir_core
+    )
+
 
     # --------------------------------------------------------------------------
     # YOLOv8 후처리 테스트
