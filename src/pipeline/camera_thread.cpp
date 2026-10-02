@@ -1,8 +1,6 @@
 #include "pipeline/camera_thread.hpp"
-
 #include <utility>
 #include <chrono>
-
 #include "common/logger.hpp"
 
 
@@ -65,10 +63,14 @@ void CameraThread::run()
     while (true)
     {
         auto frame = std::make_shared<FrameContext>();
+
         const auto started_at = measurement_enabled_ ?
-            std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-        if (!camera_.read(*frame))
+            std::chrono::steady_clock::now() :
+            std::chrono::steady_clock::time_point{};
+
+        if (!camera_.capture(*frame))
             break;
+
         const auto finished_at = std::chrono::steady_clock::now();
 
         // Camera에서 부여한 정보를 이후 모든 stage가 그대로 전달한다.

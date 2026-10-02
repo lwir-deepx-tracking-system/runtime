@@ -18,6 +18,7 @@
 #include "gui/gui_protocol.hpp"
 
 namespace {
+// 여러 GuiSender 인스턴스가 생겨도 process 전체의 GStreamer 초기화는 한 번만 한다.
 pthread_once_t g_gstreamer_once = PTHREAD_ONCE_INIT;
 
 void initialize_gstreamer_once()
@@ -34,6 +35,8 @@ bool initialize_gstreamer()
     return result == 0;
 }
 
+// 비동기 pipeline에서 발생한 오류를 bus에서 회수해 호출자에게 실패로 알린다.
+// appsrc push가 성공해도 encoder나 sink에서 뒤늦게 실패할 수 있기 때문이다.
 bool log_pipeline_error(GstElement* pipeline)
 {
     GstBus* bus = gst_element_get_bus(pipeline);
@@ -73,12 +76,25 @@ GuiSender::~GuiSender()
     stop();
 }
 
+// 첫 유효 frame의 크기와 설정값으로 H.264/RTP 송신 pipeline을 준비한다.
+// 성공하면 이후 frame은 같은 appsrc와 pipeline을 계속 재사용한다.
 bool GuiSender::start_gstreamer_pipeline(int width, int height)
 {
+    // 실행 중 frame 크기가 바뀌면 기존 caps와 맞지 않으므로 재사용하지 않는다.
     if (pipeline_)
         return width == frame_width_ && height == frame_height_;
     if (!initialize_gstreamer()) return false;
 
+    // GStreamer 영상 경로:
+    //
+    // OpenCV BGR frame
+    //   -> appsrc       : C++ frame을 GStreamer에 입력
+    //   -> queue        : frame 생산과 encoder 처리 속도를 분리
+    //   -> videoconvert : encoder가 받을 수 있는 pixel format으로 변환
+    //   -> x264enc      : H.264 압축
+    //   -> h264parse    : H.264 bitstream과 parameter set 정리
+    //   -> rtph264pay   : H.264 데이터를 RTP packet으로 분할
+    //   -> udpsink      : PC GUI의 video UDP 포트로 송신
     GstElement* pipeline = gst_pipeline_new("gui-video-pipeline");
     GstElement* appsrc = gst_element_factory_make("appsrc", "gui-source");
     GstElement* queue = gst_element_factory_make("queue", "latest-frame-queue");
@@ -106,6 +122,8 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
         return false;
     }
 
+    // appsrc 입력 계약을 BGR, 고정 크기, 설정 FPS로 명시해 downstream이
+    // OpenCV buffer 형식을 추측하지 않도록 한다.
     GstCaps* caps = gst_caps_new_simple(
         "video/x-raw",
         "format", G_TYPE_STRING, "BGR",
@@ -122,7 +140,8 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
         nullptr);
     gst_caps_unref(caps);
 
-    // encoder가 잠시 느려져도 이전 화면이 줄지어 쌓이지 않게 한다.
+    // 실시간 화면은 모든 frame 보존보다 최신 frame 유지가 중요하다.
+    // encoder가 잠시 느려지면 이전 frame을 버려 화면 지연 누적을 막는다.
     g_object_set(
         queue,
         "max-size-buffers", 1U,
@@ -131,6 +150,7 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
         "leaky", 2,
         nullptr);
 
+    // GUI 표시 지연을 줄이기 위해 재정렬 지연을 없애고 빠른 encode 설정을 쓴다.
     gst_util_set_object_arg(G_OBJECT(encoder), "tune", "zerolatency");
     gst_util_set_object_arg(G_OBJECT(encoder), "speed-preset", "ultrafast");
     g_object_set(
@@ -141,6 +161,8 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
         "byte-stream", TRUE,
         nullptr);
 
+    // 수신 GUI가 중간에 연결되어도 decoder 설정을 얻을 수 있도록 parameter set을
+    // 반복하고, metadata와 대응할 RTP timestamp 시작 offset은 0으로 고정한다.
     g_object_set(parser, "config-interval", -1, nullptr);
     g_object_set(
         payloader,
@@ -157,6 +179,7 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
         "async", FALSE,
         nullptr);
 
+    // element를 하나의 pipeline에 넣고 위에 설명한 순서로 연결한다.
     gst_bin_add_many(
         GST_BIN(pipeline), appsrc, queue, convert, encoder, parser,
         payloader, sink, nullptr);
@@ -169,6 +192,7 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
         return false;
     }
 
+    // PLAYING 이후부터 appsrc에 전달한 frame이 비동기로 encode·송신된다.
     if (gst_element_set_state(pipeline, GST_STATE_PLAYING) ==
         GST_STATE_CHANGE_FAILURE)
     {
@@ -190,11 +214,14 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
     return true;
 }
 
+// 연속 메모리 BGR image를 timestamp가 있는 GstBuffer로 복사해 appsrc에 넘긴다.
 bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
 {
     if (!pipeline_ || !appsrc_ || image.empty() || !image.isContinuous())
         return false;
 
+    // OpenCV가 소유한 memory와 pipeline의 비동기 수명을 분리하기 위해
+    // GstBuffer를 만들고 현재 frame bytes를 복사한다.
     const std::size_t byte_size = image.total() * image.elemSize();
     GstBuffer* buffer = gst_buffer_new_allocate(nullptr, byte_size, nullptr);
     if (!buffer) return false;
@@ -204,6 +231,8 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
         return false;
     }
 
+    // frame_index와 설정 FPS로 연속 PTS를 생성한다. rtph264pay는 이 시간을
+    // 90kHz RTP clock으로 변환하고 metadata도 같은 index를 기준으로 계산한다.
     const GstClockTime duration = gst_util_uint64_scale_int(
         1, GST_SECOND, video_config_.fps);
     GST_BUFFER_PTS(buffer) = frame_index_ * duration;
@@ -224,10 +253,13 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
     return !log_pipeline_error(pipeline_);
 }
 
+// 설정된 PC GUI 주소로 metadata를 보낼 UDP socket과 목적지 주소를 준비한다.
 bool GuiSender::open_metadata_socket()
 {
     if (!metadata_config_.enabled || metadata_fd_ >= 0) return true;
 
+    // metadata는 H.264/RTP pipeline과 독립된 UDP datagram 채널이다.
+    // getaddrinfo를 사용해 IPv4/IPv6 어느 주소든 설정값으로 지정할 수 있게 한다.
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
@@ -271,19 +303,25 @@ bool GuiSender::open_metadata_socket()
     return true;
 }
 
+// 현재 TrackingResult를 영상 frame과 대응 가능한 metadata datagram으로 보낸다.
 bool GuiSender::send_tracking_metadata(const TrackingResult& result)
 {
     if (!metadata_config_.enabled) return true;
     if (!open_metadata_socket()) return false;
 
+    // GUI는 frame_id와 RTP timestamp로 metadata를 영상 frame에 대응시키고,
+    // 원본 frame 크기와 bbox를 사용해 영상 위에 Track을 표시한다.
     GuiTrackingMetadata metadata;
     metadata.frame_id = result.frame->metadata.frame_id;
+    // metadata와 RTP 영상을 같은 frame으로 대응시키기 위한 timestamp이다.
+    // GStreamer H.264 RTP clock의 90kHz 기준으로 현재 frame index를 변환한다.
     metadata.rtp_timestamp = static_cast<std::uint32_t>(
         gst_util_uint64_scale(frame_index_, 90000, video_config_.fps));
     metadata.width = static_cast<std::uint32_t>(result.frame->image.cols);
     metadata.height = static_cast<std::uint32_t>(result.frame->image.rows);
     metadata.tracks = result.tracks;
 
+    // C++ Track 구조체를 직접 보내지 않고 protocol의 고정 byte layout으로 만든다.
     std::vector<std::uint8_t> packet;
     if (!encode_tracking_metadata(
             metadata, metadata_config_.max_packet_bytes, packet))
@@ -300,8 +338,10 @@ bool GuiSender::send_tracking_metadata(const TrackingResult& result)
     return sent == static_cast<ssize_t>(packet.size());
 }
 
+// 원본 LWIR frame을 표시 영상으로 변환하고 영상/metadata 두 채널에 전달한다.
 bool GuiSender::send(const TrackingResult& result)
 {
+    // 잘못된 frame이나 네트워크 설정은 pipeline 일부를 시작하기 전에 거부한다.
     if (!result.frame || result.frame->image.empty() ||
         result.frame->image.type() != CV_16UC1 || clip_min_ >= clip_max_ ||
         video_config_.codec != GuiVideoCodec::H264 ||
@@ -312,8 +352,9 @@ bool GuiSender::send(const TrackingResult& result)
     const cv::Mat& source = result.frame->image;
     if (!start_gstreamer_pipeline(source.cols, source.rows)) return false;
 
-    // 이 복사 영상에는 bbox를 그리지 않는다. GUI가 별도 metadata의 원본 좌표를
-    // 이용해 박스를 그리고, 원본 CV_16UC1과 Detection 입력은 수정하지 않는다.
+    // 16-bit LWIR 원본을 GUI 표시용 8-bit 영상으로 변환한다. 설정한
+    // clip_min~clip_max 범위를 0~255로 매핑하며 원본 frame은 수정하지 않는다.
+    // bbox는 영상에 굽지 않고 별도 metadata의 원본 좌표로 GUI가 그린다.
     const double scale = 255.0 / static_cast<double>(clip_max_ - clip_min_);
     cv::Mat gray8;
     source.convertTo(
@@ -323,12 +364,18 @@ bool GuiSender::send(const TrackingResult& result)
     cv::Mat display;
     cv::cvtColor(gray8, display, cv::COLOR_GRAY2BGR);
 
+    // 영상과 Tracking metadata는 서로 다른 UDP 채널로 전송한다.
+    // Video: BGR -> H.264 -> RTP -> UDP
+    // Metadata: frame_id / RTP timestamp / bbox / track_id -> custom UDP packet
     if (!send_tracking_metadata(result)) return false;
     return push_frame_to_gstreamer(display);
 }
 
+// 재호출해도 안전하게 GStreamer와 metadata socket 소유권을 정리한다.
 void GuiSender::stop()
 {
+    // pipeline을 NULL로 내려 내부 worker와 plugin 자원을 먼저 정리한 뒤
+    // metadata socket까지 닫아 GuiSender가 소유한 송신 자원을 모두 해제한다.
     if (pipeline_)
     {
         gst_element_set_state(pipeline_, GST_STATE_NULL);

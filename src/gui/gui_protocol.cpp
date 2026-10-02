@@ -6,7 +6,8 @@
 #include <arpa/inet.h>
 
 namespace {
-// 정수 값을 packet의 현재 위치에 network byte order로 기록한다.
+// packet cursor를 이동시키며 숫자를 network byte order로 기록하고 읽는다.
+// memcpy를 사용해 alignment와 strict-aliasing에 의존하지 않는다.
 void write_u16(std::uint8_t*& cursor, std::uint16_t value)
 {
     value = htons(value);
@@ -102,11 +103,16 @@ bool read_float(
 }
 }
 
+// 선택 ID command를 ABI 독립적인 고정 크기 network packet으로 변환한다.
 std::array<std::uint8_t, kGuiCommandPacketSize> encode_gui_command(
     const GuiCommand& command)
 {
     std::array<std::uint8_t, kGuiCommandPacketSize> packet{};
     std::uint8_t* cursor = packet.data();
+
+    // command header:
+    // magic은 LWIR command 여부, version은 wire format 호환성,
+    // type은 SelectTrack 명령 종류를 나타낸다.
     write_u32(cursor, kGuiCommandMagic);
     write_u16(cursor, kGuiProtocolVersion);
     write_u16(cursor, static_cast<std::uint16_t>(command.type));
@@ -120,11 +126,13 @@ std::array<std::uint8_t, kGuiCommandPacketSize> encode_gui_command(
     return packet;
 }
 
+// TCP에서 모은 command packet을 검증하고 애플리케이션용 GuiCommand로 복원한다.
 bool decode_gui_command(
     const std::uint8_t* data,
     std::size_t size,
     GuiCommand& command)
 {
+    // 고정 크기보다 짧거나 긴 TCP command는 stream 경계가 어긋난 것으로 본다.
     if (!data || size != kGuiCommandPacketSize) return false;
 
     const std::uint8_t* cursor = data;
@@ -139,6 +147,7 @@ bool decode_gui_command(
         !read_u32(cursor, end, raw_track_id))
         return false;
 
+    // 다른 protocol, 지원하지 않는 version/type을 애플리케이션 상태에 반영하지 않는다.
     if (magic != kGuiCommandMagic || version != kGuiProtocolVersion ||
         raw_type != static_cast<std::uint16_t>(GuiCommandType::SelectTrack))
         return false;
@@ -152,11 +161,13 @@ bool decode_gui_command(
     return cursor == end;
 }
 
+// 한 frame의 Track 목록을 하나의 bounded UDP metadata packet으로 직렬화한다.
 bool encode_tracking_metadata(
     const GuiTrackingMetadata& metadata,
     std::size_t max_packet_bytes,
     std::vector<std::uint8_t>& packet)
 {
+    // 곱셈 overflow나 표현할 수 없는 track count를 packet 할당 전에 차단한다.
     if (metadata.tracks.size() > std::numeric_limits<std::uint32_t>::max())
         return false;
     if (metadata.tracks.size() >
@@ -170,6 +181,9 @@ bool encode_tracking_metadata(
 
     packet.resize(packet_size);
     std::uint8_t* cursor = packet.data();
+
+    // frame header에는 영상과 metadata를 대응시키는 ID/timestamp, bbox 좌표계의
+    // 기준 크기, 이어지는 Track record 개수를 기록한다.
     write_u32(cursor, kGuiMetadataMagic);
     write_u16(cursor, kGuiProtocolVersion);
     write_u16(cursor, static_cast<std::uint16_t>(GuiMetadataType::Tracking));
@@ -179,6 +193,7 @@ bool encode_tracking_metadata(
     write_u32(cursor, metadata.height);
     write_u32(cursor, static_cast<std::uint32_t>(metadata.tracks.size()));
 
+    // 각 Track record는 식별 정보와 원본 frame pixel 좌표 bbox를 고정 순서로 담는다.
     for (const Track& track : metadata.tracks)
     {
         write_i32(cursor, track.track_id);
@@ -192,11 +207,13 @@ bool encode_tracking_metadata(
     return cursor == packet.data() + packet.size();
 }
 
+// metadata datagram 전체를 검증한 뒤 frame 정보와 Track 목록으로 복원한다.
 bool decode_tracking_metadata(
     const std::uint8_t* data,
     std::size_t size,
     GuiTrackingMetadata& metadata)
 {
+    // 최소 header보다 작은 datagram은 필드 읽기를 시도하지 않는다.
     if (!data || size < kGuiMetadataHeaderSize) return false;
 
     const std::uint8_t* cursor = data;
@@ -215,6 +232,8 @@ bool decode_tracking_metadata(
         !read_u32(cursor, end, track_count))
         return false;
 
+    // header 식별자와 선언된 track count가 실제 datagram 전체 크기와 정확히
+    // 일치해야 이후 record 경계를 신뢰할 수 있다.
     if (magic != kGuiMetadataMagic || version != kGuiProtocolVersion ||
         raw_type != static_cast<std::uint16_t>(GuiMetadataType::Tracking))
         return false;
@@ -226,6 +245,7 @@ bool decode_tracking_metadata(
             static_cast<std::size_t>(track_count) * kGuiTrackMetadataSize)
         return false;
 
+    // header 검증이 끝난 뒤에만 출력 목록을 교체하고 Track record를 복원한다.
     metadata.tracks.clear();
     metadata.tracks.reserve(track_count);
     for (std::uint32_t i = 0; i < track_count; ++i)

@@ -101,6 +101,33 @@ cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON -DDX_APP_ROOT=/path/to/dx_app
 
 현재 CPU-only 빌드에서는 LWIR 전처리와 pipeline 경계만 검증합니다. DXNN 로딩, NPU 추론, tensor 검증과 성능 측정은 실제 DEEPX 장치에서 추가 검증해야 합니다. 가짜 추론 결과는 생성하지 않습니다.
 
+## i3system 카메라 연동
+
+Orange Pi에서 `/usr/local/include/i3system`과 `/usr/local/lib`에 설치된 Thermal
+Expert SDK를 사용하려면 카메라 옵션을 활성화합니다.
+
+```bash
+cmake -S . -B build/orangepi \
+    -DLWIR_ENABLE_I3_CAMERA=ON \
+    -DI3SYSTEM_ROOT=/usr/local \
+    -DLWIR_ENABLE_DX_APP=ON
+cmake --build build/orangepi -j
+```
+
+SDK를 다른 위치에 설치했다면 `I3SYSTEM_ROOT`를 해당 설치 루트로 지정합니다.
+CPU-only 빌드는 기본값인 `LWIR_ENABLE_I3_CAMERA=OFF`를 사용하며 실제 프레임을
+생성하지 않습니다.
+
+카메라가 연결된 Orange Pi에서는 실제 프레임이 CameraThread queue까지 들어오는지
+하드웨어 테스트를 실행할 수 있습니다.
+
+```bash
+ctest --test-dir build/orangepi -R camera_capture --output-on-failure
+```
+
+이 테스트는 `CV_16UC1`, 640x480, 연속 메모리, 최초 frame ID와 capture timestamp를
+검증하며 실제 카메라가 없으면 실패합니다.
+
 ## 설정
 
 - `config/runtime.yaml`: Detection, ByteTrack, Control, GUI, 측정 설정
@@ -132,8 +159,9 @@ metadata UDP 포트는 `gui.metadata.port`, 명령 TCP listen 포트는
   ByteTrack, GUI/제어 결과 분기
 - 구현됨: GStreamer `x264enc` 기반 H.264/RTP/UDP 영상 송신, 별도 Track
   metadata UDP 송신, GUI TCP 명령 수신·재접속·종료 처리
-- 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리,
-  Orange Pi 하드웨어 H.264 encoder, 짐벌 통신
+- 구현됨(하드웨어 미검증): i3system Thermal Expert SDK 카메라 입력
+- 골격 상태: DEEPX NPU 추론·후처리, Orange Pi 하드웨어 H.264 encoder,
+  짐벌 통신
 
 전체 흐름은 `docs/pipeline.html`, 논의가 필요한 항목은 `discussion.md`에서 확인할 수 있습니다.
 
@@ -144,6 +172,7 @@ metadata UDP 포트는 `gui.metadata.port`, 명령 TCP listen 포트는
 ```bash
 cmake -S . -B build/test \
     -DBUILD_TESTING=ON \
+    -DLWIR_ENABLE_I3_CAMERA=OFF \
     -DLWIR_ENABLE_DX_APP=OFF
 
 cmake --build build/test -j
@@ -185,6 +214,7 @@ ctest --test-dir build/test -R shared_frame_pipeline --output-on-failure
 ```bash
 cmake -S . -B build/cpu \
     -DBUILD_TESTING=OFF \
+    -DLWIR_ENABLE_I3_CAMERA=OFF \
     -DLWIR_ENABLE_DX_APP=OFF
 
 cmake --build build/cpu -j

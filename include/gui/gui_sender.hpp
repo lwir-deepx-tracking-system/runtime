@@ -10,10 +10,21 @@
 struct _GstAppSrc;
 struct _GstElement;
 
-// TrackingResult를 GUI 표시용 RTP/UDP 영상으로 보내는 경계 클래스.
+// Orange Pi -> PC GUI 방향의 영상과 Tracking metadata 송신을 담당한다.
 //
-// 영상은 bbox를 그리지 않은 채 H.264/RTP/UDP로 보내고, Track 목록은 원본
-// pixel 좌표 metadata UDP datagram으로 별도 전송한다.
+// 입력:
+//   TrackingResult(frame + tracks)
+// 출력:
+//   1) bbox가 없는 H.264/RTP/UDP 영상
+//   2) frame_id, RTP timestamp, bbox, track_id를 담은 metadata UDP packet
+//
+// 전체 흐름:
+// TrackingThread -> gui_track_queue -> GuiSenderThread -> GuiSender
+//   -> GStreamer 영상 송신
+//   -> 별도 UDP socket을 통한 Tracking metadata 송신
+//
+// 영상과 metadata를 분리해 GUI가 원본 pixel 좌표의 bbox를 직접 그리도록 한다.
+// 이 클래스가 GStreamer pipeline과 metadata socket의 수명을 모두 소유한다.
 class GuiSender
 {
 private:
@@ -35,9 +46,18 @@ private:
     sockaddr_storage metadata_address_{};
     socklen_t metadata_address_size_ = 0;
 
+    // 최초 frame 크기로 영상 pipeline을 만들고 PLAYING 상태로 시작한다.
+    // 이미 시작된 경우에는 입력 크기가 기존 pipeline과 같은지만 확인한다.
     bool start_gstreamer_pipeline(int width, int height);
+
+    // 변환된 BGR frame을 appsrc에 전달한다. encode, RTP packetize, UDP 송신은
+    // downstream GStreamer element가 비동기로 수행한다.
     bool push_frame_to_gstreamer(const cv::Mat& image);
+
+    // 영상 RTP 포트와 독립된 metadata UDP 목적지를 최초 1회 준비한다.
     bool open_metadata_socket();
+
+    // 현재 frame의 Track 목록을 명시적 wire format으로 직렬화해 전송한다.
     bool send_tracking_metadata(const TrackingResult& result);
 
 public:
@@ -51,13 +71,11 @@ public:
     GuiSender(const GuiSender&) = delete;
     GuiSender& operator=(const GuiSender&) = delete;
 
-    // 다음 순서로 영상과 metadata를 각각 전송한다.
-    // 1. CV_16UC1과 clip 범위를 검증한다.
-    // 2. GUI 표시용 CV_8UC1 영상으로 변환한다.
-    // 3. 박스 없는 영상을 GStreamer로 H.264/RTP/UDP 전송한다.
-    // 4. frame_id와 Track bbox를 별도 UDP port로 전송한다.
+    // 한 TrackingResult를 두 GUI 채널로 전달한다.
+    // CV_16UC1 원본을 clip 범위 기준 8-bit BGR로 변환하고, metadata를 별도
+    // UDP 포트로 보낸 뒤 영상 frame을 GStreamer appsrc에 전달한다.
     bool send(const TrackingResult& result);
 
-    // pipeline을 NULL state로 내리고 GStreamer 자원을 해제한다.
+    // 영상 pipeline과 metadata socket을 함께 닫아 송신 자원을 정리한다.
     void stop();
 };

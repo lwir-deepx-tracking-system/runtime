@@ -63,18 +63,22 @@ GuiReceiver::~GuiReceiver()
 
 bool GuiReceiver::stopped()
 {
+    // stop()은 다른 thread에서 호출되므로 socket 상태와 같은 mutex로 보호한다.
     PthreadLockGuard lock(socket_mutex_);
     return stopped_;
 }
 
+// 설정 주소에 listener를 열어 GUI command TCP 연결을 받을 준비를 한다.
 bool GuiReceiver::open_listener()
 {
+    // 이미 열렸거나 종료된 상태를 먼저 확인해 중복 listener 생성을 막는다.
     {
         PthreadLockGuard lock(socket_mutex_);
         if (listen_fd_ >= 0) return true;
         if (stopped_) return false;
     }
 
+    // 설정된 bind 주소를 IPv4/IPv6 socket 후보로 변환한다.
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -93,8 +97,11 @@ bool GuiReceiver::open_listener()
         return false;
     }
 
+    // 주소 후보를 순회하며 실제 bind/listen 가능한 첫 socket을 선택한다.
     int listener = -1;
     for (addrinfo* address = addresses; address; address = address->ai_next)
+    // socket 생성 중 stop()이 호출됐을 수 있으므로 공유 FD로 넘기기 전에
+    // 종료 상태를 다시 확인한다.
     {
         const int fd = ::socket(
             address->ai_family, address->ai_socktype, address->ai_protocol);
@@ -134,8 +141,10 @@ bool GuiReceiver::open_listener()
     return true;
 }
 
+// 종료 가능하도록 timeout poll을 반복하며 한 GUI client 연결을 수립한다.
 bool GuiReceiver::accept_client()
 {
+    // blocking accept 대신 poll timeout을 사용해 stop 요청을 주기적으로 확인한다.
     while (!stopped())
     {
         int listener = -1;
@@ -162,6 +171,7 @@ bool GuiReceiver::accept_client()
         if ((descriptor.revents & POLLIN) == 0)
             return false;
 
+        // POLLIN은 pending client가 있다는 뜻이므로 이때만 accept를 호출한다.
         const int client = ::accept(listener, nullptr, nullptr);
         if (client < 0)
         {
@@ -187,14 +197,18 @@ bool GuiReceiver::accept_client()
     return false;
 }
 
+// TCP stream에서 command packet 하나의 고정 byte 수를 모두 모은다.
 bool GuiReceiver::receive_exact(
     int fd,
     std::uint8_t* data,
     std::size_t size)
 {
+    // TCP 한 번의 recv가 command 전체를 반환한다는 보장이 없으므로
+    // protocol의 고정 packet 크기가 찰 때까지 조각을 누적한다.
     std::size_t received = 0;
     while (received < size && !stopped())
     {
+        // timeout마다 stopped 상태를 다시 확인해 영구 blocking을 피한다.
         pollfd descriptor{};
         descriptor.fd = fd;
         descriptor.events = POLLIN;
@@ -226,8 +240,10 @@ bool GuiReceiver::receive_exact(
     return received == size;
 }
 
+// 끊어지거나 잘못된 client 연결을 반납해 다음 receive에서 재접속을 받게 한다.
 void GuiReceiver::release_client(int fd)
 {
+    // receive thread와 stop thread 중 한쪽만 같은 FD를 닫도록 소유권을 회수한다.
     bool owns_fd = false;
     {
         PthreadLockGuard lock(socket_mutex_);
@@ -241,11 +257,14 @@ void GuiReceiver::release_client(int fd)
     if (owns_fd) close_socket(fd);
 }
 
+// 연결 관리, 고정 크기 수신, protocol 검증을 거쳐 command 하나를 반환한다.
 bool GuiReceiver::receive(GuiCommand& command)
 {
     if (!config_.enabled || stopped()) return false;
     if (!open_listener()) return false;
 
+    // 한 번 성공할 때마다 검증된 command 하나만 호출자에게 반환한다.
+    // 연결이 끊기면 listener는 유지한 채 client 재접속부터 다시 시작한다.
     std::array<std::uint8_t, kGuiCommandPacketSize> packet{};
     while (!stopped())
     {
@@ -266,6 +285,7 @@ bool GuiReceiver::receive(GuiCommand& command)
             continue;
         }
 
+        // network byte order 변환과 magic/version/type 검증은 protocol 계층에 맡긴다.
         if (!decode_gui_command(packet.data(), packet.size(), command))
         {
             // 고정 길이 protocol이 어긋나면 stream 경계를 복원할 수 없으므로
@@ -279,8 +299,11 @@ bool GuiReceiver::receive(GuiCommand& command)
     return false;
 }
 
+// 공유 FD 소유권을 회수한 뒤 socket 대기를 깨워 receive loop를 종료시킨다.
 void GuiReceiver::stop()
 {
+    // mutex 안에서는 공유 상태와 FD 소유권만 가져오고 실제 shutdown/close는
+    // lock 밖에서 수행해 대기 중인 receive thread와의 교착 가능성을 줄인다.
     int listener = -1;
     int client = -1;
     {

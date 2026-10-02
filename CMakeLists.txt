@@ -34,6 +34,24 @@ pkg_check_modules(
 
 
 # ==============================================================================
+# i3system Thermal Expert camera SDK
+# ==============================================================================
+
+option(
+    LWIR_ENABLE_I3_CAMERA
+    "i3system Thermal Expert camera SDK를 활성화합니다"
+    OFF
+)
+
+if(LWIR_ENABLE_I3_CAMERA)
+    include(cmake/I3System.cmake)
+    set(LWIR_CAMERA_SOURCE src/camera/camera.cpp)
+else()
+    set(LWIR_CAMERA_SOURCE src/camera/camera_stub.cpp)
+endif()
+
+
+# ==============================================================================
 # DEEPX / dx_app 설정
 # ==============================================================================
 
@@ -61,7 +79,7 @@ add_library(lwir_core
     src/app/app_config.cpp
 
     # 카메라
-    src/camera/camera.cpp
+    ${LWIR_CAMERA_SOURCE}
 
     # 객체 탐지
     src/detection/lwir_preprocessor.cpp
@@ -105,6 +123,13 @@ target_link_libraries(lwir_core
         ${OpenCV_LIBS}
 )
 
+if(LWIR_ENABLE_I3_CAMERA)
+    target_link_libraries(lwir_core
+        PRIVATE
+            i3system_dependency
+    )
+endif()
+
 if(LWIR_ENABLE_DX_APP)
     target_link_libraries(lwir_core
         PRIVATE
@@ -140,6 +165,24 @@ target_link_libraries(lwir_runtime
 include(CTest)
 
 if(BUILD_TESTING)
+
+    # --------------------------------------------------------------------------
+    # 실제 카메라 하드웨어 테스트
+    # --------------------------------------------------------------------------
+
+    if(LWIR_ENABLE_I3_CAMERA)
+        add_executable(
+            test_camera_capture
+            tests/camera/test_camera_capture.cpp
+        )
+        target_link_libraries(test_camera_capture PRIVATE lwir_core)
+        add_test(NAME camera_capture COMMAND test_camera_capture)
+        set_tests_properties(camera_capture PROPERTIES
+            LABELS "hardware;camera"
+            RESOURCE_LOCK i3_camera
+            TIMEOUT 30
+        )
+    endif()
 
     # --------------------------------------------------------------------------
     # 애플리케이션 테스트

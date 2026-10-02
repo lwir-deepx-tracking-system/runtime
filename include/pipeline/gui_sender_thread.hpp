@@ -6,9 +6,12 @@
 #include "common/track.hpp"
 #include "gui/gui_sender.hpp"
 
-// 최신 TrackingResult를 GuiSender에 전달하는 worker.
-// 실제 H.264/RTP/UDP 처리는 GuiSender가 소유하며, 이 thread는 queue의 오래된
-// 프레임이 네트워크 전송 책임과 섞이지 않도록 실행 흐름만 담당한다.
+// gui_track_queue의 TrackingResult를 소비해 GuiSender::send()로 넘기는 연결 worker.
+//
+// TrackingThread -> gui_track_queue -> GuiSenderThread -> GuiSender
+//
+// 영상 변환, H.264/RTP 송신, metadata 직렬화는 수행하지 않는다. 실제 네트워크
+// 처리는 GuiSender가 담당하고 이 클래스는 queue 소비와 pthread 수명만 관리한다.
 class GuiSenderThread
 {
 private:
@@ -25,6 +28,9 @@ public:
         GuiSender& sender,
         ThreadSafeQueue<TrackingResultPtr>& input_queue);
 
+    // queue 소비 worker를 한 번만 시작한다.
     void start();
+
+    // TrackingThread가 queue를 닫고 남은 결과가 처리될 때까지 기다린다.
     void join();
 };
