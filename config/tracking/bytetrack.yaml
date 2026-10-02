@@ -12,3 +12,4 @@ track_buffer: 30
 # low_threshold: 0.1          # 이 점수 초과 ~ track_threshold 미만은 2차 매칭에만 사용
 # new_track_threshold: 0.6    # 새 ID를 만드는 최소 점수 (기본: track_threshold + 0.1)
 # frame_rate: 30              # 실제 처리 fps. track_buffer를 이 비율로 환산한다
+fuse_score: true

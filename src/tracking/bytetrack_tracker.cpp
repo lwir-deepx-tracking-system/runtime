@@ -50,6 +50,7 @@ float iou(const Box& a, const Box& b)
 
 // cost[i][j] = 1 - IoU(tracks[i]의 예측 bbox, dets[j]의 검출 bbox)
 std::vector<std::vector<float>> iou_distance(
+
     const std::vector<STrackPtr>& tracks,
     const std::vector<STrackPtr>& dets)
 {
@@ -62,6 +63,12 @@ std::vector<std::vector<float>> iou_distance(
             cost[i][j] = 1.0f - iou(tb, dets[j]->det_tlwh);
     }
     return cost;
+}
+void fuse_score(std::vector<std::vector<float>>& cost, const std::vector<STrackPtr>& dets)
+{
+    for (auto& row : cost)
+        for (size_t j = 0; j < dets.size(); ++j)
+            row[j] = 1.0f - (1.0f - row[j]) * dets[j]->score;
 }
 
 // Hungarian 알고리즘 (n <= m). 반환: 행 i에 배정된 열 번호
@@ -267,7 +274,8 @@ ByteTrackConfig load_bytetrack_config(const std::string& path)
     // 오타로 값이 조용히 무시되지 않도록 모르는 키는 오류로 처리한다.
     const std::set<std::string> known = {
         "track_threshold", "match_threshold", "track_buffer",
-        "low_threshold", "new_track_threshold", "frame_rate"};
+        "low_threshold", "new_track_threshold", "frame_rate",
+    "fuse_score"};
     for (const auto& kv : root)
     {
         const std::string key = kv.first.as<std::string>();
@@ -309,6 +317,19 @@ ByteTrackConfig load_bytetrack_config(const std::string& path)
             throw std::runtime_error(where + "'" + key + "' 값이 정수가 아닙니다");
         }
     };
+    auto read_bool = [&](const char* key, bool fallback)
+    {
+        if (!root[key])
+            return fallback;                // 키가 없으면 기본값 (선택 키)
+        try
+        {
+            return root[key].as<bool>();
+        }
+        catch (const YAML::Exception&)
+        {
+            throw std::runtime_error(where + "'" + key + "' 값은 true 또는 false여야 합니다");
+        }
+    };
 
     ByteTrackConfig c;
     c.track_thresh = read_float("track_threshold", true, c.track_thresh);
@@ -318,6 +339,7 @@ ByteTrackConfig load_bytetrack_config(const std::string& path)
     c.new_track_thresh = read_float(
         "new_track_threshold", false, std::min(c.track_thresh + 0.1f, 1.0f));
     c.frame_rate = read_int("frame_rate", false, c.frame_rate);
+    c.fuse_score = read_bool("fuse_score", c.fuse_score);
 
     auto require = [&](bool ok, const std::string& message)
     {
@@ -447,9 +469,11 @@ std::vector<Track> ByteTrackTracker::track(
     };
 
     // 3-1. 1차 Association: 모든 Track ↔ high detection
+    auto cost1 = iou_distance(pool, high_dets);
+    if (config_.fuse_score)
+        fuse_score(cost1, high_dets);
     const auto m1 = linear_assignment(
-        iou_distance(pool, high_dets), pool.size(), high_dets.size(),
-        config_.match_thresh);
+        cost1, pool.size(), high_dets.size(), config_.match_thresh);
     for (const auto& [r, c] : m1.matches)
         on_match(pool[r], high_dets[c]);
 
@@ -480,9 +504,11 @@ std::vector<Track> ByteTrackTracker::track(
     for (size_t c : m1.unmatched_cols)
         remain_high.push_back(high_dets[c]);
 
+    auto cost3 = iou_distance(unconfirmed, remain_high);
+    if (config_.fuse_score)
+        fuse_score(cost3, remain_high);
     const auto m3 = linear_assignment(
-        iou_distance(unconfirmed, remain_high), unconfirmed.size(),
-        remain_high.size(), 0.7f);
+        cost3, unconfirmed.size(), remain_high.size(), 0.7f);
     for (const auto& [r, c] : m3.matches)
     {
         apply_detection(*unconfirmed[r], *remain_high[c]);

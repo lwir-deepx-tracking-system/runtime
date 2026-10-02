@@ -18,6 +18,7 @@ struct ByteTrackConfig
     float match_thresh = 0.8f;      // 1차 매칭에서 허용하는 최대 IoU distance (1 - IoU)
     int track_buffer = 30;          // 놓친 Track을 유지하는 프레임 수 (30fps 기준)
     int frame_rate = 30;
+    bool fuse_score = false;  // true: 1차·미확정 매칭 비용에 검출 점수를 곱함 (공식 ByteTrack MOT17 설정)
 };
 
 // ByteTrack 설정 YAML을 읽고 값의 범위를 검증한다.
