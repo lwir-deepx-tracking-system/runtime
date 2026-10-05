@@ -46,112 +46,99 @@ Camera에서 만든 `FrameContext`는 복사하지 않고 `shared_ptr`로 Detect
 
 Detection은 `DxAppDetectionPipeline` 한 객체가 전처리, 추론, 후처리를 소유합니다. 별도의 preprocess/inference/postprocess thread는 사용하지 않습니다.
 
-## 빠른 시작
+## Applications
 
-CPU-only 빌드와 테스트는 저장소 루트에서 한 명령으로 실행합니다.
+### Runtime
 
-```bash
-./scripts/verify_cpu.sh
-```
+실시간 Camera → Detection → Tracking → Target Selection → Control / GUI 전체 파이프라인을 실행합니다.
 
-실행 파일은 다음과 같이 시작합니다.
+### Capture
 
-```bash
-./build/cpu/lwir_runtime
-```
+LWIR 카메라 프레임을 Benchmark용 데이터셋으로 저장합니다.
 
-기본 설정 파일은 `config/runtime.yaml`입니다. 다른 설정을 사용하려면 경로를 전달합니다.
+### Benchmark
 
-```bash
-./build/cpu/lwir_runtime config/local/runtime.yaml
-```
+저장된 데이터셋으로 Detection / Tracking 성능을 평가합니다.
 
-## Docker 사용
-
-프로젝트 이미지를 만들고 컨테이너를 엽니다.
+## Build & Run
 
 ```bash
-docker compose build runtime-pc
-docker compose run --rm runtime-pc
+# Capture
+./scripts/build_capture.sh
+./build/capture/lwir_capture
+
+# Benchmark
+./scripts/build_benchmark.sh
+./build/benchmark/lwir_benchmark
+
+# Runtime
+./scripts/build_runtime.sh
+./build/runtime/lwir_runtime
+
+# Test
+./scripts/test.sh
 ```
 
-컨테이너 안에서는 동일하게 검증 스크립트를 실행합니다.
+Runtime과 Benchmark는 DEEPX 환경을 사용합니다. Capture와 Runtime은 실제 LWIR
+카메라 입력을 사용하며, Docker는 개발 및 테스트 환경을 구성할 때 사용할 수 있습니다.
 
-```bash
-./scripts/verify_cpu.sh
+## Dataset
+
+Capture가 생성하는 데이터셋은 sequence 단위로 구성합니다.
+
+```text
+datasets/
+├── seq_001/
+│   ├── images/
+│   │   ├── 000001.png
+│   │   ├── 000002.png
+│   │   └── ...
+│   ├── gt.txt
+│   └── sequence.yaml
+├── seq_002/
+└── ...
 ```
 
-Docker 기반 이미지는 기본적으로 `dx-runtime:dxas-5749ab70-ubuntu22.04`를 사용합니다. 다른 이미지는 `.env.example`의 `DX_RUNTIME_IMAGE`를 설정해 지정할 수 있습니다.
+`images/`
 
-## DEEPX dx_app 연동
+- TE-EV1에서 저장한 16-bit LWIR PNG frame
 
-공식 `DEEPX-AI/dx_app`은 `third_party/dx_app` submodule로 고정되어 있습니다.
+`sequence.yaml`
 
-```bash
-git submodule update --init --recursive
-cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON
-cmake --build build -j
+- 촬영 sequence의 조건 및 metadata
+- distance, person count, motion, temperature, frame count, image resolution
+
+`gt.txt`
+
+- Benchmark용 Ground Truth
+- frame, person_id, bounding box 정보
+- Capture 직후 생성되는 것이 아니라 annotation 후 추가
+
+## Capture → Benchmark
+
+```text
+Capture
+  ↓
+16-bit LWIR Images + Sequence Metadata
+  ↓
+Annotation
+  ↓
+Ground Truth
+  ↓
+Benchmark
+  ↓
+Detection / Tracking Evaluation
 ```
 
-외부 dx_app 체크아웃을 사용하려면 다음 옵션을 추가합니다.
+Benchmark는 설정된 dataset root 아래의 여러 sequence를 읽습니다. Dataset root는
+프로젝트 내부의 `datasets/` 또는 외부 저장장치의 `/mnt/lwir_data/datasets/`를 사용할
+수 있습니다.
 
-```bash
-cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON -DDX_APP_ROOT=/path/to/dx_app
-```
+## Configuration
 
-현재 CPU-only 빌드에서는 LWIR 전처리와 pipeline 경계만 검증합니다. DXNN 로딩, NPU 추론, tensor 검증과 성능 측정은 실제 DEEPX 장치에서 추가 검증해야 합니다. 가짜 추론 결과는 생성하지 않습니다.
-
-## i3system 카메라 연동
-
-Orange Pi에서 `/usr/local/include/i3system`과 `/usr/local/lib`에 설치된 Thermal
-Expert SDK를 사용하려면 카메라 옵션을 활성화합니다.
-
-```bash
-cmake -S . -B build/orangepi \
-    -DLWIR_ENABLE_I3_CAMERA=ON \
-    -DI3SYSTEM_ROOT=/usr/local \
-    -DLWIR_ENABLE_DX_APP=ON
-cmake --build build/orangepi -j
-```
-
-SDK를 다른 위치에 설치했다면 `I3SYSTEM_ROOT`를 해당 설치 루트로 지정합니다.
-CPU-only 빌드는 기본값인 `LWIR_ENABLE_I3_CAMERA=OFF`를 사용하며 실제 프레임을
-생성하지 않습니다.
-
-카메라가 연결된 Orange Pi에서는 실제 프레임이 CameraThread queue까지 들어오는지
-하드웨어 테스트를 실행할 수 있습니다.
-
-```bash
-ctest --test-dir build/orangepi -R camera_capture --output-on-failure
-```
-
-이 테스트는 `CV_16UC1`, 640x480, 연속 메모리, 최초 frame ID와 capture timestamp를
-검증하며 실제 카메라가 없으면 실패합니다.
-
-## 설정
-
-- `config/runtime.yaml`: Detection, ByteTrack, Control, GUI, 측정 설정
-- `config/model/yolov8n.yaml`: LWIR 입력 범위, 모델 입력 크기, letterbox와 후처리 설정
-
-모델별 값만 `config/model/*.yaml`에 분리하고 나머지 실행 설정은
-`config/runtime.yaml`에서 관리합니다. YAML 파싱과 검증은 모두 `AppConfig`가
-담당하며 각 처리 컴포넌트는 검증된 typed config만 전달받습니다. Detection 결과
-좌표는 원본 LWIR 프레임 기준이어야 합니다.
-
-GUI 설정도 `config/runtime.yaml`의 `gui` 항목에서 관리합니다.
-
-- `gui.video`: bbox가 그려지지 않은 H.264/RTP/UDP 영상
-- `gui.metadata`: `frame_id`, Track ID와 원본 좌표 bbox를 보내는 별도 UDP 채널
-- `gui.command`: GUI가 선택한 Track ID를 받는 TCP 채널
-
-GUI 컴포넌트는 YAML을 직접 읽지 않고 `AppConfig::gui`로 전달된 검증 완료
-설정만 사용합니다.
-
-현재 송신 구현은 GStreamer `x264enc` 소프트웨어 encoder를 사용합니다. GUI
-장치의 IP는 `gui.video.host`, 영상 UDP 포트는 `gui.video.port`, Orange Pi의
-metadata UDP 포트는 `gui.metadata.port`, 명령 TCP listen 포트는
-`gui.command.port`에서 변경합니다. Orange Pi 전용 하드웨어 H.264 encoder는
-장치의 GStreamer plugin을 확인한 뒤 추가해야 합니다.
+Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yaml`,
+`config/benchmark.yaml` 설정을 사용합니다. 모델 관련 설정은 `config/model/` 아래의
+별도 model configuration으로 관리하며 실행 파라미터는 YAML에서 변경합니다.
 
 ## 현재 구현 상태
 
@@ -165,57 +152,10 @@ metadata UDP 포트는 `gui.metadata.port`, 명령 TCP listen 포트는
 
 전체 흐름은 `docs/pipeline.html`, 논의가 필요한 항목은 `discussion.md`에서 확인할 수 있습니다.
 
-## 테스트 실행
-
-테스트를 포함해 빌드하려면 `BUILD_TESTING=ON`으로 설정합니다.
+## Test
 
 ```bash
-cmake -S . -B build/test \
-    -DBUILD_TESTING=ON \
-    -DLWIR_ENABLE_I3_CAMERA=OFF \
-    -DLWIR_ENABLE_DX_APP=OFF
-
-cmake --build build/test -j
+./scripts/test.sh
 ```
 
-등록된 테스트 목록은 다음 명령으로 확인합니다.
-
-```bash
-ctest --test-dir build/test -N
-```
-
-전체 테스트를 실행합니다.
-
-```bash
-ctest --test-dir build/test --output-on-failure
-```
-
-특정 영역의 테스트만 실행할 수도 있습니다.
-
-```bash
-# ByteTrack 테스트
-ctest --test-dir build/test -R bytetrack --output-on-failure
-
-# Detection 테스트
-ctest --test-dir build/test -R detection --output-on-failure
-
-# LWIR 전처리 테스트
-ctest --test-dir build/test -R lwir_preprocessor --output-on-failure
-
-# Target Selector 테스트
-ctest --test-dir build/test -R target_selector --output-on-failure
-
-# Shared Frame 파이프라인 테스트
-ctest --test-dir build/test -R shared_frame_pipeline --output-on-failure
-```
-
-테스트가 필요하지 않은 일반 빌드에서는 다음과 같이 비활성화할 수 있습니다.
-
-```bash
-cmake -S . -B build/cpu \
-    -DBUILD_TESTING=OFF \
-    -DLWIR_ENABLE_I3_CAMERA=OFF \
-    -DLWIR_ENABLE_DX_APP=OFF
-
-cmake --build build/cpu -j
-```
+필요하면 생성된 `build/test` 디렉터리에서 특정 CTest만 직접 실행할 수 있습니다.

@@ -4,7 +4,7 @@
 
 #include <sys/socket.h>
 
-#include "app/app_config.hpp"
+#include "config/app_config.hpp"
 #include "common/track.hpp"
 
 struct _GstAppSrc;

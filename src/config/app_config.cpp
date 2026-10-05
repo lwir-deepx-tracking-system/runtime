@@ -1,4 +1,4 @@
-#include "app/app_config.hpp"
+#include "config/app_config.hpp"
 #include "common/logger.hpp"
 
 #include <limits>
@@ -16,6 +16,9 @@ T required(const YAML::Node& node, const char* key, const std::string& path)
         throw std::runtime_error("invalid configuration: " + path + "." + key + " (" + e.what() + ")");
     }
 }
+}  // namespace
+
+namespace config_parser {
 
 // yaml-cpp 예외가 파일 경로를 잃지 않도록 runtime 오류로 변환한다.
 YAML::Node load_yaml(const std::string& path)
@@ -24,6 +27,14 @@ YAML::Node load_yaml(const std::string& path)
     catch (const YAML::Exception& e) {
         throw std::runtime_error("cannot read configuration " + path + ": " + e.what());
     }
+}
+
+std::string required_string(
+    const YAML::Node& node,
+    const char* key,
+    const std::string& path)
+{
+    return required<std::string>(node, key, path);
 }
 
 GuiVideoCodec parse_gui_video_codec(const std::string& value)
@@ -153,12 +164,89 @@ GuiConfig load_gui_config(const YAML::Node& node)
         throw std::runtime_error("gui.command.receive_timeout_ms must be positive");
     return c;
 }
+
+BenchmarkPathConfig load_benchmark_path_config(const YAML::Node& node)
+{
+    BenchmarkPathConfig c{};
+
+    c.dataset_root = required<std::string>(
+        node, "dataset_root", "path");
+
+    c.output_root = required<std::string>(
+        node, "output_root", "path");
+
+    if (c.dataset_root.empty())
+        throw std::runtime_error("path.dataset_root must not be empty");
+
+    if (c.output_root.empty())
+        throw std::runtime_error("path.output_root must not be empty");
+
+    return c;
 }
+
+CaptureDatasetConfig load_capture_dataset_config(const YAML::Node& node)
+{
+    CaptureDatasetConfig c{};
+
+    c.root = required<std::string>(
+        node, "root", "dataset");
+
+    if (c.root.empty())
+        throw std::runtime_error("dataset.root must not be empty");
+
+    return c;
+}
+
+CaptureSequenceConfig load_capture_sequence_config(const YAML::Node& node)
+{
+    CaptureSequenceConfig c{};
+
+    c.id = required<std::string>(
+        node, "id", "sequence");
+
+    if (c.id.empty())
+        throw std::runtime_error("sequence.id must not be empty");
+
+    return c;
+}
+
+CaptureConditionConfig load_capture_condition_config(const YAML::Node& node)
+{
+    CaptureConditionConfig c{};
+
+    c.distance_m = required<float>(
+        node, "distance_m", "condition");
+
+    c.person_count = required<int>(
+        node, "person_count", "condition");
+
+    c.motion = required<std::string>(
+        node, "motion", "condition");
+
+    c.temperature_c = required<float>(
+        node, "temperature_c", "condition");
+
+    if (c.distance_m <= 0.0F)
+        throw std::runtime_error(
+            "condition.distance_m must be positive");
+
+    if (c.person_count <= 0)
+        throw std::runtime_error(
+            "condition.person_count must be positive");
+
+    if (c.motion.empty())
+        throw std::runtime_error(
+            "condition.motion must not be empty");
+
+    return c;
+}
+
+}  // namespace config_parser
 
 // 모델 YAML 전체를 typed config로 변환한다.
 ModelConfig load_model_config(const std::string& path)
 {
-    const YAML::Node root = load_yaml(path);
+    const YAML::Node root = config_parser::load_yaml(path);
     ModelConfig c;
     c.name = required<std::string>(root["model"], "name", "model");
     c.path = required<std::string>(root["model"], "path", "model");
@@ -198,24 +286,3 @@ ModelConfig load_model_config(const std::string& path)
     return c;
 }
 
-// runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
-AppConfig load_config(const std::string& path)
-{
-    const YAML::Node root = load_yaml(path);
-    AppConfig c;
-    c.logging = load_logging_config(root["logging"]);
-    Logger::set_level(c.logging.level);
-
-    c.model_config_path = required<std::string>(root["model"], "config", "model");
-    if (c.model_config_path.empty())
-        throw std::runtime_error("model.config must not be empty");
-    c.model = load_model_config(c.model_config_path);
-
-    c.detection = load_detection_config(root["detection"]);
-    c.tracking = load_tracking_config(root["tracking"]);
-    c.control = load_control_config(root["control"]);
-    c.measurement = load_measurement_config(root["measurement"]);
-    c.gui = load_gui_config(root["gui"]);
-    Logger::info("[Config] runtime and model configuration loaded");
-    return c;
-}

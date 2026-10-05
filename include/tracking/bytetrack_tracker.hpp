@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-#include "app/app_config.hpp"
+#include "config/app_config.hpp"
 #include "tracking/kalman_filter.hpp"
 #include "tracking/tracker.hpp"
 

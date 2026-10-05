@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "app/app_config.hpp"
+#include "config/app_config.hpp"
 #include "common/detection.hpp"
 #include "common/frame.hpp"
 #include "detection/lwir_preprocessor.hpp"

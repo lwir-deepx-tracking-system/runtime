@@ -1,9 +1,9 @@
-#include "app/app_config.hpp"
+#include "runtime/runtime.hpp"
 
 // 공용 YAML이 runtime에서 지원하는 Detection 및 LWIR 계약으로 파싱되는지 확인한다.
 int main()
 {
-    const AppConfig config = load_config("config/runtime.yaml");
+    const RuntimeConfig config = load_runtime_config("config/runtime.yaml");
 
     // runtime.yaml의 모델 경로와 고정 Detection 실행 설정 검증.
     if (config.model_config_path != "config/model/yolov8n.yaml" ||

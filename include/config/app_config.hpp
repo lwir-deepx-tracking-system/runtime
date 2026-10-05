@@ -5,6 +5,11 @@
 #include <string>
 #include <vector>
 
+namespace YAML
+{
+class Node;
+}
+
 // runtime.yaml에서 읽는 실행 단계별 설정.
 struct LoggingConfig {
     std::string level;
@@ -118,20 +123,57 @@ struct ModelConfig {
     ModelPostprocessConfig postprocess;
 };
 
-// runtime.yaml과 연결된 모델 YAML을 합친 최상위 설정.
-struct AppConfig {
-    LoggingConfig logging;
-    std::string model_config_path;
-    ModelConfig model;
-    DetectionConfig detection;
-    TrackingConfig tracking;
-    ControlConfig control;
-    MeasurementConfig measurement;
-    GuiConfig gui;
+/********** Benchmark 어플리케이션에서 사용하는 데이터셋 경로와 출력 경로 설정  ***********/
+
+struct BenchmarkPathConfig
+{
+    std::string dataset_root;
+    std::string output_root;
 };
 
-// runtime 설정을 읽고 참조한 모델 설정까지 함께 검증한다.
-AppConfig load_config(const std::string& config_path);
 
-// 모델별 입출력·전후처리 설정을 읽고 지원 범위를 검증한다.
+/********** Capture 어플리케이션에서 사용하는 설정 ***********/
+
+// 촬영 데이터가 저장될 최상위 경로
+struct CaptureDatasetConfig
+{
+    std::string root;
+};
+
+// 이번 촬영 Sequence 식별자
+struct CaptureSequenceConfig
+{
+    std::string id;
+};
+
+// 이번 촬영의 실험 조건
+struct CaptureConditionConfig
+{
+    float distance_m = 0.0F;
+    int person_count = 0;
+    std::string motion;
+    float temperature_c = 0.0F;
+};
+
+
 ModelConfig load_model_config(const std::string& config_path);
+
+namespace config_parser
+{
+YAML::Node load_yaml(const std::string& path);
+std::string required_string(
+    const YAML::Node& node,
+    const char* key,
+    const std::string& path);
+
+LoggingConfig load_logging_config(const YAML::Node& node);
+DetectionConfig load_detection_config(const YAML::Node& node);
+TrackingConfig load_tracking_config(const YAML::Node& node);
+ControlConfig load_control_config(const YAML::Node& node);
+MeasurementConfig load_measurement_config(const YAML::Node& node);
+GuiConfig load_gui_config(const YAML::Node& node);
+BenchmarkPathConfig load_benchmark_path_config(const YAML::Node& node);
+CaptureDatasetConfig load_capture_dataset_config(const YAML::Node& node);
+CaptureSequenceConfig load_capture_sequence_config(const YAML::Node& node);
+CaptureConditionConfig load_capture_condition_config(const YAML::Node& node);
+}

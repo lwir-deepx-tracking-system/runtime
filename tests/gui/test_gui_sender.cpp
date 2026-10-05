@@ -8,7 +8,7 @@
 
 #include <opencv2/core.hpp>
 
-#include "app/app_config.hpp"
+#include "config/app_config.hpp"
 #include "common/frame.hpp"
 #include "common/track.hpp"
 #include "gui/gui_protocol.hpp"

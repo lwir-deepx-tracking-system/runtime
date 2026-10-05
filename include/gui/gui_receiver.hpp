@@ -5,7 +5,7 @@
 
 #include <pthread.h>
 
-#include "app/app_config.hpp"
+#include "config/app_config.hpp"
 #include "gui/gui_protocol.hpp"
 
 // PC GUI -> Orange Pi 방향의 Track 선택 명령을 TCP로 수신한다.

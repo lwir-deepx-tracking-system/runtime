@@ -1,9 +1,25 @@
-#include "app/application.hpp"
+#include "runtime.hpp"
 #include "common/logger.hpp"
+#include "common/frame.hpp"
+#include "common/threadsafequeue.hpp"
+#include "common/detection.hpp"
+#include "common/track.hpp"
 
-#include "app/app_config.hpp"
 #include "detection/dxapp_detection_pipeline.hpp"
 #include "tracking/bytetrack_tracker.hpp"
+
+#include "camera/camera.hpp"
+#include "gui/gui_receiver.hpp"
+#include "gui/gui_sender.hpp"
+#include "target/target_selector.hpp"
+#include "tracking/tracker.hpp"
+
+#include "pipeline/camera_thread.hpp"
+#include "pipeline/detection_thread.hpp"
+#include "pipeline/tracking_thread.hpp"
+#include "pipeline/control_thread.hpp"
+#include "pipeline/gui_receiver_thread.hpp"
+#include "pipeline/gui_sender_thread.hpp"
 
 #include <chrono>
 #include <ctime>
@@ -12,8 +28,36 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <memory>
+#include <string>
+#include <vector>
+#include <yaml-cpp/yaml.h>
+
 
 namespace fs = std::filesystem;
+
+// runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
+RuntimeConfig load_runtime_config(const std::string& path)
+{
+    const YAML::Node root = config_parser::load_yaml(path);
+    RuntimeConfig c;
+    c.logging = config_parser::load_logging_config(root["logging"]);
+    Logger::set_level(c.logging.level);
+
+    c.model_config_path = config_parser::required_string(
+        root["model"], "config", "model");
+    if (c.model_config_path.empty())
+        throw std::runtime_error("model.config must not be empty");
+    c.model = load_model_config(c.model_config_path);
+
+    c.detection = config_parser::load_detection_config(root["detection"]);
+    c.tracking = config_parser::load_tracking_config(root["tracking"]);
+    c.control = config_parser::load_control_config(root["control"]);
+    c.measurement = config_parser::load_measurement_config(root["measurement"]);
+    c.gui = config_parser::load_gui_config(root["gui"]);
+    Logger::info("[Config] runtime and model configuration loaded");
+    return c;
+}
 
 // 종료된 worker의 측정값을 한 CSV에 모은다.
 static void append_metrics(
@@ -33,33 +77,93 @@ static void append_metrics(
     }
 }
 
+
+// 프로그램의 구성 요소를 생성하고
+// Pipeline 실행을 관리하는 최상위 Application 클래스
+class RuntimeApplication
+{
+private:
+    // Camera의 shared FrameContext를 Detection으로 전달
+    ThreadSafeQueue<FrameMessage> frame_queue_;
+
+    // Detection 목록 다음 Stage로 전달
+    ThreadSafeQueue<DetectionResult> detection_queue_;
+
+    // 같은 TrackingResult를 제어와 GUI 경로가 공유한다.
+    ThreadSafeQueue<TrackingResultPtr> control_track_queue_;
+    ThreadSafeQueue<TrackingResultPtr> gui_track_queue_;
+
+    std::string config_path_;
+    std::vector<std::string> config_snapshot_paths_;
+    bool measurement_enabled_ = false;
+
+/************************************************************************/
+    // Camera 객체
+    std::unique_ptr<Camera> camera_;
+
+    // Camera pthread
+    std::unique_ptr<CameraThread> camera_thread_;
+
+    // DX 전처리, 추론, 후처리를 소유하는 통합 Detection 단계
+    std::unique_ptr<DetectionPipeline> detection_pipeline_;
+    std::unique_ptr<DetectionThread> detection_thread_;
+
+    // 현재 사용하는 Tracker 객체를 Application이 소유한다.
+    std::unique_ptr<Tracker> tracker_;
+
+    // Tracking pthread
+    std::unique_ptr<TrackingThread> tracking_thread_;
+
+    TargetSelector target_selector_;
+
+    GimbalController gimbal_controller_;
+    std::unique_ptr<ControlThread> control_thread_;
+
+    // Application이 GUI 통신 객체의 전체 수명을 소유한다. Sender 내부의
+    // GStreamer pipeline과 Receiver 내부의 TCP socket은 각 객체가 RAII로
+    // 정리하고, worker는 실행 thread만 담당한다.
+    std::unique_ptr<GuiSender> gui_sender_;
+    std::unique_ptr<GuiSenderThread> gui_sender_thread_;
+    std::unique_ptr<GuiReceiver> gui_receiver_;
+    std::unique_ptr<GuiReceiverThread> gui_receiver_thread_;
+
+
+public:
+    // YAML 설정을 읽고 필요한 객체를 생성
+    explicit RuntimeApplication(const std::string& config_path);
+
+    // Pipeline Worker 실행
+    void run();
+};
+
+
 // YAML을 읽고 설정에 맞는 Component들을 생성한다.
-Application::Application(const std::string& config_path)
+RuntimeApplication::RuntimeApplication(const std::string& config_path)
     : config_path_(config_path)
 {
     // YAML 로그 레벨을 먼저 적용한 뒤 초기 큐 상태를 출력한다.
-    AppConfig config = load_config(config_path);
+    RuntimeConfig config = load_runtime_config(config_path);
     measurement_enabled_ = config.measurement.enabled;
 
-    Logger::debug("[Application] 큐 생성 완료");
+    Logger::debug("[RuntimeApplication] 큐 생성 완료");
 
     Logger::debug(
-        "[Application] frame_queue 크기: " +
+        "[RuntimeApplication] frame_queue 크기: " +
         std::to_string(frame_queue_.size())
     );
 
     Logger::debug(
-        "[Application] detection_queue 크기: " +
+        "[RuntimeApplication] detection_queue 크기: " +
         std::to_string(detection_queue_.size())
     );
 
     Logger::debug(
-        "[Application] control_track_queue 크기: " +
+        "[RuntimeApplication] control_track_queue 크기: " +
         std::to_string(control_track_queue_.size())
     );
 
     Logger::debug(
-        "[Application] gui_track_queue 크기: " +
+        "[RuntimeApplication] gui_track_queue 크기: " +
         std::to_string(gui_track_queue_.size())
     );
 
@@ -136,7 +240,7 @@ Application::Application(const std::string& config_path)
 }
 
 // Pipeline Worker를 실행한다.
-void Application::run()
+void RuntimeApplication::run()
 {
     // 수신기는 pipeline보다 먼저 열어 GUI가 언제든 선택 명령을 보낼 수 있게
     // 하고, 송신기는 Tracking 결과 queue를 기다리도록 먼저 시작한다.
@@ -208,4 +312,11 @@ void Application::run()
         throw std::runtime_error("metrics.csv 파일을 저장하지 못했습니다");
 
     Logger::info("[Measurement] 측정 결과 저장 완료: " + result_dir.string());
+}
+
+int run_runtime(const std::string& config_path)
+{
+    RuntimeApplication app(config_path);
+    app.run();
+    return 0;
 }

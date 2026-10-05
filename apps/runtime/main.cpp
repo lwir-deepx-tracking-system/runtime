@@ -1,6 +1,7 @@
 #include <string>
 
-#include "app/application.hpp"
+#include "runtime.hpp"
+
 
 int main(int argc, char* argv[])
 {
@@ -9,11 +10,5 @@ int main(int argc, char* argv[])
     const std::string config_path =
         argc > 1 ? argv[1] : "config/runtime.yaml";
 
-    // 설정 파일을 기반으로 Application 구성
-    Application app(config_path);
-
-    // Pipeline 실행
-    app.run();
-
-    return 0;
+    return run_runtime(config_path);
 }
