@@ -275,7 +275,7 @@ ByteTrackConfig load_bytetrack_config(const std::string& path)
     const std::set<std::string> known = {
         "track_threshold", "match_threshold", "track_buffer",
         "low_threshold", "new_track_threshold", "frame_rate",
-    "fuse_score"};
+    "fuse_score", "lost_output_frames"};
     for (const auto& kv : root)
     {
         const std::string key = kv.first.as<std::string>();
@@ -340,6 +340,7 @@ ByteTrackConfig load_bytetrack_config(const std::string& path)
         "new_track_threshold", false, std::min(c.track_thresh + 0.1f, 1.0f));
     c.frame_rate = read_int("frame_rate", false, c.frame_rate);
     c.fuse_score = read_bool("fuse_score", c.fuse_score);
+    c.lost_output_frames = read_int("lost_output_frames", false, c.lost_output_frames);
 
     auto require = [&](bool ok, const std::string& message)
     {
@@ -356,6 +357,7 @@ ByteTrackConfig load_bytetrack_config(const std::string& path)
             "match_threshold는 0 초과 1 이하여야 합니다 (1 - IoU 기준)");
     require(c.track_buffer >= 1, "track_buffer는 1 이상이어야 합니다");
     require(c.frame_rate >= 1, "frame_rate는 1 이상이어야 합니다");
+    require(c.lost_output_frames >= 0, "lost_output_frames는 0 이상이어야 합니다");
     return c;
 }
 
@@ -459,6 +461,17 @@ std::vector<Track> ByteTrackTracker::track(
             t->kf.mean[7] = 0.0;  // 놓친 Track은 높이 변화 속도를 멈춘다
         kalman_.predict(t->kf);
     }
+
+    // 2-1. 카메라 움직임 보정 (CMC): 예측 위치를 카메라가 움직인 만큼 옮긴다.
+    //      미확정 Track은 예측하지 않지만 위치는 같이 옮겨야 다음 검출과 겹친다.
+    if (!camera_motion_.is_identity())
+    {
+        for (auto& t : pool)
+            apply_camera_motion(t->kf, camera_motion_);
+        for (auto& t : unconfirmed)
+            apply_camera_motion(t->kf, camera_motion_);
+    }
+    camera_motion_ = CameraMotion{};
 
     std::vector<STrackPtr> activated, refind, lost_new, removed;
     auto on_match = [&](const STrackPtr& t, const STrackPtr& det)
@@ -573,6 +586,21 @@ std::vector<Track> ByteTrackTracker::track(
         out.confidence = t->score;
         tracks.push_back(out);
     }
+    for (const auto& t : lost_stracks_)
+    {
+        if (!t->is_activated || frame_id_ - t->frame_id > config_.lost_output_frames)
+           continue;
+        const Box b = track_box(*t);
+        Track out;
+        out.track_id = t->track_id;
+        out.x = b[0];
+        out.y = b[1];
+        out.width = b[2];
+        out.height = b[3];
+        out.class_id = t->class_id;
+        out.confidence = t->score;
+        tracks.push_back(out);
+    }
     return tracks;
 }
 
@@ -583,6 +611,7 @@ void ByteTrackTracker::reset()
     tracked_stracks_.clear();
     lost_stracks_.clear();
     frame_id_ = 0;
+    camera_motion_ = CameraMotion{};
     next_track_id_ = 0;
 
     Logger::info(

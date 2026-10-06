@@ -21,6 +21,9 @@
   detections.csv : frame_id, x, y, width, height, confidence, class_id, gt_id
   frames.csv     : Tracker를 호출하는 프레임 (fd 항목은 누락된 프레임이 빠져 있음)
   expected.txt   : ideal_idsw, ideal_false, ideal_missed  (완벽한 Tracker라면 나와야 할 값)
+  camera.csv     : frame_id, cam_x, cam_y  (Tracker를 호출하는 프레임의 카메라 위치, px)
+                   정지 프레임은 영상이 멈춰 있으므로 직전 위치를 그대로 쓴다.
+                   직전 호출 대비 화면 이동 = -(현재 cam - 직전 cam). CMC 검증용 정답 움직임
   README.txt     : 상황 설명
   baseline.txt   : 현재 ByteTrack 결과 (test_bytetrack_limits --update-baseline 으로 기록)
 
@@ -84,6 +87,7 @@ def build(name, n_frames, objs, note, cam=None, drop=(), freeze=(), jitter=0.0, 
     drop, freeze = set(drop), set(freeze)
     rows, frames, last_shown = [], [], {}
     first_seen = {}
+    img_cam, cams = (0.0, 0.0), []   # 영상에 반영된 카메라 위치 (정지 프레임에서는 갱신 안 됨)
 
     for f in range(1, n_frames + 1):
         # 영상이 정지한 프레임은 직전에 보인 박스를 그대로 반복한다
@@ -92,6 +96,7 @@ def build(name, n_frames, objs, note, cam=None, drop=(), freeze=(), jitter=0.0, 
         else:
             shown = {}
             dx, dy = cam(f)
+            img_cam = (dx, dy)
             for o in objs:
                 end = o.end if o.end is not None else n_frames
                 if not (o.start <= f <= end):
@@ -104,6 +109,7 @@ def build(name, n_frames, objs, note, cam=None, drop=(), freeze=(), jitter=0.0, 
         if f in drop:
             continue  # 처리가 밀려 Tracker가 이 프레임을 받지 못함
         frames.append(f)
+        cams.append((f, img_cam))
         for gid, ((x, y, w, h), s) in sorted(shown.items()):
             first_seen.setdefault(gid, f)
             rows.append([f, x, y, w, h, s, 0, gid])
@@ -129,6 +135,8 @@ def build(name, n_frames, objs, note, cam=None, drop=(), freeze=(), jitter=0.0, 
                         [f"{v:.1f}" for v in gt])
     with open(os.path.join(out, "frames.csv"), "w", newline="") as fh:
         fh.write("frame_id\n" + "".join(f"{i}\n" for i in frames))
+    with open(os.path.join(out, "camera.csv"), "w", newline="") as fh:
+        fh.write("frame_id,cam_x,cam_y\n" + "".join(f"{i},{x:.3f},{y:.3f}\n" for i, (x, y) in cams))
     with open(os.path.join(out, "expected.txt"), "w") as fh:
         fh.write(f"ideal_idsw=0\nideal_false=0\nideal_missed={ideal_missed}\n")
     with open(os.path.join(out, "README.txt"), "w") as fh:

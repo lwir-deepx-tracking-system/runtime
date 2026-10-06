@@ -38,6 +38,8 @@
 //   test_bytetrack_limits gr_                 이름에 "gr_"가 들어간 케이스만
 //   test_bytetrack_limits -v fd_02            한 케이스를 프레임별로 출력
 //   test_bytetrack_limits --update-baseline   현재 결과를 baseline.txt에 기록
+//   test_bytetrack_limits --cmc               camera.csv의 정답 카메라 움직임으로 CMC를 켜고 실행
+//                                             (기준선은 CMC 없는 값이므로 좋아지면 IMPROVED로 표시)
 
 namespace fs = std::filesystem;
 
@@ -101,7 +103,24 @@ void print_frame(int f, const std::vector<Detection>& dets, const std::vector<Tr
     std::cout << "\n";
 }
 
-CaseResult run_case(const fs::path& dir, bool verbose)
+// camera.csv: frame_id, cam_x, cam_y (카메라 위치, px). 없으면 빈 map
+std::map<int, std::pair<double, double>> read_camera(const fs::path& file)
+{
+    std::map<int, std::pair<double, double>> cam;
+    std::ifstream in(file);
+    std::string line;
+    std::getline(in, line);  // 머리글
+    while (std::getline(in, line))
+    {
+        int f = 0;
+        double x = 0.0, y = 0.0;
+        if (std::sscanf(line.c_str(), "%d,%lf,%lf", &f, &x, &y) == 3)
+            cam[f] = {x, y};
+    }
+    return cam;
+}
+
+CaseResult run_case(const fs::path& dir, bool verbose, bool cmc)
 {
     CaseResult r;
     r.name = dir.filename().string();
@@ -125,8 +144,26 @@ CaseResult run_case(const fs::path& dir, bool verbose)
     // YAML 튜닝에 영향받지 않도록 기본값(공식 ByteTrack 값)으로 고정한다.
     ByteTrackTracker tracker("test-defaults", ByteTrackConfig{});
     tracking_metrics::Accumulator metrics;
+    const auto camera = cmc ? read_camera(dir / "camera.csv") : std::map<int, std::pair<double, double>>{};
+    if (cmc && camera.empty())
+        r.error = "camera.csv가 없습니다 (generate_limits.py로 다시 생성하세요)";
+    if (!r.error.empty())
+        return r;
+    const std::pair<double, double>* prev_cam = nullptr;
     for (int f : seq.frames)
     {
+        if (cmc)
+        {
+            // 직전 호출 프레임 대비 카메라가 움직인 만큼 화면은 반대로 밀린다
+            const auto it = camera.find(f);
+            if (it != camera.end())
+            {
+                if (prev_cam != nullptr)
+                    tracker.set_camera_motion(CameraMotion::translation(
+                        -(it->second.first - prev_cam->first), -(it->second.second - prev_cam->second)));
+                prev_cam = &it->second;
+            }
+        }
         const auto tracks = tracker.track(seq.by_frame[f]);
         metrics.add_frame(f, seq.gt_by_frame[f], tracks);
         if (verbose)
@@ -136,8 +173,11 @@ CaseResult run_case(const fs::path& dir, bool verbose)
     r.actual = {m.idsw, m.pred_count - m.matched, m.gt_count - m.matched};
     r.idf1 = m.idf1;
     if (verbose)
-        for (const auto& e : m.idsw_events)
-            std::cout << "    ID 변경: " << e << "\n";
+    {
+        std::cout << "  [문제 지점] " << (m.timeline.empty() ? "없음" : "") << "\n";
+        for (const auto& e : m.timeline)
+            std::cout << "    " << e << "\n";
+    }
 
     if (compare(r.actual, r.ideal) <= 0)
         r.verdict = "IDEAL";
@@ -157,7 +197,7 @@ CaseResult run_case(const fs::path& dir, bool verbose)
 
 int main(int argc, char** argv)
 {
-    bool verbose = false, update = false;
+    bool verbose = false, update = false, cmc = false;
     std::vector<std::string> filters;
     for (int i = 1; i < argc; ++i)
     {
@@ -166,10 +206,17 @@ int main(int argc, char** argv)
             verbose = true;
         else if (arg == "--update-baseline")
             update = true;
+        else if (arg == "--cmc")
+            cmc = true;
         else
             filters.push_back(arg);
     }
 
+    if (cmc && update)
+    {
+        std::cerr << "--cmc 결과는 기준선으로 기록하지 않습니다 (기준선은 CMC 없는 값)\n";
+        return 2;
+    }
     const fs::path root = fs::path(test_csv::tracking_test_dir()) / "data" / "limits";
     std::vector<fs::path> dirs;
     if (fs::is_directory(root))
@@ -192,10 +239,10 @@ int main(int argc, char** argv)
 
     std::vector<CaseResult> results;
     for (const auto& d : dirs)
-        results.push_back(run_case(d, verbose));
+        results.push_back(run_case(d, verbose, cmc));
 
-    std::printf("\n[ByteTrack 한계 케이스 %zu개]  (IDSW, 헛출력, 누락) 비교. ideal = 완벽한 Tracker, base = 현재 기준선\n",
-                results.size());
+    std::printf("\n[ByteTrack 한계 케이스 %zu개]%s  (IDSW, 헛출력, 누락) 비교. ideal = 완벽한 Tracker, base = 현재 기준선\n",
+                results.size(), cmc ? " CMC 켬(정답 카메라 움직임)" : "");
     std::printf("  %-7s %14s %14s %14s %7s  %s\n", "case", "actual", "ideal", "base", "IDF1", "verdict");
     std::printf("  %s\n", std::string(71, '-').c_str());
 

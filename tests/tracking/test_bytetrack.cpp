@@ -1,9 +1,11 @@
 #include "tracking/bytetrack_tracker.hpp"
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <utility>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -113,6 +115,76 @@ int check_yaml_config()
 
 }  // namespace
 
+// CMC 검사: 정지한 물체(20x40)를 카메라가 좌우로 30px씩 흔들며 찍는다 (짐벌 진동).
+// 화면 속 물체가 매 프레임 30px씩 반대로 튀어 직전 위치와 IoU가 0이고 속도 예측으로도 따라갈 수 없다.
+// 보정하면 12프레임 모두 같은 ID로 출력되어야 하고, 보정 없이는 그러지 못해야 한다. 반환: 실패 수
+int check_camera_motion()
+{
+    constexpr int kFrames = 12;
+    // 반환: 첫 프레임 ID가 출력된 프레임 수, 사용된 ID 수
+    auto run = [](bool cmc) {
+        ByteTrackTracker tracker("test-cmc", ByteTrackConfig{});
+        auto cam = [](int f) { return (f % 2) * 30.0f; };  // 카메라 위치 0, 30, 0, 30, ...
+        int first_id = -1, kept = 0;
+        std::set<int> ids;
+        for (int f = 0; f < kFrames; ++f)
+        {
+            Detection d;
+            d.x = 500.0f - cam(f);
+            d.y = 200.0f;
+            d.width = 20.0f;
+            d.height = 40.0f;
+            d.confidence = 0.9f;
+            d.class_id = 0;
+            if (cmc && f > 0)
+                tracker.set_camera_motion(CameraMotion::translation(-(cam(f) - cam(f - 1)), 0.0));
+            for (const auto& t : tracker.track({d}))
+            {
+                if (first_id < 0)
+                    first_id = t.track_id;
+                ids.insert(t.track_id);
+                kept += (t.track_id == first_id);
+            }
+        }
+        return std::make_pair(kept, ids.size());
+    };
+    int failures = 0;
+    const auto without = run(false), with = run(true);
+    std::cout << "CMC 검사 (" << kFrames << "프레임): 보정 없이 같은 ID " << without.first << "프레임, 보정하면 "
+              << with.first << "프레임 (ID " << with.second << "개)\n";
+    if (with.first != kFrames || with.second != 1)
+    {
+        std::cerr << "FAIL: 카메라 움직임을 보정했는데 모든 프레임에서 같은 ID로 출력되지 않음\n";
+        ++failures;
+    }
+    if (without.first == kFrames)
+    {
+        std::cerr << "FAIL: 검사 조건이 너무 쉬움 (보정 없이도 모든 프레임 유지)\n";
+        ++failures;
+    }
+
+    // 항등 변환은 결과를 바꾸지 않아야 한다
+    KalmanFilter kf;
+    KalmanState s = kf.initiate({100.0, 50.0, 0.5, 40.0});
+    const KalmanState before = s;
+    apply_camera_motion(s, CameraMotion{});
+    if (s.mean != before.mean || s.covariance != before.covariance)
+    {
+        std::cerr << "FAIL: 항등 카메라 움직임이 Kalman 상태를 바꿈\n";
+        ++failures;
+    }
+    // 평행이동은 중심만 옮기고 속도·공분산은 그대로여야 한다
+    apply_camera_motion(s, CameraMotion::translation(-7.0, 3.0));
+    if (std::abs(s.mean[0] - 93.0) > 1e-9 || std::abs(s.mean[1] - 53.0) > 1e-9 ||
+        s.mean[4] != before.mean[4] || s.covariance != before.covariance)
+    {
+        std::cerr << "FAIL: 평행이동 보정 결과가 다름\n";
+        ++failures;
+    }
+    return failures;
+}
+
+
 int main(int argc, char** argv)
 {
     const std::string dir = argc > 1 ? argv[1] : test_csv::tracking_test_dir() + "/data";
@@ -187,6 +259,7 @@ int main(int argc, char** argv)
 
     // 검사 4: bytetrack.yaml 읽기와 잘못된 설정 거부
     failures += check_yaml_config();
+    failures += check_camera_motion();
 
     if (failures > 0)
     {

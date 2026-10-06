@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "tracking/camera_motion.hpp"
 #include "tracking/kalman_filter.hpp"
 #include "tracking/tracker.hpp"
 
@@ -19,6 +20,7 @@ struct ByteTrackConfig
     int track_buffer = 30;          // 놓친 Track을 유지하는 프레임 수 (30fps 기준)
     int frame_rate = 30;
     bool fuse_score = false;  // true: 1차·미확정 매칭 비용에 검출 점수를 곱함 (공식 ByteTrack MOT17 설정)
+    int lost_output_frames = 0;     // 놓친 Track을 예측 위치로 출력할 최대 프레임 수 (0: 출력 안 함)
 };
 
 // ByteTrack 설정 YAML을 읽고 값의 범위를 검증한다.
@@ -74,6 +76,8 @@ private:
     int next_track_id_ = 0;
     int max_time_lost_ = 30;
 
+    CameraMotion camera_motion_;   // 다음 track() 한 번에만 적용할 카메라 움직임
+
     std::vector<bytetrack::STrackPtr> tracked_stracks_;
     std::vector<bytetrack::STrackPtr> lost_stracks_;
 
@@ -101,6 +105,10 @@ public:
 
     // ByteTrack 내부 상태를 초기화한다.
     void reset() override;
+
+    // 다음 track() 호출에 적용할 카메라 움직임(직전 프레임 → 현재 프레임)을 지정한다.
+    // track()이 끝나면 지워지므로 프레임마다 다시 지정한다. 호출하지 않으면 보정하지 않는다.
+    void set_camera_motion(const CameraMotion& motion) { camera_motion_ = motion; }
 
     const ByteTrackConfig& config() const { return config_; }
 };

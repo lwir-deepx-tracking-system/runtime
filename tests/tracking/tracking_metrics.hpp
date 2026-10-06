@@ -39,6 +39,8 @@ struct Result
     int idtp = 0;
     double idf1 = 0.0;
     std::vector<std::string> idsw_events;  // "frame 46: 정답 1의 ID 1 → 3"
+    // 프레임 순서대로 모든 문제 지점: ID 변경, 누락, 헛출력 (-v 출력용)
+    std::vector<std::string> timeline;
 };
 
 inline float iou_tlwh(float ax, float ay, float aw, float ah,
@@ -167,10 +169,35 @@ public:
         }
 
         // 3) IDSW: 정답 물체가 마지막으로 매칭됐던 ID와 다른 ID에 매칭되면 1회
+        const std::string at = "frame " + std::to_string(frame) + ": ";
+        std::vector<char> track_matched(nt, 0);
         for (size_t i = 0; i < ng; ++i)
         {
             if (gt_match[i] < 0)
+            {
+                // 누락: 가장 많이 겹친 출력이 있으면 함께 적어 "위치가 어긋남"과 "출력 없음"을 구분한다
+                int best = -1;
+                for (size_t j = 0; j < nt; ++j)
+                    if (iou[i][j] > 0.0f && (best < 0 || iou[i][j] > iou[i][best]))
+                        best = static_cast<int>(j);
+                std::string line = at + "누락   정답 " + std::to_string(gt[i].id) + " (" +
+                                   std::to_string(static_cast<int>(gt[i].x)) + "," +
+                                   std::to_string(static_cast<int>(gt[i].y)) + ")";
+                if (best >= 0)
+                {
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), " - 가장 가까운 출력 ID %d, IoU %.2f (0.5 미만)",
+                                  tracks[best].track_id, iou[i][best]);
+                    line += buf;
+                }
+                else
+                {
+                    line += " - 겹치는 출력 없음";
+                }
+                result_.timeline.push_back(line);
                 continue;
+            }
+            track_matched[gt_match[i]] = 1;
             ++result_.matched;
             const int gid = gt[i].id;
             const int tid = tracks[gt_match[i]].track_id;
@@ -181,9 +208,19 @@ public:
                 result_.idsw_events.push_back(
                     "frame " + std::to_string(frame) + ": 정답 " + std::to_string(gid) +
                     "의 ID " + std::to_string(it->second) + " → " + std::to_string(tid));
+                result_.timeline.push_back(at + "ID변경 정답 " + std::to_string(gid) + "의 ID " +
+                                           std::to_string(it->second) + " → " + std::to_string(tid));
             }
             last_match_[gid] = tid;
         }
+
+        // 헛출력: 어떤 정답과도 매칭되지 않은 출력
+        for (size_t j = 0; j < nt; ++j)
+            if (!track_matched[j])
+                result_.timeline.push_back(
+                    at + "헛출력 ID " + std::to_string(tracks[j].track_id) + " (" +
+                    std::to_string(static_cast<int>(tracks[j].x)) + "," +
+                    std::to_string(static_cast<int>(tracks[j].y)) + ")");
     }
 
     // IDF1을 계산해 최종 결과를 돌려준다.
