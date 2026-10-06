@@ -69,7 +69,7 @@ void CameraThread::run()
             std::chrono::steady_clock::time_point{};
 
         if (!camera_.capture(*frame))
-            break;
+            continue;
 
         const auto finished_at = std::chrono::steady_clock::now();
 

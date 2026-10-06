@@ -1,7 +1,7 @@
 #include "camera/camera.hpp"
 
 #include <opencv2/core.hpp>
-
+#include <string>
 #include "common/logger.hpp"
 #include "i3system_TE.h"
 
@@ -50,9 +50,14 @@ bool Camera::capture(FrameContext& frame)
     auto* buffer = reinterpret_cast<unsigned short*>(frame.image.data);
 
     // 학습/전처리의 고정 16-bit 입력 범위를 유지하기 위해 SDK AGC를 끈다.
-    const int receive_result = te_->RecvImage(buffer, false);
-    return receive_result == 1;
-}
+    const int receive_result = te_->RecvImage(buffer, true);
+    // Logger::info("[Camera] Frame 결과 " + std::to_string(receive_result));
+    
+    if (receive_result != 1)
+        return false;
+
+    return true;
+}   
 
 
 // Camera 자원을 해제한다.

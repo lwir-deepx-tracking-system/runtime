@@ -149,7 +149,6 @@ void CaptureApplication::run()
 
         if (!camera_.capture(frame))
         {
-            Logger::warn("[Capture] 프레임 수신 실패");
             continue;
         }
 
