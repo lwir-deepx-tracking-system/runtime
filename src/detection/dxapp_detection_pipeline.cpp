@@ -3,9 +3,11 @@
 #include <stdexcept>
 
 // Detection에 필요한 전처리 설정, 모델 경로와 비동기 처리 한도를 한 객체가 소유한다.
-DxAppDetectionPipeline::DxAppDetectionPipeline(const AppConfig& config)
-    : preprocessor_(config.model), model_path_(config.model.path),
-      max_inflight_(config.detection.max_inflight) {}
+DxAppDetectionPipeline::DxAppDetectionPipeline(
+    const ModelConfig& model_config,
+    const DetectionConfig& detection_config)
+    : preprocessor_(model_config), model_path_(model_config.path),
+      max_inflight_(detection_config.max_inflight) {}
 
 // 전처리부터 후처리까지 dx_app runner 한 단계에서 수행하는 연결 지점이다.
 std::vector<Detection> DxAppDetectionPipeline::detect(const FrameContext& frame)

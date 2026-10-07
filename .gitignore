@@ -13,3 +13,10 @@
 
 # 개발자 PC에 종속된 VS Code 설정
 /.vscode/
+
+# 로컬 데이터셋
+/datasets/
+
+# 임시/코어 덤프
+core
+core.*
