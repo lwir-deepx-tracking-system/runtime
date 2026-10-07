@@ -1,5 +1,7 @@
 #include "pipeline/gui_sender_thread.hpp"
 
+#include <chrono>
+#include <cstdint>
 #include <stdexcept>
 
 #include "common/logger.hpp"
@@ -44,14 +46,41 @@ void GuiSenderThread::run()
 
     // TrackingThread가 닫을 때까지 queue를 소비한다. shared_ptr에 함께 담긴
     // frame과 tracks는 같은 TrackingResult에서 생성된 동일 frame의 데이터이다.
-    while (input_queue_.pop(result))
+    try
     {
-        if (!result || !result->frame) continue;
-        if (!sender_.send(*result))
+        while (input_queue_.pop(result))
         {
-            Logger::error("[GuiSenderThread] GUI 전송 실패");
-            break;
+            if (!result || !result->frame) continue;
+
+            // PC와 비교할 수 있도록 GUI 송신 처리를 시작한 epoch microsecond를 보낸다.
+            const auto gui_started_at = std::chrono::system_clock::now();
+            const std::uint64_t gui_started_us = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    gui_started_at.time_since_epoch()).count());
+
+            if (!sender_.send(*result, gui_started_us))
+            {
+                error_message_ = "GUI 전송 실패";
+                failed_.store(true);
+                Logger::error("[GuiSenderThread] " + error_message_);
+                input_queue_.close();
+                break;
+            }
         }
+    }
+    catch (const std::exception& e)
+    {
+        error_message_ = e.what();
+        failed_.store(true);
+        input_queue_.close();
+        Logger::error("[GuiSenderThread] " + error_message_);
+    }
+    catch (...)
+    {
+        error_message_ = "알 수 없는 치명적 오류";
+        failed_.store(true);
+        input_queue_.close();
+        Logger::error("[GuiSenderThread] " + error_message_);
     }
     // 정상 queue 종료와 전송 오류 모두 같은 경로로 송신 자원을 정리한다.
     sender_.stop();

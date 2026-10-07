@@ -58,7 +58,9 @@ private:
     bool open_metadata_socket();
 
     // 현재 frame의 Track 목록을 명시적 wire format으로 직렬화해 전송한다.
-    bool send_tracking_metadata(const TrackingResult& result);
+    bool send_tracking_metadata(
+        const TrackingResult& result,
+        std::uint64_t gui_started_us);
 
 public:
     GuiSender(
@@ -74,7 +76,9 @@ public:
     // 한 TrackingResult를 두 GUI 채널로 전달한다.
     // CV_16UC1 원본을 clip 범위 기준 8-bit BGR로 변환하고, metadata를 별도
     // UDP 포트로 보낸 뒤 영상 frame을 GStreamer appsrc에 전달한다.
-    bool send(const TrackingResult& result);
+    bool send(
+        const TrackingResult& result,
+        std::uint64_t gui_started_us = 0);
 
     // 영상 pipeline과 metadata socket을 함께 닫아 송신 자원을 정리한다.
     void stop();

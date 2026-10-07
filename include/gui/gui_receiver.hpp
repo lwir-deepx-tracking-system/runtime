@@ -59,4 +59,6 @@ public:
 
     // listen/client socket을 shutdown/close해 다른 thread의 poll/recv를 깨운다.
     void stop();
+
+    bool stop_requested() { return stopped(); }
 };

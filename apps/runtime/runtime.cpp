@@ -22,19 +22,63 @@
 #include "pipeline/gui_sender_thread.hpp"
 
 #include <chrono>
+#include <csignal>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
-#include <memory>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <vector>
 #include <yaml-cpp/yaml.h>
 
-
 namespace fs = std::filesystem;
+
+namespace {
+volatile std::sig_atomic_t g_stop_requested = 0;
+constexpr const char* kTrackerName = "bytetrack";
+
+void handle_sigint(int)
+{
+    g_stop_requested = 1;
+}
+
+// model/tracker와 자동 판별한 실행 모드 아래에 충돌 없는 timestamp를 만든다.
+fs::path create_result_directory(
+    const fs::path& output_root,
+    const std::string& model_name,
+    const std::string& runtime_mode)
+{
+    const fs::path mode_dir = output_root /
+        (model_name + "_" + kTrackerName) / runtime_mode;
+    fs::create_directories(mode_dir);
+
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+    std::tm local_time{};
+    if (localtime_r(&now_time, &local_time) == nullptr)
+        throw std::runtime_error("Runtime timestamp 생성에 실패했습니다");
+
+    std::ostringstream stream;
+    stream << std::put_time(&local_time, "%Y%m%d_%H%M%S");
+    if (!stream)
+        throw std::runtime_error("Runtime timestamp 생성에 실패했습니다");
+    const std::string timestamp = stream.str();
+
+    // 같은 초에 시작한 실행은 기존 결과를 보존하며 suffix를 증가시킨다.
+    for (std::size_t suffix = 0;; ++suffix)
+    {
+        const fs::path result_dir = mode_dir /
+            (timestamp + (suffix == 0 ? "" : "_" + std::to_string(suffix)));
+        if (fs::create_directory(result_dir))
+            return result_dir;
+    }
+}
+}  // namespace
 
 // runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
 RuntimeConfig load_runtime_config(const std::string& path)
@@ -55,6 +99,12 @@ RuntimeConfig load_runtime_config(const std::string& path)
     c.control = config_parser::load_control_config(root["control"]);
     c.measurement = config_parser::load_measurement_config(root["measurement"]);
     c.gui = config_parser::load_gui_config(root["gui"]);
+
+    if (!c.gui.enabled && c.control.enabled)
+        throw std::runtime_error(
+            "유효하지 않은 Runtime 설정입니다: control.enabled=true에는 "
+            "gui.enabled=true가 필요합니다");
+
     Logger::info("[Config] runtime and model configuration loaded");
     return c;
 }
@@ -67,7 +117,7 @@ static void append_metrics(
 {
     for (const StageMetric& metric : metrics)
     {
-        file << "integrated," << metric.frame_id << ',' << stage << ',';
+        file << metric.frame_id << ',' << stage << ',';
         if (metric.queue_wait_ms)
             file << *metric.queue_wait_ms;
         file << ',' << metric.processing_ms << ',';
@@ -83,6 +133,8 @@ static void append_metrics(
 class RuntimeApplication
 {
 private:
+    RuntimeConfig config_;
+
     // Camera의 shared FrameContext를 Detection으로 전달
     ThreadSafeQueue<FrameMessage> frame_queue_;
 
@@ -94,7 +146,7 @@ private:
     ThreadSafeQueue<TrackingResultPtr> gui_track_queue_;
 
     std::string config_path_;
-    std::vector<std::string> config_snapshot_paths_;
+    std::string runtime_mode_;
     bool measurement_enabled_ = false;
 
 /************************************************************************/
@@ -139,11 +191,18 @@ public:
 
 // YAML을 읽고 설정에 맞는 Component들을 생성한다.
 RuntimeApplication::RuntimeApplication(const std::string& config_path)
-    : config_path_(config_path)
+    : config_(load_runtime_config(config_path)), config_path_(config_path)
 {
-    // YAML 로그 레벨을 먼저 적용한 뒤 초기 큐 상태를 출력한다.
-    RuntimeConfig config = load_runtime_config(config_path);
-    measurement_enabled_ = config.measurement.enabled;
+    measurement_enabled_ = config_.measurement.enabled;
+
+    // Control은 GUI 선택 ID에 의존하므로 enable 조합만으로 세 모드를 결정한다.
+    if (config_.control.enabled)
+        runtime_mode_ = "full";
+    else if (config_.gui.enabled)
+        runtime_mode_ = "gui";
+    else
+        runtime_mode_ = "core";
+    Logger::info("[Runtime] 실행 모드: " + runtime_mode_);
 
     Logger::debug("[RuntimeApplication] 큐 생성 완료");
 
@@ -167,20 +226,14 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
         std::to_string(gui_track_queue_.size())
     );
 
-    // 결과 폴더에는 실행 당시 참조한 YAML을 사본으로 남긴다.
-    config_snapshot_paths_ = {
-        config_path_,
-        config.model_config_path
-    };
-
     camera_ = std::make_unique<Camera>();
 
     // 이 런타임의 고정 조합인 YOLOv8 + DX App pipeline을 생성한다.
     detection_pipeline_ = std::make_unique<DxAppDetectionPipeline>(
-        config.model, config.detection);
+        config_.model, config_.detection);
 
     // AppConfig가 검증한 runtime 설정으로 고정 ByteTrack 구현체를 생성한다.
-    tracker_ = std::make_unique<ByteTrackTracker>(config.tracking);
+    tracker_ = std::make_unique<ByteTrackTracker>(config_.tracking);
 
     
     // Camera Thread에 연결
@@ -216,23 +269,23 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             gimbal_controller_,
             target_selector_,
             control_track_queue_,
-            config.control.enabled,
+            config_.control.enabled,
             measurement_enabled_
         );
 
-    if (config.gui.enabled)
+    if (config_.gui.enabled)
     {
         gui_sender_ = std::make_unique<GuiSender>(
-            config.gui.video,
-            config.gui.metadata,
-            config.model.camera_input.clip_min,
-            config.model.camera_input.clip_max);
+            config_.gui.video,
+            config_.gui.metadata,
+            config_.model.camera_input.clip_min,
+            config_.model.camera_input.clip_max);
         gui_sender_thread_ = std::make_unique<GuiSenderThread>(
             *gui_sender_, gui_track_queue_);
 
-        if (config.gui.command.enabled)
+        if (config_.gui.command.enabled)
         {
-            gui_receiver_ = std::make_unique<GuiReceiver>(config.gui.command);
+            gui_receiver_ = std::make_unique<GuiReceiver>(config_.gui.command);
             gui_receiver_thread_ = std::make_unique<GuiReceiverThread>(
                 *gui_receiver_, target_selector_);
         }
@@ -242,76 +295,149 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 // Pipeline Worker를 실행한다.
 void RuntimeApplication::run()
 {
-    // 수신기는 pipeline보다 먼저 열어 GUI가 언제든 선택 명령을 보낼 수 있게
-    // 하고, 송신기는 Tracking 결과 queue를 기다리도록 먼저 시작한다.
-    if (gui_receiver_thread_) gui_receiver_thread_->start();
-    if (gui_sender_thread_) gui_sender_thread_->start();
-
-    control_thread_->start();
-    tracking_thread_->start();
-    detection_thread_->start();
-    // 마지막에 Frame 생산자 시작
-    camera_thread_->start();
-
-
-    // 각 Thread 종료 대기
-    camera_thread_->join();
-    detection_thread_->join();
-    tracking_thread_->join();
-    if (gui_sender_thread_) gui_sender_thread_->join();
-    control_thread_->join();
-
-    // TCP receiver는 외부 GUI 연결을 기다릴 수 있으므로 명시적으로 stop해
-    // poll/recv를 깨운 뒤 join한다.
-    if (gui_receiver_thread_)
-    {
-        gui_receiver_thread_->stop();
-        gui_receiver_thread_->join();
-    }
-
-    if (!measurement_enabled_)
-        return;
-
-    // 측정 모드에서만 실행 후 CSV와 YAML 사본을 저장한다.
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
-    std::tm local_time{};
-    localtime_r(&now_time, &local_time);
-
-    const std::string model_name = fs::path(config_snapshot_paths_[1]).stem().string();
-    std::ostringstream name;
-    name << model_name << '_' << std::put_time(&local_time, "%Y%m%d_%H%M%S");
-    const std::string base_name = name.str();
-
-    fs::create_directories("results");
     fs::path result_dir;
-    for (std::size_t suffix = 0;; ++suffix)
+    g_stop_requested = 0;
+    if (std::signal(SIGINT, handle_sigint) == SIG_ERR)
+        throw std::runtime_error("SIGINT handler 등록에 실패했습니다");
+
+    auto stop_pipeline = [this]() {
+        camera_thread_->request_stop();
+        frame_queue_.close();
+        detection_queue_.close();
+        control_track_queue_.close();
+        gui_track_queue_.close();
+        if (gui_receiver_thread_)
+            gui_receiver_thread_->stop();
+    };
+
+    auto join_workers = [this]() {
+        camera_thread_->join();
+        detection_thread_->join();
+        tracking_thread_->join();
+        if (gui_sender_thread_) gui_sender_thread_->join();
+        control_thread_->join();
+        if (gui_receiver_thread_)
+        {
+            gui_receiver_thread_->stop();
+            gui_receiver_thread_->join();
+        }
+    };
+
+    try
     {
-        result_dir = fs::path("results") /
-            (base_name + (suffix == 0 ? "" : "_" + std::to_string(suffix)));
-        if (fs::create_directory(result_dir))
-            break;
+        if (measurement_enabled_)
+        {
+            result_dir = create_result_directory(
+                config_.measurement.output_root,
+                config_.model.name,
+                runtime_mode_);
+            Logger::info("[Measurement] 결과 경로: " + result_dir.string());
+
+            // snapshot은 실행 디렉터리 바로 아래에 원본 파일명으로 보관한다.
+            fs::copy_file(config_path_, result_dir / "runtime.yaml");
+            fs::copy_file(
+                config_.model_config_path,
+                result_dir / fs::path(config_.model_config_path).filename());
+        }
+
+        // 수신·소비 worker를 먼저 대기시키고 Camera producer를 마지막에 시작한다.
+        if (gui_receiver_thread_) gui_receiver_thread_->start();
+        if (gui_sender_thread_) gui_sender_thread_->start();
+        control_thread_->start();
+        tracking_thread_->start();
+        detection_thread_->start();
+        camera_thread_->start();
+
+        bool stop_logged = false;
+        while (!camera_thread_->finished())
+        {
+            const bool worker_failed = detection_thread_->failed() ||
+                tracking_thread_->failed() || control_thread_->failed() ||
+                (gui_sender_thread_ && gui_sender_thread_->failed()) ||
+                (gui_receiver_thread_ && gui_receiver_thread_->failed());
+
+            if (worker_failed)
+            {
+                stop_pipeline();
+                break;
+            }
+
+            if (g_stop_requested != 0)
+            {
+                // signal handler는 상태만 바꾸고 실제 종료 전파는 정상 흐름에서 한다.
+                if (!stop_logged)
+                {
+                    Logger::info("[Runtime] Ctrl+C 종료 요청");
+                    stop_logged = true;
+                }
+                camera_thread_->request_stop();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        join_workers();
+
+        if (camera_thread_->failed())
+            throw std::runtime_error(
+                "CameraThread 실패: " + camera_thread_->error_message());
+        if (detection_thread_->failed())
+            throw std::runtime_error(
+                "DetectionThread 실패: " + detection_thread_->error_message());
+        if (tracking_thread_->failed())
+            throw std::runtime_error(
+                "TrackingThread 실패: " + tracking_thread_->error_message());
+        if (control_thread_->failed())
+            throw std::runtime_error(
+                "ControlThread 실패: " + control_thread_->error_message());
+        if (gui_sender_thread_ && gui_sender_thread_->failed())
+            throw std::runtime_error(
+                "GuiSenderThread 실패: " + gui_sender_thread_->error_message());
+        if (gui_receiver_thread_ && gui_receiver_thread_->failed())
+            throw std::runtime_error(
+                "GuiReceiverThread 실패: " + gui_receiver_thread_->error_message());
+
+        if (!measurement_enabled_)
+            return;
+
+        std::ofstream metrics_file(result_dir / "metrics.csv");
+        if (!metrics_file)
+            throw std::runtime_error("metrics.csv 파일을 생성하지 못했습니다");
+
+        metrics_file << "frame_id,stage,queue_wait_ms,processing_ms,e2e_ms\n"
+                     << std::fixed << std::setprecision(6);
+        append_metrics(metrics_file, "camera", camera_thread_->metrics());
+        append_metrics(metrics_file, "detection", detection_thread_->metrics());
+        append_metrics(metrics_file, "tracking", tracking_thread_->metrics());
+        if (config_.control.enabled)
+            append_metrics(metrics_file, "control", control_thread_->metrics());
+
+        if (!metrics_file)
+            throw std::runtime_error("metrics.csv 파일 쓰기에 실패했습니다");
+        metrics_file.close();
+        if (metrics_file.fail())
+            throw std::runtime_error("metrics.csv 파일을 저장하지 못했습니다");
+
+        Logger::info("[Measurement] 측정 결과 저장 완료: " + result_dir.string());
     }
+    catch (...)
+    {
+        stop_pipeline();
+        join_workers();
 
-    const fs::path snapshot_dir = result_dir / "config";
-    fs::create_directory(snapshot_dir);
-    for (const std::string& path : config_snapshot_paths_)
-        fs::copy_file(path, snapshot_dir / fs::path(path).filename());
-
-    std::ofstream metrics_file(result_dir / "metrics.csv");
-    if (!metrics_file)
-        throw std::runtime_error("metrics.csv 파일을 생성하지 못했습니다");
-    metrics_file << "mode,frame_id,stage,queue_wait_ms,processing_ms,e2e_ms\n";
-    metrics_file << std::fixed << std::setprecision(6);
-    append_metrics(metrics_file, "camera", camera_thread_->metrics());
-    append_metrics(metrics_file, "detection", detection_thread_->metrics());
-    append_metrics(metrics_file, "tracking", tracking_thread_->metrics());
-    append_metrics(metrics_file, "control", control_thread_->metrics());
-    metrics_file.close();
-    if (!metrics_file)
-        throw std::runtime_error("metrics.csv 파일을 저장하지 못했습니다");
-
-    Logger::info("[Measurement] 측정 결과 저장 완료: " + result_dir.string());
+        if (!result_dir.empty())
+        {
+            // 실패한 실행만 제거하고 model/tracker 및 mode 상위 디렉터리는 보존한다.
+            std::error_code cleanup_error;
+            fs::remove_all(result_dir, cleanup_error);
+            if (cleanup_error)
+                Logger::error(
+                    "[Runtime] 실패 결과 정리에 실패했습니다: " +
+                    result_dir.string() + " (" + cleanup_error.message() + ")");
+            else
+                Logger::info("[Runtime] 실패 결과 정리: " + result_dir.string());
+        }
+        throw;
+    }
 }
 
 int run_runtime(const std::string& config_path)

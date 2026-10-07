@@ -95,9 +95,6 @@ ControlConfig load_control_config(const YAML::Node& node)
 {
     ControlConfig c;
     c.enabled = required<bool>(node, "enabled", "control");
-    c.driver = required<std::string>(node, "driver", "control");
-    if (c.driver.empty())
-        throw std::runtime_error("control.driver must not be empty");
     return c;
 }
 
@@ -105,6 +102,9 @@ MeasurementConfig load_measurement_config(const YAML::Node& node)
 {
     MeasurementConfig c;
     c.enabled = required<bool>(node, "enabled", "measurement");
+    c.output_root = required<std::string>(node, "output_root", "measurement");
+    if (c.output_root.empty())
+        throw std::runtime_error("measurement.output_root must not be empty");
     return c;
 }
 
@@ -285,4 +285,3 @@ ModelConfig load_model_config(const std::string& path)
         throw std::runtime_error("postprocess.class_names size must equal num_classes");
     return c;
 }
-

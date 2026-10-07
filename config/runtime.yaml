@@ -6,7 +6,8 @@ logging:
   level: debug
 
 measurement:
-  enabled: false
+  enabled: true
+  output_root: /mnt/lwir_data/results/runtime
 
 
 # ============================================================
@@ -55,9 +56,6 @@ tracking:
 
 control:
   enabled: false
-
-  # 실제 GPIO / PWM / I2C 제어 방식 확정 후 구체화
-  driver: unconfigured
 
 
 # ============================================================

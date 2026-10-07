@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <pthread.h>
+#include <string>
 
 #include "gui/gui_receiver.hpp"
 #include "target/target_selector.hpp"
@@ -20,6 +22,8 @@ private:
     TargetSelector& target_selector_;
     pthread_t thread_{};
     bool started_ = false;
+    std::atomic<bool> failed_{false};
+    std::string error_message_;
 
     static void* thread_func(void* arg);
     void run();
@@ -37,4 +41,6 @@ public:
 
     // receive loop가 끝날 때까지 worker 종료를 기다린다.
     void join();
+    bool failed() const { return failed_.load(); }
+    const std::string& error_message() const { return error_message_; }
 };

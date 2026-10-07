@@ -14,8 +14,8 @@ int main()
         config.tracking.match_threshold != 0.8F ||
         config.tracking.track_buffer != 30 ||
         config.control.enabled ||
-        config.control.driver != "unconfigured" ||
-        config.measurement.enabled)
+        !config.measurement.enabled ||
+        config.measurement.output_root != "/mnt/lwir_data/results/runtime")
         return 2;
 
     // 연결된 모델 YAML의 Camera와 모델 입력 계약 검증.

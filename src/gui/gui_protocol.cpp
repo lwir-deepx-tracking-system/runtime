@@ -189,6 +189,7 @@ bool encode_tracking_metadata(
     write_u16(cursor, static_cast<std::uint16_t>(GuiMetadataType::Tracking));
     write_u64(cursor, metadata.frame_id);
     write_u32(cursor, metadata.rtp_timestamp);
+    write_u64(cursor, metadata.gui_started_us);
     write_u32(cursor, metadata.width);
     write_u32(cursor, metadata.height);
     write_u32(cursor, static_cast<std::uint32_t>(metadata.tracks.size()));
@@ -227,6 +228,7 @@ bool decode_tracking_metadata(
         !read_u16(cursor, end, raw_type) ||
         !read_u64(cursor, end, metadata.frame_id) ||
         !read_u32(cursor, end, metadata.rtp_timestamp) ||
+        !read_u64(cursor, end, metadata.gui_started_us) ||
         !read_u32(cursor, end, metadata.width) ||
         !read_u32(cursor, end, metadata.height) ||
         !read_u32(cursor, end, track_count))

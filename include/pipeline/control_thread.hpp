@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <pthread.h>
+#include <string>
 
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
@@ -15,9 +17,12 @@ private:
     GimbalController& controller_;
     TargetSelector& target_selector_;
     ThreadSafeQueue<TrackingResultPtr>& input_queue_;
-    pthread_t thread_;
+    pthread_t thread_{};
+    bool started_ = false;
     bool control_enabled_;
     bool measurement_enabled_;
+    std::atomic<bool> failed_{false};
+    std::string error_message_;
     std::vector<StageMetric> metrics_;
 
     static void* thread_func(void* arg);
@@ -32,5 +37,7 @@ public:
         bool measurement_enabled);
     void start();
     void join();
+    bool failed() const { return failed_.load(); }
+    const std::string& error_message() const { return error_message_; }
     const std::vector<StageMetric>& metrics() const { return metrics_; }
 };

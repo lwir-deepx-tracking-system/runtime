@@ -1,5 +1,6 @@
 #include "pipeline/gui_receiver_thread.hpp"
 
+#include <exception>
 #include <stdexcept>
 
 #include "common/logger.hpp"
@@ -48,12 +49,34 @@ void GuiReceiverThread::run()
     Logger::info("[GuiReceiverThread] 시작");
     GuiCommand command;
 
-    // GuiReceiver가 network와 protocol 검증을 끝낸 command만 반환하므로,
-    // 여기서는 SelectTrack의 ID를 thread-safe 상태에 반영하는 일만 한다.
-    while (receiver_.receive(command))
+    try
     {
-        if (command.type == GuiCommandType::SelectTrack)
-            target_selector_.set_selected_id(command.track_id);
+        // GuiReceiver가 network와 protocol 검증을 끝낸 command만 반환하므로,
+        // 여기서는 SelectTrack의 ID를 thread-safe 상태에 반영하는 일만 한다.
+        while (receiver_.receive(command))
+        {
+            if (command.type == GuiCommandType::SelectTrack)
+                target_selector_.set_selected_id(command.track_id);
+        }
+
+        if (!receiver_.stop_requested())
+        {
+            error_message_ = "GUI 명령 수신이 예기치 않게 종료되었습니다";
+            failed_.store(true);
+            Logger::error("[GuiReceiverThread] " + error_message_);
+        }
+    }
+    catch (const std::exception& e)
+    {
+        error_message_ = e.what();
+        failed_.store(true);
+        Logger::error("[GuiReceiverThread] " + error_message_);
+    }
+    catch (...)
+    {
+        error_message_ = "알 수 없는 치명적 오류";
+        failed_.store(true);
+        Logger::error("[GuiReceiverThread] " + error_message_);
     }
     Logger::info("[GuiReceiverThread] 종료");
 }

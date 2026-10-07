@@ -1,6 +1,8 @@
 #include "pipeline/tracking_thread.hpp"
 
 #include <chrono>
+#include <exception>
+#include <stdexcept>
 #include <utility>
 
 #include "common/logger.hpp"
@@ -22,12 +24,19 @@ TrackingThread::TrackingThread(
 
 void TrackingThread::start()
 {
-    pthread_create(&thread_, nullptr, &TrackingThread::thread_func, this);
+    if (started_) return;
+    const int result = pthread_create(
+        &thread_, nullptr, &TrackingThread::thread_func, this);
+    if (result != 0)
+        throw std::runtime_error("TrackingThread 생성 실패");
+    started_ = true;
 }
 
 void TrackingThread::join()
 {
+    if (!started_) return;
     pthread_join(thread_, nullptr);
+    started_ = false;
 }
 
 void* TrackingThread::thread_func(void* arg)
@@ -40,36 +49,61 @@ void TrackingThread::run()
 {
     Logger::info("[TrackingThread] 시작");
 
-    DetectionResult detections;
-
-    while (input_queue_.pop(detections))
+    try
     {
-        if (!detections.frame)
-            continue;
-
-        const auto started_at = measurement_enabled_ ?
-            std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-
-        auto tracks = std::make_shared<TrackingResult>();
-        tracks->frame = detections.frame;
-        tracks->tracks = tracker_.track(detections.detections);
-
-        if (measurement_enabled_)
+        DetectionResult detections;
+        while (input_queue_.pop(detections))
         {
-            // 추적 완료 지점에서 카메라 획득 이후 전체 지연을 기록한다.
-            record_stage_metric(metrics_, detections.frame->metadata,
-                detections.enqueued_at, started_at,
-                std::chrono::steady_clock::now(), true);
-            tracks->enqueued_at = std::chrono::steady_clock::now();
+            const auto queue_started_at = measurement_enabled_ ?
+                std::chrono::steady_clock::now() :
+                std::chrono::steady_clock::time_point{};
+
+            if (!detections.frame)
+                continue;
+
+            auto tracks = std::make_shared<TrackingResult>();
+            tracks->frame = detections.frame;
+
+            const auto started_at = measurement_enabled_ ?
+                std::chrono::steady_clock::now() :
+                std::chrono::steady_clock::time_point{};
+            tracks->tracks = tracker_.track(detections.detections);
+            const auto finished_at = measurement_enabled_ ?
+                std::chrono::steady_clock::now() :
+                std::chrono::steady_clock::time_point{};
+
+            if (measurement_enabled_)
+            {
+                // Tracking 완료 시점에서 Camera frame 수신 이후 지연을 기록한다.
+                record_stage_metric(metrics_, detections.frame->metadata,
+                    detections.enqueued_at, queue_started_at,
+                    started_at, finished_at, true);
+            }
+
+            TrackingResultPtr shared_result = tracks;
+
+            // 제어 경로는 모든 결과를 받고, GUI는 오래된 화면이 쌓이지 않게
+            // 최신 두 결과만 유지한다.
+            if (measurement_enabled_)
+                tracks->enqueued_at = std::chrono::steady_clock::now();
+            if (!control_output_queue_.push(shared_result))
+                break;
+            gui_output_queue_.push_latest(std::move(shared_result), 2);
         }
-
-        TrackingResultPtr shared_result = std::move(tracks);
-
-        // 제어 경로는 모든 결과를 받고, GUI는 오래된 화면이 쌓이지 않게
-        // 최신 두 결과만 유지한다.
-        if (!control_output_queue_.push(shared_result))
-            break;
-        gui_output_queue_.push_latest(std::move(shared_result), 2);
+    }
+    catch (const std::exception& e)
+    {
+        error_message_ = e.what();
+        failed_.store(true);
+        Logger::error("[TrackingThread] " + error_message_);
+        input_queue_.close();
+    }
+    catch (...)
+    {
+        error_message_ = "알 수 없는 치명적 오류";
+        failed_.store(true);
+        Logger::error("[TrackingThread] " + error_message_);
+        input_queue_.close();
     }
 
     control_output_queue_.close();

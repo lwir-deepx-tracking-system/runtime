@@ -87,10 +87,11 @@ int main()
 
     TrackingResult result;
     result.frame = frame;
+    constexpr std::uint64_t kGuiStartedUs = 1791367200123456ULL;
     for (std::uint64_t frame_id = 0; frame_id < 3; ++frame_id)
     {
         frame->metadata.frame_id = frame_id;
-        if (!sender.send(result))
+        if (!sender.send(result, kGuiStartedUs))
         {
             sender.stop();
             ::close(video_fd);
@@ -128,6 +129,7 @@ int main()
         !decode_tracking_metadata(
             metadata_packet, static_cast<std::size_t>(metadata_size), decoded) ||
         decoded.width != 640 || decoded.height != 480 ||
+        decoded.gui_started_us != kGuiStartedUs ||
         !decoded.tracks.empty())
         return 5;
 

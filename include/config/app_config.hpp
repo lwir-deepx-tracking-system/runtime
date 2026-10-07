@@ -27,11 +27,11 @@ struct TrackingConfig {
 
 struct ControlConfig {
     bool enabled = false;
-    std::string driver;
 };
 
 struct MeasurementConfig {
     bool enabled = false;
+    std::string output_root;
 };
 
 // runtime.yaml의 gui 설정은 세 개의 독립적인 통신 경로를 정의한다.

@@ -38,6 +38,7 @@ int main()
     GuiTrackingMetadata metadata;
     metadata.frame_id = 42;
     metadata.rtp_timestamp = 9000;
+    metadata.gui_started_us = 1791367200123456ULL;
     metadata.width = 640;
     metadata.height = 480;
     Track track;
@@ -58,6 +59,7 @@ int main()
             metadata_packet.data(), metadata_packet.size(), decoded_metadata) ||
         decoded_metadata.frame_id != 42 ||
         decoded_metadata.rtp_timestamp != 9000 ||
+        decoded_metadata.gui_started_us != 1791367200123456ULL ||
         decoded_metadata.width != 640 ||
         decoded_metadata.height != 480 || decoded_metadata.tracks.size() != 1)
         return 6;
@@ -70,7 +72,7 @@ int main()
         std::fabs(decoded_track.height - 40.0F) > 1e-6F)
         return 7;
 
-    if (encode_tracking_metadata(metadata, 32, metadata_packet)) return 8;
+    if (encode_tracking_metadata(metadata, 40, metadata_packet)) return 8;
 
     return 0;
 }

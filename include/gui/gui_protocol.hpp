@@ -18,17 +18,18 @@
 // Command(TCP):
 //   magic + version + type + track_id
 // Tracking metadata(UDP):
-//   magic + version + type + frame_id + RTP timestamp + frame size
+//   magic + version + type + frame_id + RTP timestamp + GUI start timestamp
+//   + frame size
 //   + track count + 반복되는 Track ID/class/confidence/bbox
 //
 // TCP는 message 경계를 보존하지 않으므로 command packet 크기를 고정하고,
 // UDP metadata는 datagram 하나가 한 frame의 metadata 전체를 담는다.
 constexpr std::uint32_t kGuiCommandMagic = 0x4c574952U; // ASCII "LWIR"
-constexpr std::uint16_t kGuiProtocolVersion = 1U;
+constexpr std::uint16_t kGuiProtocolVersion = 2U;
 constexpr std::size_t kGuiCommandPacketSize = 12U;
 
 constexpr std::uint32_t kGuiMetadataMagic = 0x4c57494dU; // ASCII "LWIM"
-constexpr std::size_t kGuiMetadataHeaderSize = 32U;
+constexpr std::size_t kGuiMetadataHeaderSize = 40U;
 constexpr std::size_t kGuiTrackMetadataSize = 28U;
 
 enum class GuiCommandType : std::uint16_t
@@ -56,6 +57,8 @@ struct GuiTrackingMetadata
 {
     std::uint64_t frame_id = 0;
     std::uint32_t rtp_timestamp = 0;
+    // GuiSenderThread가 송신 처리를 시작한 system_clock epoch microsecond이다.
+    std::uint64_t gui_started_us = 0;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::vector<Track> tracks;
