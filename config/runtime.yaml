@@ -1,21 +1,112 @@
+# ============================================================
+# 1. Runtime / Logging
+# ============================================================
+
 logging:
   level: debug
 
-detector:
-  type: yolov8
+measurement:
+  enabled: true
+  output_root: /mnt/lwir_data/results/runtime
+
+
+# ============================================================
+# 2. Model
+# ============================================================
+
+# 모델에 종속적인 설정은 별도 YAML에서 관리한다.
+# - model path
+# - camera input format
+# - model input size
+# - preprocess
+# - postprocess
+model:
   config: config/model/yolov8n.yaml
 
+
+# ============================================================
+# 3. Detection
+# ============================================================
+
 detection:
-  backend: dx_app_async
+  # 동시에 처리할 수 있는 최대 inference 요청 수
   max_inflight: 4
 
+
+# ============================================================
+# 4. Tracking - ByteTrack
+# ============================================================
+
 tracking:
-  type: bytetrack
-  config: config/tracking/bytetrack.yaml
+  # Detection confidence 기준
+  track_threshold: 0.5
+
+  # 1차 매칭 허용 거리 (1 - IoU)
+  # 0.8이면 IoU 0.2 이상이어야 같은 객체로 매칭 가능
+  match_threshold: 0.8
+
+  # Detection이 일시적으로 사라져도 Track을 유지하는 프레임 수
+  # 30 FPS 기준 30이면 약 1초
+  track_buffer: 30
+
+
+# ============================================================
+# 5. Target / Control
+# ============================================================
 
 control:
   enabled: false
-  config: config/control.yaml
 
-measurement:
+
+# ============================================================
+# 6. GUI Communication
+# ============================================================
+
+gui:
+  # GUI 프로그램이 준비되기 전에는 관련 worker를 시작하지 않는다.
   enabled: false
+
+  # ----------------------------------------------------------
+  # 6-1. Video
+  # Orange Pi -> GUI
+  # H.264 / RTP / UDP
+  # ----------------------------------------------------------
+
+  video:
+    host: 127.0.0.1
+    port: 5000
+
+    codec: h264
+    encoder: x264enc
+
+    bitrate_kbps: 3000
+    fps: 30
+    rtp_mtu: 1200
+
+  # ----------------------------------------------------------
+  # 6-2. Tracking Metadata
+  # Orange Pi -> GUI
+  # frame_id / track_id / bbox 등을 UDP로 전송
+  # ----------------------------------------------------------
+
+  metadata:
+    enabled: true
+
+    host: 127.0.0.1
+    port: 5002
+
+    max_packet_bytes: 1200
+
+  # ----------------------------------------------------------
+  # 6-3. GUI Command
+  # GUI -> Orange Pi
+  # 선택한 track_id를 TCP로 전달
+  # ----------------------------------------------------------
+
+  command:
+    enabled: true
+
+    bind_address: 0.0.0.0
+    port: 5001
+
+    receive_timeout_ms: 1000

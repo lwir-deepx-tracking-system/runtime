@@ -7,176 +7,172 @@ LWIR 카메라 영상에서 객체를 검출하고 추적한 뒤, 같은 프레�
 - 입력: `CV_16UC1` LWIR 영상
 - Detection: YOLOv8 + DEEPX `dx_app` 구조
 - Tracking: ByteTrack
-- 실행 구조: POSIX pthread + thread-safe queue
+- 실행 구조: POSIX pthread + `ThreadSafeQueue`
+- 동기화/통신: POSIX pthread mutex와 POSIX socket API
+
+worker thread와 queue 동기화, socket은 POSIX API를 사용합니다. 프레임과 처리 결과는
+`shared_ptr`로 전달하고, 종료 및 실패 상태는 atomic flag로 관리합니다. GStreamer는
+영상 pipeline 내부 구현을 위해 GLib을 사용하지만 애플리케이션 worker와 socket의
+소유권은 POSIX 경계에 유지합니다.
 
 ## 파이프라인
 
-```mermaid
-flowchart LR
-    Camera["CameraThread<br/>LWIR CV_16UC1"]
-
-    subgraph Detection["DetectionThread · 단일 Detection 단계"]
-        direction LR
-        Preprocess["LWIR 전처리<br/>16-bit → RGB · letterbox"]
-        Inference["DEEPX NPU 추론<br/>dx_app 연동 예정"]
-        Postprocess["YOLOv8 후처리<br/>원본 영상 좌표"]
-        Preprocess --> Inference --> Postprocess
-    end
-
-    Tracking["TrackingThread<br/>ByteTrack"]
-    GUI["GUI 송신<br/>원본 Frame + Track 목록"]
-    Selection["TargetSelectionThread<br/>선택 ID 매칭"]
-    Control["ControlThread<br/>Orange Pi 짐벌 제어"]
-
-    Camera -->|"FrameMessage<br/>shared_ptr&lt;const FrameContext&gt;"| Preprocess
-    Postprocess -->|"DetectionResult<br/>동일 FrameContextPtr"| Tracking
-    Tracking -->|"TrackingResultPtr"| GUI
-    Tracking -->|"동일 TrackingResultPtr"| Selection
-    GUI -.->|"selected track_id"| Selection
-    Selection -->|"TargetSelection"| Control
-```
+![Runtime Pipeline](docs/runtime_pipeline.drawio.svg)
 
 Camera에서 만든 `FrameContext`는 복사하지 않고 `shared_ptr`로 Detection, Tracking, GUI까지 전달합니다. 따라서 GUI는 Track 결과가 생성된 정확한 원본 프레임을 사용할 수 있습니다.
 
 Detection은 `DxAppDetectionPipeline` 한 객체가 전처리, 추론, 후처리를 소유합니다. 별도의 preprocess/inference/postprocess thread는 사용하지 않습니다.
 
-## 빠른 시작
+## Applications
 
-CPU-only 빌드와 테스트는 저장소 루트에서 한 명령으로 실행합니다.
+### Runtime
 
-```bash
-./scripts/verify_cpu.sh
-```
+실시간 Camera → Detection → Tracking → Target Selection → Control / GUI 전체 파이프라인을 실행합니다.
+`gui.enabled`와 `control.enabled` 조합에 따라 실행 결과를 자동으로 구분합니다.
 
-실행 파일은 다음과 같이 시작합니다.
+| 구분 | GUI | Control |
+| --- | --- | --- |
+| `core` | 비활성 | 비활성 |
+| `gui` | 활성 | 비활성 |
+| `full` | 활성 | 활성 |
 
-```bash
-./build/cpu/lwir_runtime
-```
+Control은 GUI에서 선택한 Track을 사용하므로 GUI 없이 Control만 활성화하는 설정은 허용하지
+않습니다. 실행 중 `Ctrl+C`를 입력하면 프레임 생산을 멈추고 queue를 순서대로 닫은 뒤 worker를
+join하고 측정 결과를 저장합니다.
 
-기본 설정 파일은 `config/runtime.yaml`입니다. 다른 설정을 사용하려면 경로를 전달합니다.
+### Capture
 
-```bash
-./build/cpu/lwir_runtime config/local/runtime.yaml
-```
+LWIR 카메라 프레임을 Benchmark용 데이터셋으로 저장합니다.
 
-## Docker 사용
+### Benchmark
 
-프로젝트 이미지를 만들고 컨테이너를 엽니다.
+저장된 모든 sequence의 16-bit PNG를 순차 처리하여 Detection/Tracking prediction과 각 단계의
+처리 시간을 저장합니다.
 
-```bash
-docker compose build runtime-pc
-docker compose run --rm runtime-pc
-```
-
-컨테이너 안에서는 동일하게 검증 스크립트를 실행합니다.
+## Build & Run
 
 ```bash
-./scripts/verify_cpu.sh
+# Capture
+./scripts/build_capture.sh
+./build/capture/lwir_capture
+
+# Benchmark
+./scripts/build_benchmark.sh
+./build/benchmark/lwir_benchmark
+
+# Runtime
+./scripts/build_runtime.sh
+./build/runtime/lwir_runtime
+
+# Test
+./scripts/test.sh
 ```
 
-Docker 기반 이미지는 기본적으로 `dx-runtime:dxas-5749ab70-ubuntu22.04`를 사용합니다. 다른 이미지는 `.env.example`의 `DX_RUNTIME_IMAGE`를 설정해 지정할 수 있습니다.
+Runtime과 Benchmark는 DEEPX 환경을 사용합니다. Capture와 Runtime은 실제 LWIR
+카메라 입력을 사용하며, Docker는 개발 및 테스트 환경을 구성할 때 사용할 수 있습니다.
 
-## DEEPX dx_app 연동
+## Dataset
 
-공식 `DEEPX-AI/dx_app`은 `third_party/dx_app` submodule로 고정되어 있습니다.
+Capture가 생성하는 데이터셋은 sequence 단위로 구성합니다.
 
-```bash
-git submodule update --init --recursive
-cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON
-cmake --build build -j
+```text
+<dataset_root>/
+├── seq_001/
+│   ├── images/
+│   │   ├── 000001.png
+│   │   ├── 000002.png
+│   │   └── ...
+│   └── sequence.yaml
+├── seq_002/
+└── ...
 ```
 
-외부 dx_app 체크아웃을 사용하려면 다음 옵션을 추가합니다.
+`images/`
 
-```bash
-cmake -S . -B build -DLWIR_ENABLE_DX_APP=ON -DDX_APP_ROOT=/path/to/dx_app
+- TE-EV1에서 저장한 16-bit LWIR PNG frame
+
+`sequence.yaml`
+
+- 촬영 sequence의 조건 및 metadata
+- distance, person count, motion, temperature, frame count, image resolution
+
+## Capture → Benchmark
+
+```text
+Capture
+  ↓
+16-bit LWIR Images + Sequence Metadata
+  ↓
+Benchmark
+  ↓
+Detection / Tracking Predictions + Timing
 ```
 
-현재 CPU-only 빌드에서는 LWIR 전처리와 pipeline 경계만 검증합니다. DXNN 로딩, NPU 추론, tensor 검증과 성능 측정은 실제 DEEPX 장치에서 추가 검증해야 합니다. 가짜 추론 결과는 생성하지 않습니다.
+Benchmark는 설정된 dataset root 아래의 여러 sequence를 읽습니다. Dataset root는
+프로젝트 내부의 `datasets/` 또는 외부 저장장치의 `/mnt/lwir_data/datasets/`를 사용할
+수 있습니다. 각 sequence는 `000001.png`부터 누락 없이 연속된 frame 이름을 사용해야 하며,
+sequence가 바뀔 때마다 Tracker 상태를 초기화합니다.
 
-## 설정
+## 결과 저장 구조
 
-- `config/runtime.yaml`: Detection backend, Tracking, Control, 측정 설정
-- `config/model/yolov8n.yaml`: LWIR 입력 범위, 모델 입력 크기, letterbox와 후처리 설정
-- `config/tracking/bytetrack.yaml`: ByteTrack 설정
-- `config/control.yaml`: 제어 설정
+Benchmark 결과는 model과 tracker 조합 아래에서 실행 시각별로 저장합니다.
 
-모델별 값은 `config/model/*.yaml`에 두고, YAML 파싱과 검증은 `AppConfig`에서 담당합니다. Detection 결과 좌표는 원본 LWIR 프레임 기준이어야 합니다.
-
-## GUI 연결 경계
-
-GUI에서 선택한 Track ID는 다음 함수로 전달합니다.
-
-```cpp
-application.set_selected_track_id(track_id);
+```text
+/mnt/lwir_data/results/benchmark/
+└── yolov8n_bytetrack/
+    └── 20261007_190531/
+        ├── benchmark.yaml
+        ├── yolov8n.yaml
+        ├── detections/
+        ├── tracks/
+        └── timing/
 ```
 
-GUI로 보낼 최신 프레임과 Track 결과는 다음 함수에서 가져옵니다.
+Runtime 결과는 같은 조합 아래에서 `core`, `gui`, `full` 모드와 실행 시각으로 구분합니다.
 
-```cpp
-TrackingResultPtr result;
-application.pop_gui_result(result);
+```text
+/mnt/lwir_data/results/runtime/
+└── yolov8n_bytetrack/
+    ├── core/20261007_193015/
+    ├── gui/20261007_194230/
+    └── full/20261007_195105/
+        ├── runtime.yaml
+        ├── yolov8n.yaml
+        └── metrics.csv
 ```
 
-`result->frame->image`와 `result->tracks`는 동일한 프레임에 대응합니다. GUI queue는 화면 지연 누적을 막기 위해 최신 결과 두 개만 유지합니다.
+실행 디렉터리는 `YYYYMMDD_HHMMSS` 형식을 사용하며 같은 초에 충돌하면 `_1`, `_2` suffix를
+붙입니다. 실행 중 오류가 발생하면 해당 timestamp 디렉터리를 삭제하여 완료된 결과만 남깁니다.
+
+## Configuration
+
+Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yaml`,
+`config/benchmark.yaml` 설정을 사용합니다. 모델 관련 설정은 `config/model/` 아래의
+별도 model configuration으로 관리하며 실행 파라미터는 YAML에서 변경합니다.
+
+- Runtime 측정 결과 root: `measurement.output_root`
+- Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`
+- Benchmark dataset/result root: `path.dataset_root`, `path.output_root`
+- Runtime/Benchmark model 설정: `model.config`
 
 ## 현재 구현 상태
 
-- 구현됨: thread/queue 연결, shared Frame 수명 관리, LWIR 전처리, 설정 검증, GUI/제어 결과 분기
-- 골격 상태: 실제 카메라 입력, DEEPX NPU 추론·후처리, ByteTrack 내부 로직, 짐벌 통신
+- 구현됨: thread/queue 연결, shared Frame 수명 관리, LWIR 전처리, 설정 검증,
+  ByteTrack, GUI/제어 결과 분기
+- 구현됨: `core`/`gui`/`full` 구분, Runtime/Benchmark 결과 snapshot과 실패 시 정리,
+  Runtime stage 측정, `Ctrl+C` 정상 종료
+- 구현됨: GStreamer `x264enc` 기반 H.264/RTP/UDP 영상 송신, 별도 Track
+  metadata UDP 송신, GUI 송신 시작 timestamp 전달, GUI TCP 명령 수신·재접속·종료 처리
+- 구현됨(하드웨어 미검증): i3system Thermal Expert SDK 카메라 입력
+- 골격 상태: DEEPX NPU 추론·후처리, Orange Pi 하드웨어 H.264 encoder,
+  짐벌 통신
 
-전체 흐름은 `docs/pipeline.html`, 논의가 필요한 항목은 `discussion.md`에서 확인할 수 있습니다.
+논의가 필요한 항목은 [Discussion](discussion.md)에서 확인할 수 있습니다.
 
-## 테스트 실행
-
-테스트를 포함해 빌드하려면 `BUILD_TESTING=ON`으로 설정합니다.
-
-```bash
-cmake -S . -B build/test \
-    -DBUILD_TESTING=ON \
-    -DLWIR_ENABLE_DX_APP=OFF
-
-cmake --build build/test -j
-```
-
-등록된 테스트 목록은 다음 명령으로 확인합니다.
+## Test
 
 ```bash
-ctest --test-dir build/test -N
+./scripts/test.sh
 ```
 
-전체 테스트를 실행합니다.
-
-```bash
-ctest --test-dir build/test --output-on-failure
-```
-
-특정 영역의 테스트만 실행할 수도 있습니다.
-
-```bash
-# ByteTrack 테스트
-ctest --test-dir build/test -R bytetrack --output-on-failure
-
-# Detection 테스트
-ctest --test-dir build/test -R detection --output-on-failure
-
-# LWIR 전처리 테스트
-ctest --test-dir build/test -R lwir_preprocessor --output-on-failure
-
-# Target Selector 테스트
-ctest --test-dir build/test -R target_selector --output-on-failure
-
-# Shared Frame 파이프라인 테스트
-ctest --test-dir build/test -R shared_frame_pipeline --output-on-failure
-```
-
-테스트가 필요하지 않은 일반 빌드에서는 다음과 같이 비활성화할 수 있습니다.
-
-```bash
-cmake -S . -B build/cpu \
-    -DBUILD_TESTING=OFF \
-    -DLWIR_ENABLE_DX_APP=OFF
-
-cmake --build build/cpu -j
-```
+필요하면 생성된 `build/test` 디렉터리에서 특정 CTest만 직접 실행할 수 있습니다.
