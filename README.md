@@ -7,40 +7,17 @@ LWIR 카메라 영상에서 객체를 검출하고 추적한 뒤, 같은 프레�
 - 입력: `CV_16UC1` LWIR 영상
 - Detection: YOLOv8 + DEEPX `dx_app` 구조
 - Tracking: ByteTrack
-- 실행 구조: POSIX pthread + thread-safe queue
+- 실행 구조: POSIX pthread + `ThreadSafeQueue`
 - 동기화/통신: POSIX pthread mutex와 POSIX socket API
 
-런타임에서 직접 소유하는 thread, mutex, socket은 POSIX API로 통일합니다.
-`std::thread`, `std::mutex`, `std::atomic`은 사용하지 않습니다. GStreamer는 영상
-pipeline 내부 구현을 위해 GLib을 사용하지만 애플리케이션 worker와 socket의
+worker thread와 queue 동기화, socket은 POSIX API를 사용합니다. 프레임과 처리 결과는
+`shared_ptr`로 전달하고, 종료 및 실패 상태는 atomic flag로 관리합니다. GStreamer는
+영상 pipeline 내부 구현을 위해 GLib을 사용하지만 애플리케이션 worker와 socket의
 소유권은 POSIX 경계에 유지합니다.
 
 ## 파이프라인
 
-```mermaid
-flowchart LR
-    Camera["CameraThread<br/>LWIR CV_16UC1"]
-
-    subgraph Detection["DetectionThread · 단일 Detection 단계"]
-        direction LR
-        Preprocess["LWIR 전처리<br/>16-bit → RGB · letterbox"]
-        Inference["DEEPX NPU 추론<br/>dx_app 연동 예정"]
-        Postprocess["YOLOv8 후처리<br/>원본 영상 좌표"]
-        Preprocess --> Inference --> Postprocess
-    end
-
-    Tracking["TrackingThread<br/>ByteTrack"]
-    GUI["GUI 송신<br/>원본 Frame + Track 목록"]
-    Selection["TargetSelector<br/>선택 ID 상태"]
-    Control["ControlThread<br/>Orange Pi 짐벌 제어"]
-
-    Camera -->|"FrameMessage<br/>shared_ptr&lt;const FrameContext&gt;"| Preprocess
-    Postprocess -->|"DetectionResult<br/>동일 FrameContextPtr"| Tracking
-    Tracking -->|"TrackingResultPtr"| GUI
-    Tracking -->|"동일 TrackingResultPtr"| Control
-    GUI -.->|"selected track_id"| Selection
-    Selection -.->|"get_selected_id()"| Control
-```
+![Runtime Pipeline](docs/runtime_pipeline.drawio.svg)
 
 Camera에서 만든 `FrameContext`는 복사하지 않고 `shared_ptr`로 Detection, Tracking, GUI까지 전달합니다. 따라서 GUI는 Track 결과가 생성된 정확한 원본 프레임을 사용할 수 있습니다.
 
@@ -51,6 +28,17 @@ Detection은 `DxAppDetectionPipeline` 한 객체가 전처리, 추론, 후처리
 ### Runtime
 
 실시간 Camera → Detection → Tracking → Target Selection → Control / GUI 전체 파이프라인을 실행합니다.
+`gui.enabled`와 `control.enabled` 조합에 따라 실행 결과를 자동으로 구분합니다.
+
+| 구분 | GUI | Control |
+| --- | --- | --- |
+| `core` | 비활성 | 비활성 |
+| `gui` | 활성 | 비활성 |
+| `full` | 활성 | 활성 |
+
+Control은 GUI에서 선택한 Track을 사용하므로 GUI 없이 Control만 활성화하는 설정은 허용하지
+않습니다. 실행 중 `Ctrl+C`를 입력하면 프레임 생산을 멈추고 queue를 순서대로 닫은 뒤 worker를
+join하고 측정 결과를 저장합니다.
 
 ### Capture
 
@@ -58,7 +46,8 @@ LWIR 카메라 프레임을 Benchmark용 데이터셋으로 저장합니다.
 
 ### Benchmark
 
-저장된 데이터셋으로 Detection / Tracking 성능을 평가합니다.
+저장된 모든 sequence의 16-bit PNG를 순차 처리하여 Detection/Tracking prediction과 각 단계의
+처리 시간을 저장합니다.
 
 ## Build & Run
 
@@ -87,13 +76,12 @@ Runtime과 Benchmark는 DEEPX 환경을 사용합니다. Capture와 Runtime은 �
 Capture가 생성하는 데이터셋은 sequence 단위로 구성합니다.
 
 ```text
-datasets/
+<dataset_root>/
 ├── seq_001/
 │   ├── images/
 │   │   ├── 000001.png
 │   │   ├── 000002.png
 │   │   └── ...
-│   ├── gt.txt
 │   └── sequence.yaml
 ├── seq_002/
 └── ...
@@ -108,12 +96,6 @@ datasets/
 - 촬영 sequence의 조건 및 metadata
 - distance, person count, motion, temperature, frame count, image resolution
 
-`gt.txt`
-
-- Benchmark용 Ground Truth
-- frame, person_id, bounding box 정보
-- Capture 직후 생성되는 것이 아니라 annotation 후 추가
-
 ## Capture → Benchmark
 
 ```text
@@ -121,18 +103,46 @@ Capture
   ↓
 16-bit LWIR Images + Sequence Metadata
   ↓
-Annotation
-  ↓
-Ground Truth
-  ↓
 Benchmark
   ↓
-Detection / Tracking Evaluation
+Detection / Tracking Predictions + Timing
 ```
 
 Benchmark는 설정된 dataset root 아래의 여러 sequence를 읽습니다. Dataset root는
 프로젝트 내부의 `datasets/` 또는 외부 저장장치의 `/mnt/lwir_data/datasets/`를 사용할
-수 있습니다.
+수 있습니다. 각 sequence는 `000001.png`부터 누락 없이 연속된 frame 이름을 사용해야 하며,
+sequence가 바뀔 때마다 Tracker 상태를 초기화합니다.
+
+## 결과 저장 구조
+
+Benchmark 결과는 model과 tracker 조합 아래에서 실행 시각별로 저장합니다.
+
+```text
+/mnt/lwir_data/results/benchmark/
+└── yolov8n_bytetrack/
+    └── 20261007_190531/
+        ├── benchmark.yaml
+        ├── yolov8n.yaml
+        ├── detections/
+        ├── tracks/
+        └── timing/
+```
+
+Runtime 결과는 같은 조합 아래에서 `core`, `gui`, `full` 모드와 실행 시각으로 구분합니다.
+
+```text
+/mnt/lwir_data/results/runtime/
+└── yolov8n_bytetrack/
+    ├── core/20261007_193015/
+    ├── gui/20261007_194230/
+    └── full/20261007_195105/
+        ├── runtime.yaml
+        ├── yolov8n.yaml
+        └── metrics.csv
+```
+
+실행 디렉터리는 `YYYYMMDD_HHMMSS` 형식을 사용하며 같은 초에 충돌하면 `_1`, `_2` suffix를
+붙입니다. 실행 중 오류가 발생하면 해당 timestamp 디렉터리를 삭제하여 완료된 결과만 남깁니다.
 
 ## Configuration
 
@@ -140,17 +150,24 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 `config/benchmark.yaml` 설정을 사용합니다. 모델 관련 설정은 `config/model/` 아래의
 별도 model configuration으로 관리하며 실행 파라미터는 YAML에서 변경합니다.
 
+- Runtime 측정 결과 root: `measurement.output_root`
+- Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`
+- Benchmark dataset/result root: `path.dataset_root`, `path.output_root`
+- Runtime/Benchmark model 설정: `model.config`
+
 ## 현재 구현 상태
 
 - 구현됨: thread/queue 연결, shared Frame 수명 관리, LWIR 전처리, 설정 검증,
   ByteTrack, GUI/제어 결과 분기
+- 구현됨: `core`/`gui`/`full` 구분, Runtime/Benchmark 결과 snapshot과 실패 시 정리,
+  Runtime stage 측정, `Ctrl+C` 정상 종료
 - 구현됨: GStreamer `x264enc` 기반 H.264/RTP/UDP 영상 송신, 별도 Track
-  metadata UDP 송신, GUI TCP 명령 수신·재접속·종료 처리
+  metadata UDP 송신, GUI 송신 시작 timestamp 전달, GUI TCP 명령 수신·재접속·종료 처리
 - 구현됨(하드웨어 미검증): i3system Thermal Expert SDK 카메라 입력
 - 골격 상태: DEEPX NPU 추론·후처리, Orange Pi 하드웨어 H.264 encoder,
   짐벌 통신
 
-전체 흐름은 `docs/pipeline.html`, 논의가 필요한 항목은 `discussion.md`에서 확인할 수 있습니다.
+논의가 필요한 항목은 [Discussion](discussion.md)에서 확인할 수 있습니다.
 
 ## Test
 
