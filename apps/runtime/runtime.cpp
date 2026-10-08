@@ -157,7 +157,7 @@ private:
     std::unique_ptr<CameraThread> camera_thread_;
 
     // DX 전처리, 추론, 후처리를 소유하는 통합 Detection 단계
-    std::unique_ptr<DetectionPipeline> detection_pipeline_;
+    std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<DetectionThread> detection_thread_;
 
     // 현재 사용하는 Tracker 객체를 Application이 소유한다.
@@ -263,6 +263,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             measurement_enabled_
         );
 
+    /// TODO: add control enabled
+
     // Tracking 결과와 GUI 선택 ID를 Orange Pi 짐벌 제어 단계에 직접 연결한다.
     control_thread_ =
         std::make_unique<ControlThread>(
@@ -272,6 +274,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             config_.control.enabled,
             measurement_enabled_
         );
+
 
     if (config_.gui.enabled)
     {

@@ -11,7 +11,7 @@
 #include "pipeline/tracking_thread.hpp"
 #include "tracking/tracker.hpp"
 
-class FakeDetectionPipeline : public DetectionPipeline
+class FakeDetectionPipeline : public IDetectionPipeline
 {
 public:
     std::vector<Detection> detect(const FrameContext&) override

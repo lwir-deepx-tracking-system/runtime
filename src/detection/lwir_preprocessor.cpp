@@ -6,7 +6,7 @@
 #include <opencv2/imgproc.hpp>
 
 // 실행 중 YAML을 다시 읽지 않고 AppConfig가 검증한 값을 복사해 사용한다.
-LwirPreprocessor::LwirPreprocessor(const ModelConfig& config) : config_(config) {}
+LwirPreprocessor::LwirPreprocessor(const ModelConfig& config) : IPreprocessor(config) {}
 
 // 원본 영상 좌표를 보존할 수 있도록 영상과 letterbox 변환 정보를 함께 생성한다.
 void LwirPreprocessor::process(

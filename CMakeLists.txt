@@ -163,6 +163,7 @@ if(LWIR_NEEDS_VISION)
     )
 
     if(LWIR_ENABLE_DX_APP)
+        target_sources(lwir_vision PRIVATE src/detection/postprocessor.cpp)
         target_link_libraries(lwir_vision
             PRIVATE
                 dx_app_dependency

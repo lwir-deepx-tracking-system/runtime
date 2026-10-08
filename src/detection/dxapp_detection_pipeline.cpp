@@ -1,5 +1,9 @@
 #include "detection/dxapp_detection_pipeline.hpp"
 
+#include "detection/lwir_preprocessor.hpp"
+#include "detection/postprocessor.hpp"
+#include "common/common_util.hpp"
+
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -14,12 +18,12 @@ struct DxAppDetectionPipeline::NpuState
         ThreadSafeQueue<bool> completed;
         std::vector<Detection> detections;
         std::exception_ptr error;
-        dxapp::PreprocessContext context;
+        LwirPreprocessContext context;
     };
 
     dxrt::InferenceOption inference_option;
     dxrt::InferenceEngine engine;
-    std::unique_ptr<dxapp::IPostprocessor<dxapp::DetectionResult>> postprocessor;
+
     std::vector<std::uint8_t> input_buffer;
     bool is_float_input = false;
     bool is_nhwc = false;
@@ -43,13 +47,6 @@ struct DxAppDetectionPipeline::NpuState
 
         is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
         is_nhwc = ::isInputNHWC(input_shape);
-        postprocessor = std::make_unique<dxapp::YOLOv8Postprocessor>(
-            input_width, input_height,
-            config.model.postprocess.confidence_threshold,
-            config.model.postprocess.nms_threshold,
-            engine.IsOrtConfigured(),
-            config.model.postprocess.num_classes,
-            config.model.postprocess.class_names);
         input_buffer.resize(engine.GetInputSize());
     }
 
@@ -96,30 +93,17 @@ struct DxAppDetectionPipeline::NpuState
         return std::move(request.detections);
     }
 
-    void register_callback()
+    bool ort_configured() const { return engine.IsOrtConfigured(); }
+
+    void register_callback(IPostprocessor* postprocessor)
     {
       engine.RegisterCallback(
-          [this](dxrt::TensorPtrs &outputs, void *user_data) -> int
+          [postprocessor](dxrt::TensorPtrs &outputs, void *user_data) -> int
           {
             auto &request = *static_cast<Request *>(user_data);
             try
             {
-              const auto results = postprocessor->process(outputs, request.context);
-              request.detections.reserve(results.size());
-              for(const auto &result : results)
-              {
-                if(result.box.size() < 4)
-                  continue;
-                Detection detection;
-                detection.x          = result.box[0];
-                detection.y          = result.box[1];
-                detection.width      = result.box[2] - result.box[0];
-                detection.height     = result.box[3] - result.box[1];
-                detection.class_id   = result.class_id;
-                detection.confidence = result.confidence;
-                detection.class_name = result.class_name;
-                request.detections.push_back(std::move(detection));
-              }
+              request.detections = postprocessor->process(outputs, request.context);
             }
             catch(...)
             {
@@ -134,20 +118,26 @@ struct DxAppDetectionPipeline::NpuState
 DxAppDetectionPipeline::DxAppDetectionPipeline(
     const ModelConfig& model_config,
     const DetectionConfig& detection_config)
-    : preprocessor_(model_config),
+    : preprocessor_(std::make_unique<LwirPreprocessor>(model_config)),
       model_path_(model_config.path),
+<<<<<<< Updated upstream
       max_inflight_(detection_config.max_inflight),
       npu_(std::make_unique<NpuState>(config, model_path_))
+=======
+      max_inflight_(detection_config.max_inflight)
+>>>>>>> Stashed changes
 {
-    npu_->register_callback();
+    npu_ = std::make_unique<NpuState>(model_config, model_path_);
+    postprocessor_ = std::make_unique<Postprocessor>(model_config, npu_->ort_configured());
+    npu_->register_callback(postprocessor_.get());
 }
 
 DxAppDetectionPipeline::~DxAppDetectionPipeline() = default;
 
 std::vector<Detection> DxAppDetectionPipeline::detect(const FrameContext& frame)
 {
-    cv::Mat model_input;
-    LwirPreprocessContext context;
-    preprocessor_.process(frame.image, model_input, context);
+    cv::Mat model_input;    // preprocessed image
+    PreprocessContext context;
+    preprocessor_->process(frame.image, model_input, context);
     return npu_->infer(model_input, context);
 }

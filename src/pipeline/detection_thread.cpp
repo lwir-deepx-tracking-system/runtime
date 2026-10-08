@@ -9,7 +9,7 @@
 
 // Detection 구현과 shared Frame 입출력 queue를 worker에 연결한다.
 DetectionThread::DetectionThread(
-    DetectionPipeline& pipeline,
+    IDetectionPipeline& pipeline,
     ThreadSafeQueue<FrameMessage>& input_queue,
     ThreadSafeQueue<DetectionResult>& output_queue,
     bool measurement_enabled)

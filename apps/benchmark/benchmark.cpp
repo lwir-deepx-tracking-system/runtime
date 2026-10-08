@@ -205,7 +205,7 @@ private:
     BenchmarkConfig config_;
     std::string config_path_;
 
-    std::unique_ptr<DetectionPipeline> detection_pipeline_;
+    std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<Tracker> tracker_;
 
 public:

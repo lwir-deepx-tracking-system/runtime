@@ -1,40 +1,35 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
 
 #include "config/app_config.hpp"
 #include "common/detection.hpp"
 #include "common/frame.hpp"
+#include "common/common_util.hpp"
+
+#include "detection/i_detection_pipeline.hpp"
+#include "detection/postprocessor.hpp"
 #include "detection/lwir_preprocessor.hpp"
-#include "common/base/i_processor.hpp"
-#include "common/utility/common_util.hpp"
-#include "common/processors/yolo_detection_postprocessor.hpp"
 
-// dx_app과 같은 방식으로 전처리, 추론, 후처리를 한 객체 안에서 수행한다.
-class DetectionPipeline
-{
-public:
-    virtual ~DetectionPipeline() = default;
-    virtual std::vector<Detection> detect(const FrameContext& frame) = 0;
-};
 
-// 향후 dx_app 실행기와 연결할 CPU 측 경계이다.
-// 현재는 하드웨어 추론을 제공하지 않으며 가짜 검출 결과도 생성하지 않는다.
-class DxAppDetectionPipeline final : public DetectionPipeline
+class DxAppDetectionPipeline final : public IDetectionPipeline
 {
 public:
     DxAppDetectionPipeline(
         const ModelConfig& model_config,
         const DetectionConfig& detection_config);
+    ~DxAppDetectionPipeline() override;
+
     std::vector<Detection> detect(const FrameContext& frame) override;
 
 private:
     struct NpuState;
 
-    LwirPreprocessor preprocessor_;
+    std::unique_ptr<IPreprocessor> preprocessor_;
+    std::unique_ptr<IPostprocessor> postprocessor_;
     std::string model_path_;
     std::size_t max_inflight_;
     std::unique_ptr<NpuState> npu_;

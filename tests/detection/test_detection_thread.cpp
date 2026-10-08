@@ -1,7 +1,7 @@
 #include "pipeline/detection_thread.hpp"
 
 // NPU 없이 DetectionThread의 queue 및 Frame 수명 계약만 검증하는 test double.
-class FakePipeline final : public DetectionPipeline {
+class FakePipeline final : public IDetectionPipeline {
 public:
     std::vector<Detection> detect(const FrameContext&) override
     {
