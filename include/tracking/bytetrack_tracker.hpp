@@ -2,31 +2,11 @@
 
 #include <array>
 #include <memory>
-#include <string>
 #include <vector>
 
+#include "config/app_config.hpp"
 #include "tracking/kalman_filter.hpp"
 #include "tracking/tracker.hpp"
-
-
-// ByteTrack 파라미터. 기본값은 공식 ByteTrack 구현 기준이다.
-struct ByteTrackConfig
-{
-    float track_thresh = 0.5f;      // 이 점수 이상: high detection (1차 매칭)
-    float low_thresh = 0.1f;        // 이 점수 초과 ~ track_thresh 미만: low detection (2차 매칭)
-    float new_track_thresh = 0.6f;  // 새 Track을 만드는 최소 점수
-    float match_thresh = 0.8f;      // 1차 매칭에서 허용하는 최대 IoU distance (1 - IoU)
-    int track_buffer = 30;          // 놓친 Track을 유지하는 프레임 수 (30fps 기준)
-    int frame_rate = 30;
-};
-
-// ByteTrack 설정 YAML을 읽고 값의 범위를 검증한다.
-// 파일이 없거나, 필수 키가 빠졌거나, 모르는 키·잘못된 값이 있으면 std::runtime_error.
-//   필수: track_threshold, match_threshold, track_buffer
-//   선택: low_threshold(기본 0.1), new_track_threshold(기본 track_threshold + 0.1),
-//         frame_rate(기본 30)
-ByteTrackConfig load_bytetrack_config(const std::string& path);
-
 
 namespace bytetrack
 {
@@ -65,8 +45,10 @@ using STrackPtr = std::shared_ptr<STrack>;
 class ByteTrackTracker : public Tracker
 {
 private:
-    std::string config_path_;
-    ByteTrackConfig config_;
+    static constexpr float kLowThreshold = 0.1F;
+
+    TrackingConfig config_;
+    float new_track_threshold_ = 0.6F;
     KalmanFilter kalman_;
 
     int frame_id_ = 0;
@@ -80,16 +62,8 @@ private:
     void apply_detection(bytetrack::STrack& track, const bytetrack::STrack& det);
 
 public:
-    // 실행용: config_path의 YAML을 읽어 설정을 적용한다.
-    explicit ByteTrackTracker(
-        std::string config_path
-    );
-
-    // 테스트용: YAML 없이 설정 값을 직접 지정한다. (config_path는 로그 표시용)
-    ByteTrackTracker(
-        std::string config_path,
-        const ByteTrackConfig& config
-    );
+    // AppConfig가 검증한 runtime tracking 설정을 적용한다.
+    explicit ByteTrackTracker(const TrackingConfig& config);
 
     ~ByteTrackTracker() override = default;
 
@@ -101,5 +75,5 @@ public:
     // ByteTrack 내부 상태를 초기화한다.
     void reset() override;
 
-    const ByteTrackConfig& config() const { return config_; }
+    const TrackingConfig& config() const { return config_; }
 };

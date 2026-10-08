@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/app_config.hpp"
+#include "config/app_config.hpp"
 
 #include <opencv2/core.hpp>
 

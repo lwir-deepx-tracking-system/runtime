@@ -131,10 +131,12 @@ struct DxAppDetectionPipeline::NpuState
     }
 };
 // Keep the NPU engine and callback state alive for every request.
-DxAppDetectionPipeline::DxAppDetectionPipeline(const AppConfig& config)
-    : preprocessor_(config.model),
-      model_path_(config.model.path),
-      max_inflight_(config.detection.max_inflight),
+DxAppDetectionPipeline::DxAppDetectionPipeline(
+    const ModelConfig& model_config,
+    const DetectionConfig& detection_config)
+    : preprocessor_(model_config),
+      model_path_(model_config.path),
+      max_inflight_(detection_config.max_inflight),
       npu_(std::make_unique<NpuState>(config, model_path_))
 {
     npu_->register_callback();
