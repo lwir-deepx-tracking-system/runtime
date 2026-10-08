@@ -14,6 +14,7 @@ find_library(DXRT_LIBRARY NAMES dxrt REQUIRED)
 add_library(dx_app_dependency INTERFACE)
 target_include_directories(dx_app_dependency INTERFACE
     "${DX_APP_ROOT}/src/cpp_example"
+    "${DX_APP_ROOT}/src/cpp_example/common/utility"
     "${DXRT_INCLUDE_DIR}"
 )
 target_link_libraries(dx_app_dependency INTERFACE "${DXRT_LIBRARY}")

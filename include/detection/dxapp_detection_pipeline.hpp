@@ -3,11 +3,15 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include <memory>
 
 #include "app/app_config.hpp"
 #include "common/detection.hpp"
 #include "common/frame.hpp"
 #include "detection/lwir_preprocessor.hpp"
+#include "common/base/i_processor.hpp"
+#include "common/utility/common_util.hpp"
+#include "common/processors/yolo_detection_postprocessor.hpp"
 
 // dx_app과 같은 방식으로 전처리, 추론, 후처리를 한 객체 안에서 수행한다.
 class DetectionPipeline
@@ -23,10 +27,14 @@ class DxAppDetectionPipeline final : public DetectionPipeline
 {
 public:
     explicit DxAppDetectionPipeline(const AppConfig& config);
+    ~DxAppDetectionPipeline() override;
     std::vector<Detection> detect(const FrameContext& frame) override;
 
 private:
+    struct NpuState;
+
     LwirPreprocessor preprocessor_;
     std::string model_path_;
     std::size_t max_inflight_;
+    std::unique_ptr<NpuState> npu_;
 };
