@@ -60,6 +60,46 @@ std::vector<std::vector<float>> iou_distance(
     return cost;
 }
 
+// 박스의 각 변을 (폭, 높이) × scale만큼 넓힌다. max_px > 0이면 한 변의 확장량을 그 값으로 제한한다.
+Box buffered(const Box& b, float scale, float max_px)
+{
+    float ex = b[2] * scale, ey = b[3] * scale;
+    if (max_px > 0.0f)
+    {
+        ex = std::min(ex, max_px);
+        ey = std::min(ey, max_px);
+    }
+    return {b[0] - ex, b[1] - ey, b[2] + 2.0f * ex, b[3] + 2.0f * ey};
+}
+
+// Buffered IoU distance: cost[i][j] = 1 - IoU(넓힌 Track 예측 박스, 넓힌 검출 박스).
+// small_size > 0이면 Track 박스의 짧은 변이 그보다 큰 Track은 대상에서 빼고 cost 1(매칭 불가)로 둔다.
+std::vector<std::vector<float>> buffered_iou_distance(
+    const std::vector<STrackPtr>& tracks,
+    const std::vector<STrackPtr>& dets,
+    const TrackingConfig& c)
+{
+    std::vector<std::vector<float>> cost(
+        tracks.size(), std::vector<float>(dets.size(), 1.0f));
+    for (size_t i = 0; i < tracks.size(); ++i)
+    {
+        const Box tb = track_box(*tracks[i]);
+        if (c.buffer_small_size > 0.0f && std::min(tb[2], tb[3]) > c.buffer_small_size)
+            continue;
+        const Box tbb = buffered(tb, c.buffer_scale, c.buffer_max_px);
+        for (size_t j = 0; j < dets.size(); ++j)
+            cost[i][j] = 1.0f - iou(tbb, buffered(dets[j]->det_tlwh, c.buffer_scale, c.buffer_max_px));
+    }
+    return cost;
+}
+
+void fuse_score(std::vector<std::vector<float>>& cost, const std::vector<STrackPtr>& dets)
+{
+    for (auto& row : cost)
+        for (size_t j = 0; j < dets.size(); ++j)
+            row[j] = 1.0f - (1.0f - row[j]) * dets[j]->score;
+}
+
 // Hungarian 알고리즘 (n <= m). 반환: 행 i에 배정된 열 번호
 std::vector<int> hungarian(const std::vector<std::vector<double>>& a)
 {
@@ -260,6 +300,15 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
            << ", match_threshold=" << config_.match_threshold
            << ", track_buffer=" << config_.track_buffer
            << " (Lost 유지 " << max_time_lost_ << "프레임)";
+    if (config_.fuse_score)
+        values << ", fuse_score=true";
+    if (config_.lost_output_frames > 0)
+        values << ", lost_output_frames=" << config_.lost_output_frames;
+    if (config_.buffer_scale > 0.0F)
+        values << ", buffer_scale=" << config_.buffer_scale
+               << ", buffer_max_px=" << config_.buffer_max_px
+               << ", buffer_small_size=" << config_.buffer_small_size
+               << ", buffer_snap=" << (config_.buffer_snap ? "true" : "false");
     Logger::debug(
         "[Tracking] ByteTrack 설정 값: " + values.str()
     );
@@ -289,6 +338,7 @@ void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
     t.score = det.score;
     t.class_id = det.class_id;
     t.frame_id = frame_id_;
+    t.det_tlwh = det.det_tlwh;  // 마지막으로 매칭된 검출 박스 (화면 밖 판정에 사용)
 }
 
 
@@ -329,6 +379,17 @@ std::vector<Track> ByteTrackTracker::track(
         kalman_.predict(t->kf);
     }
 
+    // 2-1. 카메라 움직임 보정 (CMC): 예측 위치를 카메라가 움직인 만큼 옮긴다.
+    //      미확정 Track은 예측하지 않지만 위치는 같이 옮겨야 다음 검출과 겹친다.
+    if (!camera_motion_.is_identity())
+    {
+        for (auto& t : pool)
+            apply_camera_motion(t->kf, camera_motion_);
+        for (auto& t : unconfirmed)
+            apply_camera_motion(t->kf, camera_motion_);
+    }
+    camera_motion_ = CameraMotion{};
+
     std::vector<STrackPtr> activated, refind, lost_new, removed;
     auto on_match = [&](const STrackPtr& t, const STrackPtr& det)
     {
@@ -338,15 +399,56 @@ std::vector<Track> ByteTrackTracker::track(
     };
 
     // 3-1. 1차 Association: 모든 Track ↔ high detection
+    auto cost1 = iou_distance(pool, high_dets);
+    if (config_.fuse_score)
+        fuse_score(cost1, high_dets);
     const auto m1 = linear_assignment(
-        iou_distance(pool, high_dets), pool.size(), high_dets.size(),
-        config_.match_threshold);
+        cost1, pool.size(), high_dets.size(), config_.match_threshold);
     for (const auto& [r, c] : m1.matches)
         on_match(pool[r], high_dets[c]);
 
+    std::vector<size_t> left_pool = m1.unmatched_rows;
+    std::vector<size_t> left_high = m1.unmatched_cols;
+
+    // 3-1b. Buffered IoU (켰을 때만): 1차에서 남은 Track ↔ 남은 high detection을 넓힌 박스로 다시 매칭.
+    //       원래 IoU로 맞는 쌍은 이미 1차에서 정해졌으므로, 빠르거나 작아서 겹치지 않던 쌍만 구제한다.
+    if (config_.buffer_scale > 0.0f && !left_pool.empty() && !left_high.empty())
+    {
+        std::vector<STrackPtr> bt, bd;
+        for (size_t r : left_pool)
+            bt.push_back(pool[r]);
+        for (size_t c : left_high)
+            bd.push_back(high_dets[c]);
+        auto costb = buffered_iou_distance(bt, bd, config_);
+        if (config_.fuse_score)
+            fuse_score(costb, bd);
+        const auto mb = linear_assignment(costb, bt.size(), bd.size(), config_.match_threshold);
+        for (const auto& [r, c] : mb.matches)
+        {
+            on_match(bt[r], bd[c]);
+            // 넓힌 박스로만 맞은 쌍은 예측이 크게 빗나간 경우다. Kalman 업데이트는 틀린 예측과 검출의
+            // 중간 위치를 내므로, buffer_snap이면 위치(cx, cy, a, h)를 검출 박스로 맞춘다.
+            // (프레임 누락에는 유리, 검출이 흔들리는 작은 표적에는 평활이 사라져 불리)
+            if (config_.buffer_snap)
+            {
+                const KalmanMeasurement z = to_xyah(bd[c]->det_tlwh);
+                for (int k = 0; k < 4; ++k)
+                    bt[r]->kf.mean[k] = z[k];
+            }
+        }
+
+        std::vector<size_t> next_pool, next_high;
+        for (size_t r : mb.unmatched_rows)
+            next_pool.push_back(left_pool[r]);
+        for (size_t c : mb.unmatched_cols)
+            next_high.push_back(left_high[c]);
+        left_pool = std::move(next_pool);
+        left_high = std::move(next_high);
+    }
+
     // 3-2. 2차 Association: 남은 Tracked Track ↔ low detection (ByteTrack 핵심)
     std::vector<STrackPtr> remain_tracked;
-    for (size_t r : m1.unmatched_rows)
+    for (size_t r : left_pool)
         if (pool[r]->state == TrackState::Tracked)
             remain_tracked.push_back(pool[r]);
 
@@ -368,12 +470,14 @@ std::vector<Track> ByteTrackTracker::track(
 
     // 3-3. 미확정 Track(직전 프레임에 생긴 Track) ↔ 남은 high detection
     std::vector<STrackPtr> remain_high;
-    for (size_t c : m1.unmatched_cols)
+    for (size_t c : left_high)
         remain_high.push_back(high_dets[c]);
 
+    auto cost3 = iou_distance(unconfirmed, remain_high);
+    if (config_.fuse_score)
+        fuse_score(cost3, remain_high);
     const auto m3 = linear_assignment(
-        iou_distance(unconfirmed, remain_high), unconfirmed.size(),
-        remain_high.size(), 0.7f);
+        cost3, unconfirmed.size(), remain_high.size(), 0.7f);
     for (const auto& [r, c] : m3.matches)
     {
         apply_detection(*unconfirmed[r], *remain_high[c]);
@@ -438,6 +542,46 @@ std::vector<Track> ByteTrackTracker::track(
         out.confidence = t->score;
         tracks.push_back(out);
     }
+    for (const auto& t : lost_stracks_)
+    {
+        if (!t->is_activated || frame_id_ - t->frame_id > config_.lost_output_frames)
+            continue;
+        const Box b = track_box(*t);
+        // 화면 밖으로 나가는 중인 Track은 예측 박스를 내지 않는다 (사라진 물체 자리에 남는 헛출력 방지).
+        // 기억(Lost 유지)은 그대로 하므로 다시 들어오면 같은 ID로 이어진다.
+        //   1) 예측 박스가 화면 안에 절반도 안 보이면 제외
+        //   2) 마지막 검출 박스가 화면 경계에 닿아 있고, 예측 위치가 그 경계 바깥쪽으로 움직였으면 제외
+        //      (검출 박스는 경계에서 잘려 작아지므로 예측 박스가 화면 안에 남아 있어도 실제로는 나가는 중)
+        if (image_width_ > 0.0f && image_height_ > 0.0f)
+        {
+            const float vis_w = std::min(b[0] + b[2], image_width_) - std::max(b[0], 0.0f);
+            const float vis_h = std::min(b[1] + b[3], image_height_) - std::max(b[1], 0.0f);
+            const float area = b[2] * b[3];
+            if (vis_w <= 0.0f || vis_h <= 0.0f || area <= 0.0f || vis_w * vis_h < 0.5f * area)
+                continue;
+
+            constexpr float kEdge = 2.0f;  // 경계에 닿았다고 보는 거리 (px)
+            const auto& d = t->det_tlwh;
+            // 마지막 검출 위치 → 지금 예측 위치로 움직인 방향 (물체 자체 속도 + 카메라 움직임 보정 포함)
+            const float dx = (b[0] + b[2] / 2) - (d[0] + d[2] / 2);
+            const float dy = (b[1] + b[3] / 2) - (d[1] + d[3] / 2);
+            const bool exiting = (d[0] <= kEdge && dx < 0.0f) ||
+                                 (d[0] + d[2] >= image_width_ - kEdge && dx > 0.0f) ||
+                                 (d[1] <= kEdge && dy < 0.0f) ||
+                                 (d[1] + d[3] >= image_height_ - kEdge && dy > 0.0f);
+            if (exiting)
+                continue;
+        }
+        Track out;
+        out.track_id = t->track_id;
+        out.x = b[0];
+        out.y = b[1];
+        out.width = b[2];
+        out.height = b[3];
+        out.class_id = t->class_id;
+        out.confidence = t->score;
+        tracks.push_back(out);
+    }
     return tracks;
 }
 
@@ -448,6 +592,7 @@ void ByteTrackTracker::reset()
     tracked_stracks_.clear();
     lost_stracks_.clear();
     frame_id_ = 0;
+    camera_motion_ = CameraMotion{};
     next_track_id_ = 0;
 
     Logger::info(
