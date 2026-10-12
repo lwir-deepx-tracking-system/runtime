@@ -12,6 +12,6 @@ cmake -S "${project_dir}" -B "${build_dir}" \
     -DLWIR_BUILD_BENCHMARK=OFF \
     -DLWIR_BUILD_CAPTURE=OFF \
     -DLWIR_ENABLE_I3_CAMERA=ON \
-    -DLWIR_ENABLE_DX_APP=ON
+    -DLWIR_ENABLE_DX_APP=ON 
 
 cmake --build "${build_dir}" --target lwir_runtime --parallel

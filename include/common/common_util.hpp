@@ -6,9 +6,6 @@
 #ifndef DXAPP_COMMON_UTIL_HPP
 #define DXAPP_COMMON_UTIL_HPP
 
-#include <dxrt/device_info_status.h>
-#include <dxrt/dxrt_api.h>
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -18,10 +15,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <opencv2/opencv.hpp>
 #include <atomic>
 #include <array>
 #include <cstring>
+
+#include <opencv2/opencv.hpp>
+#include <dxrt/dxrt_cxx_api.h>
 
 #if __cplusplus >= 201703L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
 #include <filesystem>

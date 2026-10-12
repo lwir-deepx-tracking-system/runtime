@@ -28,8 +28,8 @@ struct DxAppDetectionPipeline::NpuState
     bool is_float_input = false;
     bool is_nhwc = false;
 
-    NpuState(const AppConfig& config, const std::string& model_path)
-        : inference_option{}, engine(model_path, inference_option)
+    NpuState(const ModelConfig& config)
+        : inference_option{}, engine(config.path, inference_option)
     {
         if (!dxapp::minversionforRTandCompiler(&engine))
             throw std::runtime_error("DXRT runtime/compiler version is incompatible with this model");
@@ -42,7 +42,7 @@ struct DxAppDetectionPipeline::NpuState
         int input_width = 0;
         int input_height = 0;
         ::parseInputShape(input_shape, input_width, input_height);
-        if (input_width != config.model.input.width || input_height != config.model.input.height)
+        if (input_width != config.input.width || input_height != config.input.height)
             throw std::runtime_error("DXNN input dimensions do not match model configuration");
 
         is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
@@ -120,14 +120,9 @@ DxAppDetectionPipeline::DxAppDetectionPipeline(
     const DetectionConfig& detection_config)
     : preprocessor_(std::make_unique<LwirPreprocessor>(model_config)),
       model_path_(model_config.path),
-<<<<<<< Updated upstream
-      max_inflight_(detection_config.max_inflight),
-      npu_(std::make_unique<NpuState>(config, model_path_))
-=======
       max_inflight_(detection_config.max_inflight)
->>>>>>> Stashed changes
 {
-    npu_ = std::make_unique<NpuState>(model_config, model_path_);
+    npu_ = std::make_unique<NpuState>(model_config);
     postprocessor_ = std::make_unique<Postprocessor>(model_config, npu_->ort_configured());
     npu_->register_callback(postprocessor_.get());
 }

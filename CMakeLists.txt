@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.16)
 
 project(lwir_deepx_tracking_system LANGUAGES CXX)
 
+# PROJECT_ROOT_DIR is consumed by common_util.hpp in several targets.
+add_compile_definitions(PROJECT_ROOT_DIR="${CMAKE_SOURCE_DIR}")
+
 
 # ==============================================================================
 # C++ 빌드 설정
@@ -16,6 +19,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 빌드 옵션
 # ==============================================================================
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LWIR_BUILD_RUNTIME "Build runtime application" ON)
 option(LWIR_BUILD_BENCHMARK "Build benchmark application" ON)
 option(LWIR_BUILD_CAPTURE "Build capture application" ON)
@@ -171,6 +175,7 @@ if(LWIR_NEEDS_VISION)
         target_compile_definitions(lwir_vision
             PRIVATE
                 LWIR_ENABLE_DX_APP=1
+                PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
     endif()
 endif()
