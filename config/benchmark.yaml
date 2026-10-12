@@ -38,7 +38,7 @@ tracking:
   match_threshold: 0.8
 
   # Detection이 일시적으로 사라졌을 때 Track을 유지할 프레임 수
-  track_buffer: 50
+  track_buffer: 30
 
   # ----------------------------------------------------------
   # 선택 설정
