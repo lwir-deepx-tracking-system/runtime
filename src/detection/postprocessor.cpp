@@ -151,7 +151,13 @@ std::vector<Postprocessor::Candidate> Postprocessor::decode_ort(
     {
         std::ostringstream message;
         message << "Unexpected YOLOv8 ORT output shape; expected [1, "
-                << (4 + config_.postprocess.num_classes) << ", N]";
+                << (4 + config_.postprocess.num_classes) << ", N], actual [";
+        for (std::size_t i = 0; i < shape.size(); ++i)
+        {
+            if (i > 0) message << ", ";
+            message << shape[i];
+        }
+        message << "]";
         throw std::runtime_error(message.str());
     }
 
