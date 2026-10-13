@@ -17,6 +17,8 @@ struct LoggingConfig {
 
 struct DetectionConfig {
     std::size_t max_inflight = 1;
+    int buffer_count = 0;
+    bool use_ort = false;
 };
 
 struct TrackingConfig {

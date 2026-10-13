@@ -24,8 +24,8 @@ struct DetectionTiming
         return elapsed_ms(preprocess_started_at, preprocess_finished_at);
     }
 
-    // RunAsync 직전부터 DXRT callback 진입까지의 전체 대기 시간이다.
-    double inference_turnaround_ms() const
+    // dxrun Latency의 비교 대상으로 RunAsync 직전부터 callback 진입까지 측정한다.
+    double latency_ms() const
     {
         return elapsed_ms(inference_started_at, inference_finished_at);
     }

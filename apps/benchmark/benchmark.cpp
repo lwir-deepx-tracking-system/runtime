@@ -325,7 +325,7 @@ void BenchmarkApplication::run()
             detection_file << std::fixed << std::setprecision(6);
             track_file << std::fixed << std::setprecision(6);
             timing_file << std::fixed << std::setprecision(6)
-                        << "frame_id,preprocess_ms,inference_turnaround_ms,"
+                        << "frame_id,preprocess_ms,latency_ms,"
                            "npu_processing_ms,postprocess_ms,tracking_ms\n";
 
             if (!detection_file || !track_file || !timing_file)
@@ -405,7 +405,7 @@ void BenchmarkApplication::run()
 
                 timing_file << frame_id << ','
                             << detection_timing.preprocess_ms() << ','
-                            << detection_timing.inference_turnaround_ms() << ','
+                            << detection_timing.latency_ms() << ','
                             << detection_timing.npu_processing_ms() << ','
                             << detection_timing.postprocess_ms() << ','
                             << tracking_ms << '\n';

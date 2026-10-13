@@ -333,6 +333,13 @@ if(BUILD_TESTING)
     add_test(NAME app_config COMMAND test_app_config)
 
     add_executable(
+        test_detection_config
+        tests/app/test_detection_config.cpp
+    )
+    target_link_libraries(test_detection_config PRIVATE lwir_common)
+    add_test(NAME detection_config COMMAND test_detection_config)
+
+    add_executable(
         test_gui_protocol
         tests/gui/test_gui_protocol.cpp
     )
@@ -435,6 +442,7 @@ if(BUILD_TESTING)
 
     set_tests_properties(
         app_config
+        detection_config
         lwir_preprocessor
         PROPERTIES
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

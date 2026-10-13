@@ -45,22 +45,27 @@ struct DxAppDetectionPipeline::NpuState
   bool                               stopping = false;
   std::thread                        completion_worker;
 
-  static dxrt::InferenceOption make_inference_option()
+  static dxrt::InferenceOption make_inference_option(
+      const DetectionConfig &config)
   {
     // job별 NPU core 시간을 얻기 위해 engine 생성 전에 profiler를 켠다.
     dxrt::Configuration::GetInstance().SetEnable(
         dxrt::Configuration::ITEM::PROFILER, true);
 
     dxrt::InferenceOption option;
-    // CPU fallback을 끄고 모델의 NPU task만 실행한다.
-    option.useORT = false;
+    // AppConfig가 검증한 DXRT 실행 옵션만 적용한다.
+    option.bufferCount = config.buffer_count;
+    option.useORT = config.use_ort;
     return option;
   }
 
-  NpuState(const ModelConfig &config, std::size_t limit)
-      : inference_option(make_inference_option()),
-        engine(config.path, inference_option),
-        max_inflight(std::max<std::size_t>(1, limit))
+  NpuState(
+      const ModelConfig &model_config,
+      const DetectionConfig &detection_config)
+      : inference_option(make_inference_option(detection_config)),
+        engine(model_config.path, inference_option),
+        max_inflight(std::max<std::size_t>(
+            1, detection_config.max_inflight))
   {
     if(!dxapp::minversionforRTandCompiler(&engine))
       throw std::runtime_error("DXRT runtime/compiler version is incompatible with this model");
@@ -73,7 +78,8 @@ struct DxAppDetectionPipeline::NpuState
     int        input_width  = 0;
     int        input_height = 0;
     ::parseInputShape(input_shape, input_width, input_height);
-    if(input_width != config.input.width || input_height != config.input.height)
+    if(input_width != model_config.input.width ||
+       input_height != model_config.input.height)
       throw std::runtime_error("DXNN input dimensions do not match model configuration");
 
     is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
@@ -333,7 +339,7 @@ DxAppDetectionPipeline::DxAppDetectionPipeline(
     const ModelConfig     &model_config,
     const DetectionConfig &detection_config)
     : preprocessor_(std::make_unique<LwirPreprocessor>(model_config)),
-      npu_(std::make_unique<NpuState>(model_config, detection_config.max_inflight))
+      npu_(std::make_unique<NpuState>(model_config, detection_config))
 {
   postprocessor_ =
       std::make_unique<Postprocessor>(model_config, npu_->ort_configured());

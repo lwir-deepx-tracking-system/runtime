@@ -438,7 +438,7 @@ void RuntimeApplication::run()
                 "detection_timing.csv 파일을 생성하지 못했습니다");
 
         detection_timing_file
-            << "frame_id,preprocess_ms,inference_turnaround_ms,"
+            << "frame_id,preprocess_ms,latency_ms,"
                "npu_processing_ms,postprocess_ms\n"
             << std::fixed << std::setprecision(6);
         for (const DetectionTiming& timing : detection_timings)
@@ -446,7 +446,7 @@ void RuntimeApplication::run()
             detection_timing_file
                 << timing.frame_id << ','
                 << timing.preprocess_ms() << ','
-                << timing.inference_turnaround_ms() << ','
+                << timing.latency_ms() << ','
                 << timing.npu_processing_ms() << ','
                 << timing.postprocess_ms() << '\n';
         }

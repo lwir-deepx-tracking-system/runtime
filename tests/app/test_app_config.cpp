@@ -7,7 +7,9 @@ int main()
 
     // runtime.yaml의 모델 경로와 고정 Detection 실행 설정 검증.
     if (config.model_config_path != "config/model/yolov8n.yaml" ||
-        config.detection.max_inflight != 4) return 1;
+        config.detection.max_inflight != 4 ||
+        config.detection.buffer_count != 6 ||
+        config.detection.use_ort) return 1;
 
     // ByteTrack, Control, Measurement 설정도 runtime.yaml에서 직접 읽는다.
     if (config.tracking.track_threshold != 0.5F ||

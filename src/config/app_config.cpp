@@ -69,6 +69,14 @@ DetectionConfig load_detection_config(const YAML::Node& node)
     if (max_inflight <= 0)
         throw std::runtime_error("detection.max_inflight must be positive");
     c.max_inflight = static_cast<std::size_t>(max_inflight);
+
+    c.buffer_count = required<int>(
+        node, "buffer_count", "detection");
+    if (c.buffer_count < 0 || c.buffer_count > 100)
+        throw std::runtime_error(
+            "detection.buffer_count must be 0 (auto) or in [1, 100]");
+
+    c.use_ort = required<bool>(node, "use_ort", "detection");
     return c;
 }
 
