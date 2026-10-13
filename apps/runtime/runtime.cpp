@@ -21,6 +21,7 @@
 #include "pipeline/gui_receiver_thread.hpp"
 #include "pipeline/gui_sender_thread.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <ctime>
@@ -419,6 +420,41 @@ void RuntimeApplication::run()
         metrics_file.close();
         if (metrics_file.fail())
             throw std::runtime_error("metrics.csv 파일을 저장하지 못했습니다");
+
+        // 모든 Detection callback이 끝난 뒤 프레임별 내부 단계 시간을 저장한다.
+        std::vector<DetectionTiming> detection_timings =
+            detection_thread_->detection_timings();
+        std::sort(
+            detection_timings.begin(), detection_timings.end(),
+            [](const DetectionTiming& lhs, const DetectionTiming& rhs)
+            {
+                return lhs.frame_id < rhs.frame_id;
+            });
+
+        std::ofstream detection_timing_file(
+            result_dir / "detection_timing.csv");
+        if (!detection_timing_file)
+            throw std::runtime_error(
+                "detection_timing.csv 파일을 생성하지 못했습니다");
+
+        detection_timing_file
+            << "frame_id,preprocess_ms,inference_ms,postprocess_ms\n"
+            << std::fixed << std::setprecision(6);
+        for (const DetectionTiming& timing : detection_timings)
+        {
+            detection_timing_file
+                << timing.frame_id << ','
+                << timing.preprocess_ms() << ','
+                << timing.inference_ms() << ','
+                << timing.postprocess_ms() << '\n';
+        }
+        if (!detection_timing_file)
+            throw std::runtime_error(
+                "detection_timing.csv 파일 쓰기에 실패했습니다");
+        detection_timing_file.close();
+        if (detection_timing_file.fail())
+            throw std::runtime_error(
+                "detection_timing.csv 파일을 저장하지 못했습니다");
 
         Logger::info("[Measurement] 측정 결과 저장 완료: " + result_dir.string());
     }

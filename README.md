@@ -138,7 +138,8 @@ Runtime 결과는 같은 조합 아래에서 `core`, `gui`, `full` 모드와 실
     └── full/20261007_195105/
         ├── runtime.yaml
         ├── yolov8n.yaml
-        └── metrics.csv
+        ├── metrics.csv
+        └── detection_timing.csv
 ```
 
 실행 디렉터리는 `YYYYMMDD_HHMMSS` 형식을 사용하며 같은 초에 충돌하면 `_1`, `_2` suffix를

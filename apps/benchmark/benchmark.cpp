@@ -15,6 +15,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -324,7 +325,8 @@ void BenchmarkApplication::run()
             detection_file << std::fixed << std::setprecision(6);
             track_file << std::fixed << std::setprecision(6);
             timing_file << std::fixed << std::setprecision(6)
-                        << "frame_id,detection_ms,tracking_ms\n";
+                        << "frame_id,preprocess_ms,inference_ms,"
+                           "postprocess_ms,tracking_ms\n";
 
             if (!detection_file || !track_file || !timing_file)
                 throw std::runtime_error(
@@ -342,22 +344,47 @@ void BenchmarkApplication::run()
                 const std::uint64_t frame_id = frame_entry.first;
                 const fs::path& image_path = frame_entry.second;
 
-                FrameContext frame;
-                frame.image = cv::imread(image_path.string(), cv::IMREAD_UNCHANGED);
+                auto mutable_frame = std::make_shared<FrameContext>();
+                mutable_frame->image =
+                    cv::imread(image_path.string(), cv::IMREAD_UNCHANGED);
 
-                if (frame.image.empty())
+                if (mutable_frame->image.empty())
                     throw std::runtime_error(
                         "이미지 읽기에 실패했습니다: " + image_path.string());
 
-                frame.metadata.frame_id = frame_id;
+                mutable_frame->metadata.frame_id = frame_id;
+                FrameContextPtr frame = mutable_frame;
 
-                // 파일 I/O를 제외하고 detect() 호출 자체만 측정한다.
-                const auto detection_started_at = std::chrono::steady_clock::now();
-                const std::vector<Detection> detections =
-                    detection_pipeline_->detect(frame);
-                const auto detection_finished_at = std::chrono::steady_clock::now();
-                const double detection_ms = std::chrono::duration<double, std::milli>(
-                    detection_finished_at - detection_started_at).count();
+                // Runtime과 동일한 비동기 Detection 경로를 실행하고 이 프레임의
+                // Completion이 전달하는 결과와 단계별 시간을 기다린다.
+                using DetectionResult =
+                    std::pair<std::vector<Detection>, DetectionTiming>;
+                std::promise<DetectionResult> completion_promise;
+                std::future<DetectionResult> completion_future =
+                    completion_promise.get_future();
+                detection_pipeline_->submit_async(
+                    frame,
+                    [&completion_promise](
+                        std::vector<Detection> completed_detections,
+                        std::exception_ptr error,
+                        DetectionTiming timing)
+                    {
+                        if (error)
+                            completion_promise.set_exception(error);
+                        else
+                            completion_promise.set_value(
+                                DetectionResult{
+                                    std::move(completed_detections), timing});
+                    });
+
+                DetectionResult detection_result = completion_future.get();
+                std::vector<Detection> detections =
+                    std::move(detection_result.first);
+                const DetectionTiming& detection_timing = detection_result.second;
+                if (detection_timing.frame_id != frame_id)
+                    throw std::runtime_error(
+                        "Detection timing Frame ID가 일치하지 않습니다: " +
+                        sequence_name + "/" + std::to_string(frame_id));
 
                 write_detections(detection_file, frame_id, detections);
                 if (!detection_file)
@@ -376,7 +403,10 @@ void BenchmarkApplication::run()
                     throw std::runtime_error(
                         "Tracking 결과 저장에 실패했습니다: " + sequence_name);
 
-                timing_file << frame_id << ',' << detection_ms << ','
+                timing_file << frame_id << ','
+                            << detection_timing.preprocess_ms() << ','
+                            << detection_timing.inference_ms() << ','
+                            << detection_timing.postprocess_ms() << ','
                             << tracking_ms << '\n';
                 if (!timing_file)
                     throw std::runtime_error(

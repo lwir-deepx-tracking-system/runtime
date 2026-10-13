@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/detection.hpp"
+#include "common/detection_timing.hpp"
 #include "common/frame.hpp"
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
@@ -28,6 +29,7 @@ private:
     std::string error_message_;
     std::mutex metrics_mutex_;
     std::vector<StageMetric> metrics_;
+    std::vector<DetectionTiming> detection_timings_;
     std::mutex reorder_mutex_;
     std::map<std::uint64_t, DetectionResult> completed_results_;
     std::uint64_t next_submit_sequence_ = 0;
@@ -49,4 +51,8 @@ public:
     bool failed() const { return failed_.load(); }
     const std::string& error_message() const { return error_message_; }
     const std::vector<StageMetric>& metrics() const { return metrics_; }
+    const std::vector<DetectionTiming>& detection_timings() const
+    {
+        return detection_timings_;
+    }
 };

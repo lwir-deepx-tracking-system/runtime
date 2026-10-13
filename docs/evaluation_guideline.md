@@ -199,14 +199,20 @@ timing/seq_001.csv
 ```
 
 ```text
-frame_id,detection_ms,tracking_ms
+frame_id,preprocess_ms,inference_ms,postprocess_ms,tracking_ms
 ```
 
 측정 범위:
 
 ```text
-detection_ms
-detect() 시작 ─────────────→ detect() 반환
+preprocess_ms
+전처리 시작 ───────────────→ NPU 입력 buffer 준비 완료
+
+inference_ms
+RunAsync() 호출 직전 ──────→ DXRT callback 진입
+
+postprocess_ms
+DXRT callback 진입 ────────→ postprocess 완료
 
 tracking_ms
 track() 시작 ──────────────→ track() 반환
@@ -322,8 +328,8 @@ seqinfo.ini
 |---|---|
 | Detection | mAP@50, Precision, Recall |
 | Tracking | HOTA, IDF1, MOTA, MOTP |
-| Benchmark 성능 | detection_ms, tracking_ms |
-| Runtime 성능 | queue_wait_ms, processing_ms, e2e_ms |
+| Benchmark 성능 | preprocess_ms, inference_ms, postprocess_ms, tracking_ms |
+| Runtime 성능 | queue_wait_ms, processing_ms, e2e_ms, Detection 단계별 시간 |
 
 ### Tracking 핵심
 
@@ -452,7 +458,8 @@ gui
 YYYYMMDD_HHMMSS/
 ├── runtime.yaml
 ├── yolov8n.yaml
-└── metrics.csv
+├── metrics.csv
+└── detection_timing.csv
 ```
 
 실패한 run은 timestamp 디렉터리를 삭제한다.
@@ -485,6 +492,12 @@ Camera frame 수신 완료 ─────→ Control 완료
 ```
 
 GUI 자체 latency는 Orange Pi `metrics.csv`에서 계산하지 않는다.
+
+Detection 내부 단계 시간은 별도의 `detection_timing.csv`에 저장한다.
+
+```text
+frame_id,preprocess_ms,inference_ms,postprocess_ms
+```
 
 ---
 

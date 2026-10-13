@@ -76,9 +76,11 @@ void DetectionThread::run()
 
             pipeline_.submit_async(
                 frame,
-                [this, frame = std::move(frame), enqueued_at, sequence,
-                 queue_started_at, submitted_at]
-                (std::vector<Detection> detections, std::exception_ptr error) mutable
+                [this, frame, enqueued_at, sequence,
+                    queue_started_at, submitted_at]
+                    (std::vector<Detection> detections,
+                     std::exception_ptr error,
+                     DetectionTiming detection_timing) mutable
                 {
                     const auto completed_at = measurement_enabled_ ?
                         std::chrono::steady_clock::now() :
@@ -102,6 +104,13 @@ void DetectionThread::run()
                         return;
                     }
 
+                    if (detection_timing.frame_id != frame->metadata.frame_id)
+                    {
+                        set_error("Detection timing frame ID mismatch");
+                        input_queue_.close();
+                        return;
+                    }
+
                     DetectionResult result;
                     result.frame = frame;
                     result.detections = std::move(detections);
@@ -112,6 +121,8 @@ void DetectionThread::run()
                         record_stage_metric(
                             metrics_, frame->metadata, enqueued_at,
                             queue_started_at, submitted_at, completed_at);
+                        if (detection_timings_.size() < kMaxStageMetrics)
+                            detection_timings_.push_back(detection_timing);
                         result.enqueued_at = completed_at;
                     }
 

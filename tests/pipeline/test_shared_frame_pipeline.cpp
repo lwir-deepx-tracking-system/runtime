@@ -14,12 +14,17 @@
 class FakeDetectionPipeline : public IDetectionPipeline
 {
 public:
-    std::vector<Detection> detect(const FrameContext&) override
+    void submit_async(
+        const FrameContextPtr& frame,
+        Completion completion) override
     {
         Detection detection;
         detection.width = 10.0f;
         detection.height = 10.0f;
-        return {detection};
+
+        DetectionTiming timing;
+        timing.frame_id = frame->metadata.frame_id;
+        completion({detection}, nullptr, timing);
     }
 };
 

@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
-#include <future>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
@@ -19,6 +18,7 @@ struct DxAppDetectionPipeline::NpuState
     std::vector<std::uint8_t>      input_buffer;
     PreprocessContext              context;
     IDetectionPipeline::Completion completion;
+    DetectionTiming                timing;
   };
 
   dxrt::InferenceOption inference_option;
@@ -89,6 +89,7 @@ struct DxAppDetectionPipeline::NpuState
   void run_async(
       const cv::Mat                 &model_input,
       const PreprocessContext       &context,
+      DetectionTiming                timing,
       IDetectionPipeline::Completion completion,
       IPostprocessor                *postprocessor)
   {
@@ -99,6 +100,7 @@ struct DxAppDetectionPipeline::NpuState
     request->input_buffer.resize(engine.GetInputSize());
     request->context    = context;
     request->completion = std::move(completion);
+    request->timing     = timing;
 
     if(is_float_input)
     {
@@ -116,7 +118,12 @@ struct DxAppDetectionPipeline::NpuState
       std::memcpy(request->input_buffer.data(), model_input.data, byte_count);
     }
 
-    auto     *user_data = new std::shared_ptr<Request>(request);
+    // 모델 입력 tensor 변환과 복사까지 전처리에 포함한다.
+    const auto inference_started_at = DetectionTiming::Clock::now();
+    request->timing.preprocess_finished_at = inference_started_at;
+    request->timing.inference_started_at = inference_started_at;
+
+    auto *user_data = new std::shared_ptr<Request>(request);
     const int job_id    = engine.RunAsync(request->input_buffer.data(), user_data);
     if(job_id < 0)
     {
@@ -137,6 +144,10 @@ struct DxAppDetectionPipeline::NpuState
               static_cast<std::shared_ptr<Request> *>(user_data));
           const auto request = *holder;
 
+          const auto postprocess_started_at = DetectionTiming::Clock::now();
+          request->timing.inference_finished_at = postprocess_started_at;
+          request->timing.postprocess_started_at = postprocess_started_at;
+
           std::vector<Detection> detections;
           std::exception_ptr     error;
           try
@@ -147,10 +158,12 @@ struct DxAppDetectionPipeline::NpuState
           {
             error = std::current_exception();
           }
+          request->timing.postprocess_finished_at = DetectionTiming::Clock::now();
 
           try
           {
-            request->completion(std::move(detections), error);
+            request->completion(
+                std::move(detections), error, request->timing);
           }
           catch(...)
           {
@@ -177,29 +190,9 @@ DxAppDetectionPipeline::~DxAppDetectionPipeline()
   wait_idle();
 }
 
-std::vector<Detection> DxAppDetectionPipeline::detect(const FrameContext &frame)
-{
-  auto frame_ref = std::shared_ptr<FrameContext>(
-      const_cast<FrameContext *>(&frame), [](FrameContext *) {});
-  std::promise<std::vector<Detection>> promise;
-  auto                                 result = promise.get_future();
-
-  submit_async(
-      frame_ref,
-      [&promise](std::vector<Detection> detections, std::exception_ptr error)
-      {
-        if(error)
-          promise.set_exception(error);
-        else
-          promise.set_value(std::move(detections));
-      });
-
-  return result.get();
-}
-
 void DxAppDetectionPipeline::submit_async(
-    const std::shared_ptr<FrameContext> &frame,
-    Completion                           completion)
+    const FrameContextPtr &frame,
+    Completion            completion)
 {
   if(!frame)
     throw std::invalid_argument("Cannot submit an empty frame");
@@ -209,8 +202,12 @@ void DxAppDetectionPipeline::submit_async(
   {
     cv::Mat           model_input;
     PreprocessContext context;
+    DetectionTiming timing;
+    timing.frame_id = frame->metadata.frame_id;
+    timing.preprocess_started_at = DetectionTiming::Clock::now();
     preprocessor_->process(frame->image, model_input, context);
-    npu_->run_async(model_input, context, std::move(completion), postprocessor_.get());
+    npu_->run_async(
+        model_input, context, timing, std::move(completion), postprocessor_.get());
   }
   catch(...)
   {
