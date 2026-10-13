@@ -66,8 +66,11 @@ if(LWIR_OPENCV_COMPONENTS)
     find_package(OpenCV REQUIRED COMPONENTS ${LWIR_OPENCV_COMPONENTS})
 endif()
 
-if(LWIR_NEEDS_RUNTIME_CORE)
+if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
     find_package(Threads REQUIRED)
+endif()
+
+if(LWIR_NEEDS_RUNTIME_CORE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(
         GSTREAMER
@@ -163,6 +166,7 @@ if(LWIR_NEEDS_VISION)
     target_link_libraries(lwir_vision
         PUBLIC
             lwir_common
+            Threads::Threads
             ${OpenCV_LIBS}
     )
 

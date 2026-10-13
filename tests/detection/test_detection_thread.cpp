@@ -42,6 +42,8 @@ public:
             timing.inference_finished_at = now;
             timing.postprocess_started_at = now;
             timing.postprocess_finished_at = now;
+            timing.npu_processing_duration_ms =
+                static_cast<double>(timing.frame_id);
             pending->completion({detection}, nullptr, timing);
         }
         pending_.clear();
@@ -93,7 +95,9 @@ int main()
         thread.detection_timings().size() != 2)
         return 3;
     if (thread.detection_timings()[0].frame_id != 43 ||
-        thread.detection_timings()[1].frame_id != 42)
+        thread.detection_timings()[0].npu_processing_ms() != 43.0 ||
+        thread.detection_timings()[1].frame_id != 42 ||
+        thread.detection_timings()[1].npu_processing_ms() != 42.0)
         return 3;
 
     // 입력 종료가 downstream queue 종료로 전파되어 추가 pop은 실패해야 한다.

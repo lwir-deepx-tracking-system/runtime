@@ -22,7 +22,7 @@ model:
 
 detection:
   # 동시에 처리할 수 있는 최대 inference 요청 수
-  # benchmark는 순차 처리 기준으로 우선 1 사용
+  # 프레임별 latency 측정을 위해 한 번에 하나씩 처리한다.
   max_inflight: 1
 
 

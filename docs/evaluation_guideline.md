@@ -199,7 +199,7 @@ timing/seq_001.csv
 ```
 
 ```text
-frame_id,preprocess_ms,inference_ms,postprocess_ms,tracking_ms
+frame_id,preprocess_ms,inference_turnaround_ms,npu_processing_ms,postprocess_ms,tracking_ms
 ```
 
 측정 범위:
@@ -208,8 +208,14 @@ frame_id,preprocess_ms,inference_ms,postprocess_ms,tracking_ms
 preprocess_ms
 전처리 시작 ───────────────→ NPU 입력 buffer 준비 완료
 
-inference_ms
+inference_turnaround_ms
 RunAsync() 호출 직전 ──────→ DXRT callback 진입
+
+npu_processing_ms
+해당 job에서 DXRT profiler가 측정한 순수 NPU core 실행 시간
+
+`npu_processing_ms`는 `inference_turnaround_ms` 안에 포함되는 구간이므로 두 값을 합산하지 않는다.
+job별 측정에는 `GetJobMetrics()`를 제공하는 DXRT 3.4.0 이상이 필요하다.
 
 postprocess_ms
 DXRT callback 진입 ────────→ postprocess 완료
@@ -328,7 +334,7 @@ seqinfo.ini
 |---|---|
 | Detection | mAP@50, Precision, Recall |
 | Tracking | HOTA, IDF1, MOTA, MOTP |
-| Benchmark 성능 | preprocess_ms, inference_ms, postprocess_ms, tracking_ms |
+| Benchmark 성능 | preprocess_ms, inference_turnaround_ms, npu_processing_ms, postprocess_ms, tracking_ms |
 | Runtime 성능 | queue_wait_ms, processing_ms, e2e_ms, Detection 단계별 시간 |
 
 ### Tracking 핵심
@@ -496,7 +502,7 @@ GUI 자체 latency는 Orange Pi `metrics.csv`에서 계산하지 않는다.
 Detection 내부 단계 시간은 별도의 `detection_timing.csv`에 저장한다.
 
 ```text
-frame_id,preprocess_ms,inference_ms,postprocess_ms
+frame_id,preprocess_ms,inference_turnaround_ms,npu_processing_ms,postprocess_ms
 ```
 
 ---

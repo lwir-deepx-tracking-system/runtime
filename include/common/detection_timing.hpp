@@ -17,15 +17,23 @@ struct DetectionTiming
     TimePoint inference_finished_at{};
     TimePoint postprocess_started_at{};
     TimePoint postprocess_finished_at{};
+    double npu_processing_duration_ms = 0.0;
 
     double preprocess_ms() const
     {
         return elapsed_ms(preprocess_started_at, preprocess_finished_at);
     }
 
-    double inference_ms() const
+    // RunAsync 직전부터 DXRT callback 진입까지의 전체 대기 시간이다.
+    double inference_turnaround_ms() const
     {
         return elapsed_ms(inference_started_at, inference_finished_at);
+    }
+
+    // DXRT profiler가 측정한 순수 NPU core 실행 시간이다.
+    double npu_processing_ms() const
+    {
+        return npu_processing_duration_ms;
     }
 
     double postprocess_ms() const

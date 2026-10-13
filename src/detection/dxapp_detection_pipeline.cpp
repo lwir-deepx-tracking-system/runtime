@@ -4,9 +4,11 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 #include "common/common_util.hpp"
@@ -19,6 +21,12 @@ struct DxAppDetectionPipeline::NpuState
     PreprocessContext              context;
     IDetectionPipeline::Completion completion;
     DetectionTiming                timing;
+    std::vector<Detection>         detections;
+    std::exception_ptr             error;
+
+    std::mutex              job_mutex;
+    std::condition_variable job_cv;
+    int                     job_id = -1;
   };
 
   dxrt::InferenceOption inference_option;
@@ -30,10 +38,27 @@ struct DxAppDetectionPipeline::NpuState
   std::condition_variable inflight_cv;
   std::size_t             inflight     = 0;
   std::size_t             max_inflight = 1;
-  int                     last_job_id  = -1;
+
+  std::mutex                         completed_mutex;
+  std::condition_variable            completed_cv;
+  std::deque<std::shared_ptr<Request>> completed_requests;
+  bool                               stopping = false;
+  std::thread                        completion_worker;
+
+  static dxrt::InferenceOption make_inference_option()
+  {
+    // job별 NPU core 시간을 얻기 위해 engine 생성 전에 profiler를 켠다.
+    dxrt::Configuration::GetInstance().SetEnable(
+        dxrt::Configuration::ITEM::PROFILER, true);
+
+    dxrt::InferenceOption option;
+    // CPU fallback을 끄고 모델의 NPU task만 실행한다.
+    option.useORT = false;
+    return option;
+  }
 
   NpuState(const ModelConfig &config, std::size_t limit)
-      : inference_option{},
+      : inference_option(make_inference_option()),
         engine(config.path, inference_option),
         max_inflight(std::max<std::size_t>(1, limit))
   {
@@ -53,6 +78,28 @@ struct DxAppDetectionPipeline::NpuState
 
     is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
     is_nhwc        = ::isInputNHWC(input_shape);
+
+    completion_worker = std::thread([this]
+                                    { complete_requests(); });
+  }
+
+  ~NpuState()
+  {
+    try
+    {
+      wait_idle();
+    }
+    catch(...)
+    {
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(completed_mutex);
+      stopping = true;
+    }
+    completed_cv.notify_all();
+    if(completion_worker.joinable())
+      completion_worker.join();
   }
 
   void acquire_slot()
@@ -75,23 +122,110 @@ struct DxAppDetectionPipeline::NpuState
 
   void wait_idle()
   {
-    int job_id = -1;
+    std::unique_lock<std::mutex> lock(inflight_mutex);
+    inflight_cv.wait(lock, [this]
+                     { return inflight == 0; });
+  }
+
+  static double get_npu_processing_ms(int job_id)
+  {
+    const dxrt::JobMetrics metrics =
+        dxrt::Profiler::GetInstance().GetJobMetrics(job_id);
+    if(!metrics.valid)
+      throw std::runtime_error("DXRT job profiler metrics are unavailable");
+
+    double inference_core_us = 0.0;
+    bool   found_npu_metric  = false;
+    for(const dxrt::TaskMetrics &task : metrics.tasks)
     {
-      std::unique_lock<std::mutex> lock(inflight_mutex);
-      inflight_cv.wait(lock, [this]
-                       { return inflight == 0; });
-      job_id = last_job_id;
+      for(const auto &device_entry : task.devices)
+      {
+        const dxrt::NpuDeviceMetrics &device = device_entry.second;
+        if(!device.valid || device.inference_core_all_us <= 0.0)
+          continue;
+        inference_core_us += device.inference_core_all_us;
+        found_npu_metric = true;
+      }
     }
-    if(job_id >= 0)
-      engine.Wait(job_id);
+
+    if(!found_npu_metric)
+      throw std::runtime_error("DXRT job has no valid NPU core timing");
+    return inference_core_us / 1000.0;
+  }
+
+  static int wait_for_job_id(const std::shared_ptr<Request> &request)
+  {
+    std::unique_lock<std::mutex> lock(request->job_mutex);
+    request->job_cv.wait(lock, [&request]
+                         { return request->job_id >= 0; });
+    return request->job_id;
+  }
+
+  void enqueue_completed(const std::shared_ptr<Request> &request)
+  {
+    {
+      std::lock_guard<std::mutex> lock(completed_mutex);
+      completed_requests.push_back(request);
+    }
+    completed_cv.notify_one();
+  }
+
+  void complete_requests()
+  {
+    for(;;)
+    {
+      std::shared_ptr<Request> request;
+      {
+        std::unique_lock<std::mutex> lock(completed_mutex);
+        completed_cv.wait(lock, [this]
+                          { return stopping || !completed_requests.empty(); });
+        if(stopping && completed_requests.empty())
+          return;
+        request = std::move(completed_requests.front());
+        completed_requests.pop_front();
+      }
+
+      try
+      {
+        const int job_id = wait_for_job_id(request);
+
+        // callback 반환 뒤 Wait해야 job별 profiler 값이 완성된다.
+        const dxrt_status_t wait_status =
+            dxrt_engine_wait(engine.handle(), job_id, nullptr);
+        if(wait_status != DXRT_OK)
+        {
+          const char *message = dxrt_last_error_message();
+          throw std::runtime_error(
+              message ? message : "DXRT failed while waiting for a job");
+        }
+        request->timing.npu_processing_duration_ms =
+            get_npu_processing_ms(job_id);
+      }
+      catch(...)
+      {
+        if(!request->error)
+          request->error = std::current_exception();
+      }
+
+      try
+      {
+        request->completion(
+            std::move(request->detections),
+            request->error,
+            request->timing);
+      }
+      catch(...)
+      {
+      }
+      release_slot();
+    }
   }
 
   void run_async(
       const cv::Mat                 &model_input,
       const PreprocessContext       &context,
       DetectionTiming                timing,
-      IDetectionPipeline::Completion completion,
-      IPostprocessor                *postprocessor)
+      IDetectionPipeline::Completion completion)
   {
     if(model_input.empty() || !model_input.isContinuous())
       throw std::invalid_argument("Preprocessed NPU input must be non-empty and contiguous");
@@ -124,13 +258,26 @@ struct DxAppDetectionPipeline::NpuState
     request->timing.inference_started_at = inference_started_at;
 
     auto *user_data = new std::shared_ptr<Request>(request);
-    const int job_id    = engine.RunAsync(request->input_buffer.data(), user_data);
+    int job_id = -1;
+    try
+    {
+      job_id = engine.RunAsync(request->input_buffer.data(), user_data);
+    }
+    catch(...)
+    {
+      delete user_data;
+      throw;
+    }
     if(job_id < 0)
     {
       delete user_data;
       throw std::runtime_error("DXRT RunAsync failed to submit inference");
     }
-    last_job_id = job_id;
+    {
+      std::lock_guard<std::mutex> lock(request->job_mutex);
+      request->job_id = job_id;
+    }
+    request->job_cv.notify_all();
   }
 
   bool ort_configured() const { return engine.IsOrtConfigured(); }
@@ -159,16 +306,24 @@ struct DxAppDetectionPipeline::NpuState
             error = std::current_exception();
           }
           request->timing.postprocess_finished_at = DetectionTiming::Clock::now();
-
+          request->error = error;
+          request->detections = std::move(detections);
           try
           {
-            request->completion(
-                std::move(detections), error, request->timing);
+            enqueue_completed(request);
           }
           catch(...)
           {
+            try
+            {
+              request->completion(
+                  {}, std::current_exception(), request->timing);
+            }
+            catch(...)
+            {
+            }
+            release_slot();
           }
-          release_slot();
           return 0;
         });
   }
@@ -207,7 +362,7 @@ void DxAppDetectionPipeline::submit_async(
     timing.preprocess_started_at = DetectionTiming::Clock::now();
     preprocessor_->process(frame->image, model_input, context);
     npu_->run_async(
-        model_input, context, timing, std::move(completion), postprocessor_.get());
+        model_input, context, timing, std::move(completion));
   }
   catch(...)
   {
