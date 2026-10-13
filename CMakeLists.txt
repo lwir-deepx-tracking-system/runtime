@@ -412,11 +412,11 @@ if(BUILD_TESTING)
     )
 
     add_executable(
-        test_bytetrack_scenarios
-        tests/tracking/test_bytetrack_scenarios.cpp
+        test_bytetrack_limits
+        tests/tracking/test_bytetrack_limits.cpp
     )
-    target_link_libraries(test_bytetrack_scenarios PRIVATE lwir_vision)
-    add_test(NAME bytetrack_scenarios COMMAND test_bytetrack_scenarios)
+    target_link_libraries(test_bytetrack_limits PRIVATE lwir_vision)
+    add_test(NAME bytetrack_limits COMMAND test_bytetrack_limits)
 
 
     # --------------------------------------------------------------------------

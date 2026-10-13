@@ -1,6 +1,7 @@
 #include "tracking/bytetrack_tracker.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -86,6 +87,7 @@ struct CaseResult
     std::string name;
     Score actual, ideal, baseline;
     double idf1 = 0.0;
+    std::vector<double> ms;  // 프레임마다 track() 한 번 걸린 시간 (ms)
     std::string verdict;
     std::string error;
 };
@@ -164,7 +166,11 @@ CaseResult run_case(const fs::path& dir, bool verbose, bool cmc)
                 prev_cam = &it->second;
             }
         }
+        // track() 호출 시간만 잰다 (지표 계산·출력 시간은 제외)
+        const auto t0 = std::chrono::steady_clock::now();
         const auto tracks = tracker.track(seq.by_frame[f]);
+        const auto t1 = std::chrono::steady_clock::now();
+        r.ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
         metrics.add_frame(f, seq.gt_by_frame[f], tracks);
         if (verbose)
             print_frame(f, seq.by_frame[f], tracks);
@@ -286,6 +292,20 @@ int main(int argc, char** argv)
     std::printf("\n  판정 합계:");
     for (const auto& [v, n] : counts)
         std::printf("  %s %d", v.c_str(), n);
+
+    // 처리 시간: 모든 케이스의 track() 호출을 모아 평균, p99, 최대를 낸다
+    std::vector<double> all_ms;
+    for (const auto& r : results)
+        all_ms.insert(all_ms.end(), r.ms.begin(), r.ms.end());
+    if (!all_ms.empty())
+    {
+        double sum = 0.0;
+        for (double v : all_ms)
+            sum += v;
+        std::sort(all_ms.begin(), all_ms.end());
+        std::printf("\n  처리 시간:  track() %zu회, 평균 %.4f ms, p99 %.4f ms, 최대 %.4f ms",
+                    all_ms.size(), sum / all_ms.size(), all_ms[all_ms.size() * 99 / 100], all_ms.back());
+    }
     std::printf("\n\n");
 
     if (update)
