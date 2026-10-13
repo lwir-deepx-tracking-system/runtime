@@ -1,138 +1,226 @@
 #include "detection/dxapp_detection_pipeline.hpp"
 
-#include "detection/lwir_preprocessor.hpp"
-#include "detection/postprocessor.hpp"
-#include "common/common_util.hpp"
-
+#include <algorithm>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <future>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
-#include "common/threadsafequeue.hpp"
+
+#include "common/common_util.hpp"
 
 struct DxAppDetectionPipeline::NpuState
 {
-    struct Request
+  struct Request
+  {
+    std::vector<std::uint8_t>      input_buffer;
+    PreprocessContext              context;
+    IDetectionPipeline::Completion completion;
+  };
+
+  dxrt::InferenceOption inference_option;
+  dxrt::InferenceEngine engine;
+  bool                  is_float_input = false;
+  bool                  is_nhwc        = false;
+
+  std::mutex              inflight_mutex;
+  std::condition_variable inflight_cv;
+  std::size_t             inflight     = 0;
+  std::size_t             max_inflight = 1;
+  int                     last_job_id  = -1;
+
+  NpuState(const ModelConfig &config, std::size_t limit)
+      : inference_option{},
+        engine(config.path, inference_option),
+        max_inflight(std::max<std::size_t>(1, limit))
+  {
+    if(!dxapp::minversionforRTandCompiler(&engine))
+      throw std::runtime_error("DXRT runtime/compiler version is incompatible with this model");
+
+    const auto &inputs = engine.GetInputs();
+    if(inputs.empty())
+      throw std::runtime_error("DXNN model has no input tensor");
+
+    const auto input_shape  = inputs.front().shape();
+    int        input_width  = 0;
+    int        input_height = 0;
+    ::parseInputShape(input_shape, input_width, input_height);
+    if(input_width != config.input.width || input_height != config.input.height)
+      throw std::runtime_error("DXNN input dimensions do not match model configuration");
+
+    is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
+    is_nhwc        = ::isInputNHWC(input_shape);
+  }
+
+  void acquire_slot()
+  {
+    std::unique_lock<std::mutex> lock(inflight_mutex);
+    inflight_cv.wait(lock, [this]
+                     { return inflight < max_inflight; });
+    ++inflight;
+  }
+
+  void release_slot()
+  {
     {
-        ThreadSafeQueue<bool> completed;
-        std::vector<Detection> detections;
-        std::exception_ptr error;
-        LwirPreprocessContext context;
-    };
+      std::lock_guard<std::mutex> lock(inflight_mutex);
+      if(inflight > 0)
+        --inflight;
+    }
+    inflight_cv.notify_all();
+  }
 
-    dxrt::InferenceOption inference_option;
-    dxrt::InferenceEngine engine;
-
-    std::vector<std::uint8_t> input_buffer;
-    bool is_float_input = false;
-    bool is_nhwc = false;
-
-    NpuState(const ModelConfig& config)
-        : inference_option{}, engine(config.path, inference_option)
+  void wait_idle()
+  {
+    int job_id = -1;
     {
-        if (!dxapp::minversionforRTandCompiler(&engine))
-            throw std::runtime_error("DXRT runtime/compiler version is incompatible with this model");
+      std::unique_lock<std::mutex> lock(inflight_mutex);
+      inflight_cv.wait(lock, [this]
+                       { return inflight == 0; });
+      job_id = last_job_id;
+    }
+    if(job_id >= 0)
+      engine.Wait(job_id);
+  }
 
-        const auto& inputs = engine.GetInputs();
-        if (inputs.empty())
-            throw std::runtime_error("DXNN model has no input tensor");
+  void run_async(
+      const cv::Mat                 &model_input,
+      const PreprocessContext       &context,
+      IDetectionPipeline::Completion completion,
+      IPostprocessor                *postprocessor)
+  {
+    if(model_input.empty() || !model_input.isContinuous())
+      throw std::invalid_argument("Preprocessed NPU input must be non-empty and contiguous");
 
-        const auto input_shape = inputs.front().shape();
-        int input_width = 0;
-        int input_height = 0;
-        ::parseInputShape(input_shape, input_width, input_height);
-        if (input_width != config.input.width || input_height != config.input.height)
-            throw std::runtime_error("DXNN input dimensions do not match model configuration");
+    auto request = std::make_shared<Request>();
+    request->input_buffer.resize(engine.GetInputSize());
+    request->context    = context;
+    request->completion = std::move(completion);
 
-        is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
-        is_nhwc = ::isInputNHWC(input_shape);
-        input_buffer.resize(engine.GetInputSize());
+    if(is_float_input)
+    {
+      const auto        float_buffer = convertToFloatBuffer(model_input, is_nhwc);
+      const std::size_t byte_count   = float_buffer.size() * sizeof(float);
+      if(byte_count != request->input_buffer.size())
+        throw std::runtime_error("Float input tensor size does not match DXRT input size");
+      std::memcpy(request->input_buffer.data(), float_buffer.data(), byte_count);
+    }
+    else
+    {
+      const std::size_t byte_count = model_input.total() * model_input.elemSize();
+      if(byte_count != request->input_buffer.size())
+        throw std::runtime_error("UInt8 input tensor size does not match DXRT input size");
+      std::memcpy(request->input_buffer.data(), model_input.data, byte_count);
     }
 
-    std::vector<Detection> infer(const cv::Mat& input, const LwirPreprocessContext& lwir_context)
+    auto     *user_data = new std::shared_ptr<Request>(request);
+    const int job_id    = engine.RunAsync(request->input_buffer.data(), user_data);
+    if(job_id < 0)
     {
-        if (input.empty() || !input.isContinuous())
-            throw std::invalid_argument("Preprocessed NPU input must be non-empty and contiguous");
-
-        if (is_float_input)
-        {
-            const auto float_buffer = convertToFloatBuffer(input, is_nhwc);
-            const std::size_t byte_count = float_buffer.size() * sizeof(float);
-            if (byte_count != input_buffer.size())
-                throw std::runtime_error("Float input tensor size does not match DXRT input size");
-            std::memcpy(input_buffer.data(), float_buffer.data(), byte_count);
-        }
-        else
-        {
-            const std::size_t byte_count = input.total() * input.elemSize();
-            if (byte_count != input_buffer.size())
-                throw std::runtime_error("UInt8 input tensor size does not match DXRT input size");
-            std::memcpy(input_buffer.data(), input.data, byte_count);
-        }
-
-        Request request;
-        request.context.pad_x = lwir_context.pad_x;
-        request.context.pad_y = lwir_context.pad_y;
-        request.context.scale = lwir_context.scale;
-        request.context.original_width = lwir_context.original_width;
-        request.context.original_height = lwir_context.original_height;
-        request.context.input_width = lwir_context.input_width;
-        request.context.input_height = lwir_context.input_height;
-
-        const int job_id = engine.RunAsync(input_buffer.data(), &request);
-        if (job_id < 0)
-            throw std::runtime_error("DXRT RunAsync failed to submit inference");
-        engine.Wait(job_id);
-
-        bool completed = false;
-        if (!request.completed.pop(completed))
-            throw std::runtime_error("Inference completion queue was closed");
-        if (request.error)
-            std::rethrow_exception(request.error);
-        return std::move(request.detections);
+      delete user_data;
+      throw std::runtime_error("DXRT RunAsync failed to submit inference");
     }
+    last_job_id = job_id;
+  }
 
-    bool ort_configured() const { return engine.IsOrtConfigured(); }
+  bool ort_configured() const { return engine.IsOrtConfigured(); }
 
-    void register_callback(IPostprocessor* postprocessor)
-    {
-      engine.RegisterCallback(
-          [postprocessor](dxrt::TensorPtrs &outputs, void *user_data) -> int
+  void register_callback(IPostprocessor *postprocessor)
+  {
+    engine.RegisterCallback(
+        [this, postprocessor](dxrt::TensorPtrs &outputs, void *user_data) -> int
+        {
+          std::unique_ptr<std::shared_ptr<Request>> holder(
+              static_cast<std::shared_ptr<Request> *>(user_data));
+          const auto request = *holder;
+
+          std::vector<Detection> detections;
+          std::exception_ptr     error;
+          try
           {
-            auto &request = *static_cast<Request *>(user_data);
-            try
-            {
-              request.detections = postprocessor->process(outputs, request.context);
-            }
-            catch(...)
-            {
-              request.error = std::current_exception();
-            }
-            request.completed.push(true);
-            return 0;
-          });
-    }
+            detections = postprocessor->process(outputs, request->context);
+          }
+          catch(...)
+          {
+            error = std::current_exception();
+          }
+
+          try
+          {
+            request->completion(std::move(detections), error);
+          }
+          catch(...)
+          {
+          }
+          release_slot();
+          return 0;
+        });
+  }
 };
-// Keep the NPU engine and callback state alive for every request.
+
 DxAppDetectionPipeline::DxAppDetectionPipeline(
-    const ModelConfig& model_config,
-    const DetectionConfig& detection_config)
+    const ModelConfig     &model_config,
+    const DetectionConfig &detection_config)
     : preprocessor_(std::make_unique<LwirPreprocessor>(model_config)),
-      model_path_(model_config.path),
-      max_inflight_(detection_config.max_inflight)
+      npu_(std::make_unique<NpuState>(model_config, detection_config.max_inflight))
 {
-    npu_ = std::make_unique<NpuState>(model_config);
-    postprocessor_ = std::make_unique<Postprocessor>(model_config, npu_->ort_configured());
-    npu_->register_callback(postprocessor_.get());
+  postprocessor_ =
+      std::make_unique<Postprocessor>(model_config, npu_->ort_configured());
+  npu_->register_callback(postprocessor_.get());
 }
 
-DxAppDetectionPipeline::~DxAppDetectionPipeline() = default;
-
-std::vector<Detection> DxAppDetectionPipeline::detect(const FrameContext& frame)
+DxAppDetectionPipeline::~DxAppDetectionPipeline()
 {
-    cv::Mat model_input;    // preprocessed image
+  wait_idle();
+}
+
+std::vector<Detection> DxAppDetectionPipeline::detect(const FrameContext &frame)
+{
+  auto frame_ref = std::shared_ptr<FrameContext>(
+      const_cast<FrameContext *>(&frame), [](FrameContext *) {});
+  std::promise<std::vector<Detection>> promise;
+  auto                                 result = promise.get_future();
+
+  submit_async(
+      frame_ref,
+      [&promise](std::vector<Detection> detections, std::exception_ptr error)
+      {
+        if(error)
+          promise.set_exception(error);
+        else
+          promise.set_value(std::move(detections));
+      });
+
+  return result.get();
+}
+
+void DxAppDetectionPipeline::submit_async(
+    const std::shared_ptr<FrameContext> &frame,
+    Completion                           completion)
+{
+  if(!frame)
+    throw std::invalid_argument("Cannot submit an empty frame");
+
+  npu_->acquire_slot();
+  try
+  {
+    cv::Mat           model_input;
     PreprocessContext context;
-    preprocessor_->process(frame.image, model_input, context);
-    return npu_->infer(model_input, context);
+    preprocessor_->process(frame->image, model_input, context);
+    npu_->run_async(model_input, context, std::move(completion), postprocessor_.get());
+  }
+  catch(...)
+  {
+    npu_->release_slot();
+    throw;
+  }
+}
+
+void DxAppDetectionPipeline::wait_idle()
+{
+  if(npu_)
+    npu_->wait_idle();
 }
