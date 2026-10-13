@@ -148,6 +148,7 @@ if(LWIR_NEEDS_VISION)
         src/detection/lwir_preprocessor.cpp
         src/detection/dxapp_detection_pipeline.cpp
         src/tracking/bytetrack_tracker.cpp
+        src/tracking/kalman_filter.cpp
     )
 
     target_include_directories(lwir_vision
@@ -417,6 +418,27 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_bytetrack_limits PRIVATE lwir_vision)
     add_test(NAME bytetrack_limits COMMAND test_bytetrack_limits)
+
+    add_executable(
+        test_bytetrack_scenarios
+        tests/tracking/test_bytetrack_scenarios.cpp
+    )
+    target_link_libraries(test_bytetrack_scenarios PRIVATE lwir_vision)
+    add_test(NAME bytetrack_scenarios COMMAND test_bytetrack_scenarios)
+
+    add_executable(
+        test_bytetrack_cases
+        tests/tracking/test_bytetrack_cases.cpp
+    )
+    target_link_libraries(test_bytetrack_cases PRIVATE lwir_vision)
+    add_test(NAME bytetrack_cases COMMAND test_bytetrack_cases)
+
+    # MOT17 공개 데이터 실행 도구 (ctest 미등록, datasets/MOT17이 있을 때 직접 실행)
+    add_executable(
+        bench_mot17
+        tests/tracking/bench_mot17.cpp
+    )
+    target_link_libraries(bench_mot17 PRIVATE lwir_vision)
 
 
     # --------------------------------------------------------------------------

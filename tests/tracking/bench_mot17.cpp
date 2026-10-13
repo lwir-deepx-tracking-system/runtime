@@ -9,7 +9,12 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <set>
 #include <vector>
+
+#include <yaml-cpp/yaml.h>
+
+#include "config/app_config.hpp"
 
 #include "tracking_metrics.hpp"
 
@@ -31,7 +36,12 @@
 //     <MOT17 폴더> : train/ 이 들어 있는 폴더 또는 train 폴더 자체
 //     --det        : 사용할 공개 검출기 (기본 FRCNN)
 //     --out        : 결과 파일 폴더 (기본: 저장하지 않음)
-//     --config     : ByteTrack YAML (기본: 공식 기본값). frame_rate는 항상 seqinfo.ini 값을 쓴다
+//     --config     : Tracking 설정 YAML (기본: TrackingConfig 기본값). 두 형식 모두 읽는다
+//                    - runtime.yaml / benchmark.yaml 처럼 tracking: 섹션이 있는 파일
+//                    - track_threshold: ... 처럼 tracking 키만 나열한 파일 (sweep_mot17.py가 만드는 형식)
+//                    v2에서 없어진 low_threshold, new_track_threshold, frame_rate 키는 오류로 처리한다
+//     track_buffer : v2 Tracker는 fps 환산을 하지 않으므로, 예전 결과와 맞추기 위해 여기서
+//                    track_buffer × (seqinfo fps / 30)으로 환산해 넘긴다 (05는 14fps)
 //     --gmc        : 카메라 움직임 보정(CMC). 폴더 안의 GMC-MOT17-XX.txt를 읽어 프레임마다 적용한다
 //                    BoT-SORT가 영상으로 미리 계산해 공개한 파일 형식 (MIT 라이선스):
 //                    줄 번호(0부터), a, b, tx, c, d, ty  (탭 구분, n번째 줄 = n프레임 → n+1프레임 변환)
@@ -212,19 +222,47 @@ void preprocess(const std::vector<GtRow>& gt_all, std::vector<Track>& tracks,
     tracks.swap(kept);
 }
 
-void print_score_distribution(const std::vector<float>& scores, const ByteTrackConfig& c)
+// v2 ByteTrackTracker의 고정값과 같게 맞춘다 (low 0.1, new = track + 0.1)
+constexpr float kLowThreshold = 0.1f;
+float new_track_threshold(const TrackingConfig& c) { return std::min(c.track_threshold + 0.1f, 1.0f); }
+
+// --config 파일을 읽는다. tracking: 섹션이 있으면 그 안을, 없으면 파일 전체를 tracking 설정으로 본다.
+// 오타가 조용히 무시되지 않도록 모르는 키는 오류로 처리한다.
+TrackingConfig load_config(const std::string& path)
 {
+    const YAML::Node root = config_parser::load_yaml(path);
+    const YAML::Node node = root["tracking"] ? root["tracking"] : root;
+    if (!node.IsMap())
+        throw std::runtime_error(path + ": tracking 설정이 key: value 형식이 아닙니다");
+    static const std::set<std::string> known = {
+        "track_threshold", "match_threshold", "track_buffer", "fuse_score", "lost_output_frames",
+        "buffer_scale", "buffer_max_px", "buffer_small_size", "buffer_snap"};
+    static const std::set<std::string> removed = {"low_threshold", "new_track_threshold", "frame_rate"};
+    for (const auto& kv : node)
+    {
+        const std::string key = kv.first.as<std::string>();
+        if (removed.count(key))
+            throw std::runtime_error(path + ": '" + key + "'는 v2 Tracker에서 설정할 수 없습니다 (고정값)");
+        if (!known.count(key))
+            throw std::runtime_error(path + ": 알 수 없는 키 '" + key + "'");
+    }
+    return config_parser::load_tracking_config(node);
+}
+
+void print_score_distribution(const std::vector<float>& scores, const TrackingConfig& c)
+{
+    const float low = kLowThreshold, new_thresh = new_track_threshold(c);
     int band[4] = {0, 0, 0, 0};
     float lo = scores.empty() ? 0.0f : scores[0], hi = lo;
     for (float s : scores)
     {
         lo = std::min(lo, s);
         hi = std::max(hi, s);
-        if (s <= c.low_thresh)
+        if (s <= low)
             ++band[0];
-        else if (s < c.track_thresh)
+        else if (s < c.track_threshold)
             ++band[1];
-        else if (s < c.new_track_thresh)
+        else if (s < new_thresh)
             ++band[2];
         else
             ++band[3];
@@ -232,8 +270,8 @@ void print_score_distribution(const std::vector<float>& scores, const ByteTrackC
     const double n = scores.empty() ? 1.0 : static_cast<double>(scores.size());
     std::printf("  검출 %zu개, 점수 범위 %.3f ~ %.3f\n", scores.size(), lo, hi);
     std::printf("    버림(<=%.2f) %5.1f%%   low(2차 매칭) %5.1f%%   high %5.1f%%   high+새 ID 가능(>=%.2f) %5.1f%%\n",
-                c.low_thresh, 100.0 * band[0] / n, 100.0 * band[1] / n, 100.0 * band[2] / n,
-                c.new_track_thresh, 100.0 * band[3] / n);
+                low, 100.0 * band[0] / n, 100.0 * band[1] / n, 100.0 * band[2] / n,
+                new_thresh, 100.0 * band[3] / n);
     if (lo < 0.0f || hi > 1.0f)
         std::printf("    ! 점수가 0~1 범위가 아닙니다 (DPM). ByteTrack 임계값과 의미가 맞지 않습니다\n");
     else if (band[1] == 0)
@@ -293,11 +331,11 @@ int main(int argc, char** argv)
     if (fs::is_directory(root / "train"))
         root /= "train";
 
-    ByteTrackConfig base;
+    TrackingConfig base;
     try
     {
         if (!config_path.empty())
-            base = load_bytetrack_config(config_path);
+            base = load_config(config_path);
     }
     catch (const std::exception& e)
     {
@@ -329,8 +367,11 @@ int main(int argc, char** argv)
         fs::create_directories(out_dir);
 
     std::printf("\n[MOT17 %s, 시퀀스 %zu개]  ByteTrack track %.2f / low %.2f / new %.2f / match %.2f / buffer %d\n",
-                det_name.c_str(), seqs.size(), base.track_thresh, base.low_thresh, base.new_track_thresh,
-                base.match_thresh, base.track_buffer);
+                det_name.c_str(), seqs.size(), base.track_threshold, kLowThreshold, new_track_threshold(base),
+                base.match_threshold, base.track_buffer);
+    std::printf("  fuse_score %s / lost_output_frames %d / buffer_scale %.2f (max_px %.0f, small %.0f, snap %s)\n",
+                base.fuse_score ? "켬" : "끔", base.lost_output_frames, base.buffer_scale, base.buffer_max_px,
+                base.buffer_small_size, base.buffer_snap ? "켬" : "끔");
     if (!gmc_dir.empty())
         std::printf("  CMC 켬: %s/GMC-<시퀀스>.txt\n", gmc_dir.c_str());
 
@@ -361,9 +402,10 @@ int main(int argc, char** argv)
         std::printf("\n%s  (%d프레임, %dfps)\n", info.name.c_str(), info.length, info.frame_rate);
         print_score_distribution(scores, base);
 
-        ByteTrackConfig cfg = base;
-        cfg.frame_rate = info.frame_rate;
-        ByteTrackTracker tracker("mot17", cfg);
+        // 예전 Tracker처럼 track_buffer를 30fps 기준으로 보고 시퀀스 fps에 맞춰 환산한다
+        TrackingConfig cfg = base;
+        cfg.track_buffer = std::max(1, static_cast<int>(info.frame_rate / 30.0 * base.track_buffer));
+        ByteTrackTracker tracker(cfg);
         tracker.set_image_size(static_cast<float>(info.width), static_cast<float>(info.height));
         std::vector<CameraMotion> gmc;
         if (!gmc_dir.empty())

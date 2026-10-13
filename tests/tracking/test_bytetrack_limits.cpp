@@ -168,7 +168,7 @@ CaseResult run_case(const fs::path& dir, bool verbose, bool cmc)
         }
         // track() 호출 시간만 잰다 (지표 계산·출력 시간은 제외)
         const auto t0 = std::chrono::steady_clock::now();
-        const auto tracks = tracker.track(seq.by_frame[f]);
+        const auto tracks = tracker.track(seq.by_frame[f]);$B datasets/MOT17 | tail -12  
         const auto t1 = std::chrono::steady_clock::now();
         r.ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
         metrics.add_frame(f, seq.gt_by_frame[f], tracks);
