@@ -40,7 +40,6 @@
 //   test_bytetrack_limits --update-baseline   현재 결과를 baseline.txt에 기록
 //   test_bytetrack_limits --cmc               camera.csv의 정답 카메라 움직임으로 CMC를 켜고 실행
 //                                             (기준선은 CMC 없는 값이므로 좋아지면 IMPROVED로 표시)
-//   test_bytetrack_limits --config a.yaml     기본값 대신 YAML 설정으로 실행 (--cmc와 함께 쓸 수 있음)
 
 namespace fs = std::filesystem;
 
@@ -121,7 +120,7 @@ std::map<int, std::pair<double, double>> read_camera(const fs::path& file)
     return cam;
 }
 
-CaseResult run_case(const fs::path& dir, bool verbose, bool cmc, const ByteTrackConfig& cfg)
+CaseResult run_case(const fs::path& dir, bool verbose, bool cmc)
 {
     CaseResult r;
     r.name = dir.filename().string();
@@ -142,9 +141,8 @@ CaseResult run_case(const fs::path& dir, bool verbose, bool cmc, const ByteTrack
     if (verbose)
         std::cout << "[" << r.name << "]\n";
 
-    // 기본은 공식 ByteTrack 기본값. --config를 주면 그 설정을 쓴다 (ctest는 항상 기본값)
-    ByteTrackTracker tracker("test-limits", cfg);
-    tracker.set_image_size(640.0f, 480.0f);  // 생성기의 영상 크기
+    // YAML 튜닝에 영향받지 않도록 기본값(공식 ByteTrack 값)으로 고정한다.
+    ByteTrackTracker tracker(TrackingConfig{});
     tracking_metrics::Accumulator metrics;
     const auto camera = cmc ? read_camera(dir / "camera.csv") : std::map<int, std::pair<double, double>>{};
     if (cmc && camera.empty())
@@ -200,7 +198,6 @@ CaseResult run_case(const fs::path& dir, bool verbose, bool cmc, const ByteTrack
 int main(int argc, char** argv)
 {
     bool verbose = false, update = false, cmc = false;
-    std::string config_path;
     std::vector<std::string> filters;
     for (int i = 1; i < argc; ++i)
     {
@@ -211,29 +208,14 @@ int main(int argc, char** argv)
             update = true;
         else if (arg == "--cmc")
             cmc = true;
-        else if (arg == "--config" && i + 1 < argc)
-            config_path = argv[++i];
         else
             filters.push_back(arg);
     }
 
-    if ((cmc || !config_path.empty()) && update)
+    if (cmc && update)
     {
-        std::cerr << "--cmc / --config 결과는 기준선으로 기록하지 않습니다 (기준선은 기본 설정, CMC 없는 값)\n";
+        std::cerr << "--cmc 결과는 기준선으로 기록하지 않습니다 (기준선은 CMC 없는 값)\n";
         return 2;
-    }
-    ByteTrackConfig cfg;
-    if (!config_path.empty())
-    {
-        try
-        {
-            cfg = load_bytetrack_config(config_path);
-        }
-        catch (const std::exception& e)
-        {
-            std::cerr << "설정 오류: " << e.what() << "\n";
-            return 2;
-        }
     }
     const fs::path root = fs::path(test_csv::tracking_test_dir()) / "data" / "limits";
     std::vector<fs::path> dirs;
@@ -257,11 +239,10 @@ int main(int argc, char** argv)
 
     std::vector<CaseResult> results;
     for (const auto& d : dirs)
-        results.push_back(run_case(d, verbose, cmc, cfg));
+        results.push_back(run_case(d, verbose, cmc));
 
     std::printf("\n[ByteTrack 한계 케이스 %zu개]%s  (IDSW, 헛출력, 누락) 비교. ideal = 완벽한 Tracker, base = 현재 기준선\n",
-                results.size(), (std::string(cmc ? " CMC 켬(정답 카메라 움직임)" : "") +
-                                 (config_path.empty() ? "" : " 설정: " + config_path)).c_str());
+                results.size(), cmc ? " CMC 켬(정답 카메라 움직임)" : "");
     std::printf("  %-7s %14s %14s %14s %7s  %s\n", "case", "actual", "ideal", "base", "IDF1", "verdict");
     std::printf("  %s\n", std::string(71, '-').c_str());
 

@@ -77,7 +77,7 @@ bool run(const std::string& name, FrameTracks& out)
     }
 
     // YAML 튜닝에 영향받지 않도록 기본값(공식 ByteTrack 값)으로 고정한다.
-    ByteTrackTracker tracker("test-defaults", ByteTrackConfig{});
+    ByteTrackTracker tracker(TrackingConfig{});
     tracking_metrics::Accumulator metrics;
     for (int f : seq.frames)
     {
@@ -274,7 +274,7 @@ void test_performance()
         objs.push_back({pos_x(rng), pos_y(rng), vel(rng), vel(rng), size(rng), size(rng) * 1.5f});
 
     // YAML 튜닝에 영향받지 않도록 기본값(공식 ByteTrack 값)으로 고정한다.
-    ByteTrackTracker tracker("test-defaults", ByteTrackConfig{});
+    ByteTrackTracker tracker(TrackingConfig{});
     std::vector<double> ms;
     size_t max_tracks = 0;
     tracking_metrics::Accumulator metrics;

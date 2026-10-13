@@ -90,7 +90,7 @@ CaseResult run_case(const fs::path& dir, bool verbose)
         std::cout << "[" << r.name << "]\n";
 
     // YAML 튜닝에 영향받지 않도록 기본값(공식 ByteTrack 값)으로 고정한다.
-    ByteTrackTracker tracker("test-defaults", ByteTrackConfig{});
+    ByteTrackTracker tracker(TrackingConfig{});
     tracking_metrics::Accumulator metrics;
     std::map<int, std::vector<Track>> outputs;
 
