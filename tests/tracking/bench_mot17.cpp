@@ -386,6 +386,7 @@ int main(int argc, char** argv)
     };
     std::vector<Row> rows;
     Totals total;
+    std::vector<double> frame_ms;  // 모든 시퀀스의 프레임별 처리 시간 (p99·최대 계산용)
 
     for (const auto& dir : seqs)
     {
@@ -439,7 +440,9 @@ int main(int argc, char** argv)
             if (f >= 2 && f - 1 < static_cast<int>(gmc.size()))
                 tracker.set_camera_motion(gmc[f - 1]);
             auto tracks = tracker.track(in);
-            ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            const double dt = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            ms += dt;
+            frame_ms.push_back(dt);
 
             if (out.is_open())
                 for (const auto& t : tracks)
@@ -495,6 +498,14 @@ int main(int argc, char** argv)
         std::printf("  %-18s %7ld %7ld %7ld %7ld %7ld %6.1f%% %6.1f%% %9.3f\n", "합계", total.gt, total.pred,
                     total.idsw, fp, fn, 100.0 * 2.0 * total.idtp / (total.gt + total.pred),
                     100.0 * (1.0 - static_cast<double>(fp + fn + total.idsw) / total.gt), total.ms / total.frames);
+    }
+    if (!frame_ms.empty())
+    {
+        std::sort(frame_ms.begin(), frame_ms.end());
+        std::printf("\n  처리 시간:  track() %zu회, 평균 %.4f ms, p99 %.4f ms, 최대 %.4f ms"
+                    "  (set_camera_motion + track 구간만, 파일 읽기·지표 계산 제외)\n",
+                    frame_ms.size(), total.ms / frame_ms.size(), frame_ms[frame_ms.size() * 99 / 100],
+                    frame_ms.back());
     }
     int removed_all = 0;
     for (const auto& r : rows)
