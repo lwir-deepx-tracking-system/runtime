@@ -13,6 +13,19 @@ namespace
 constexpr int kDflBins = 16;
 constexpr int kDflChannels = 4 * kDflBins;
 
+float sigmoid_probability(float logit)
+{
+    if (!std::isfinite(logit))
+        throw std::runtime_error("YOLOv8 class logit must be finite");
+
+    // 양수와 음수를 나눠 큰 음수에서 exp(-logit)가 overflow하지 않게 한다.
+    if (logit >= 0.0F)
+        return 1.0F / (1.0F + std::exp(-logit));
+
+    const float exp_logit = std::exp(logit);
+    return exp_logit / (1.0F + exp_logit);
+}
+
 const float* require_float_data(const dxrt::TensorPtr& tensor, const char* role)
 {
     if (!tensor)
@@ -269,17 +282,23 @@ std::vector<Postprocessor::Candidate> Postprocessor::decode_npu(
             {
                 const int cell = y * width + x;
                 int best_class = -1;
-                float best_confidence = config_.postprocess.confidence_threshold;
+                float best_logit = -std::numeric_limits<float>::infinity();
                 for (int class_id = 0; class_id < config_.postprocess.num_classes; ++class_id)
                 {
-                    const float score = classes[class_id * grid_size + cell];
-                    if (score > best_confidence)
+                    const float logit = classes[class_id * grid_size + cell];
+                    if (!std::isfinite(logit))
+                        throw std::runtime_error("YOLOv8 class logit must be finite");
+                    if (logit > best_logit)
                     {
-                        best_confidence = score;
+                        best_logit = logit;
                         best_class = class_id;
                     }
                 }
                 if (best_class < 0)
+                    continue;
+
+                const float best_confidence = sigmoid_probability(best_logit);
+                if (best_confidence <= config_.postprocess.confidence_threshold)
                     continue;
 
                 const float left = dfl_distance(regression, grid_size, 0, cell);
