@@ -133,7 +133,47 @@ option.useORT = config.use_ort;
 `buffer_count: 0`으로 바꾸면 DXRT 자동 설정을 사용할 수 있다. Runtime의
 `max_inflight: 4`가 DXRT `bufferCount: 4`를 의미하지는 않는다.
 
-## 7. 비교용 장비 측정 기록
+## 7. Benchmark 대응 `dxrun` 실행 조건
+
+현재 `config/benchmark.yaml`의 Detection 실행 조건과 가장 가깝게 비교하려면 다음 명령을
+사용한다.
+
+```bash
+dxrun \
+  -m models/yolov8n.dxnn \
+  -s \
+  -v \
+  --buffer-count 6 \
+  --profiler \
+  -d all \
+  -n 0 \
+  -w 0 \
+  -l <처리할_프레임_수>
+```
+
+| Benchmark 조건 | `dxrun` 옵션 | 의미 |
+| --- | --- | --- |
+| `max_inflight: 1`이며 매 프레임 completion을 기다림 | `-s`, `--single` | 단일 입력을 순차 실행한다. |
+| `buffer_count: 6` | `--buffer-count 6` | DXRT 입력·출력 buffer pool을 6개로 설정한다. |
+| `use_ort: false` | `--use-ort` 생략 | ONNX Runtime CPU task 실행을 비활성화한다. |
+| DXRT profiler 활성화 | `--profiler` | job별 NPU processing 측정 조건을 맞춘다. |
+| 장치와 NPU를 별도로 제한하지 않음 | `-d all -n 0` | 사용 가능한 모든 장치와 `NPU_ALL`을 사용한다. |
+| 별도 warmup 없음 | `-w 0`, `--warmup-runs 0` | 측정 전에 제외할 warmup 추론이 없다. |
+| Dataset의 모든 프레임 처리 | `-l N`, `--loops N` | 비교할 프레임 수와 같은 횟수로 반복한다. |
+| NPU processing과 latency 기록 | `-v`, `--verbose` | NPU Processing Time과 Latency를 출력한다. |
+
+장치와 NPU, warmup 설정은 `dxrun` 기본값이므로 다음과 같이 줄여서 실행할 수도 있다.
+
+```bash
+dxrun -m models/yolov8n.dxnn -s -v --buffer-count 6 --profiler -l 30
+```
+
+`dxrun`은 프로젝트의 LWIR 전처리, YOLO 후처리, ByteTrack 및 결과 파일 저장을 실행하지
+않는다. 따라서 `dxrun`의 NPU Processing Time은 Benchmark의 `npu_processing_ms`와,
+Latency는 `latency_ms`와 비교한다. `preprocess_ms`, `postprocess_ms`, `tracking_ms`까지 포함한
+전체 pipeline 성능을 동일하게 재현하는 명령은 아니다.
+
+## 8. 비교용 장비 측정 기록
 
 다음 값은 개발 환경에서 재현한 결과가 아니라 대상 장비에서 사용자가 확인한 참고값이다.
 
@@ -146,7 +186,7 @@ option.useORT = config.use_ort;
 NPU processing이 약 3.8 ms로 유지되면서 latency만 증가한 것은 NPU core 연산 자체보다
 DXRT/CPU/queue/buffer/전송 구간이 전체 왕복 시간을 늘렸다는 의미로 해석한다.
 
-## 8. 요구 버전과 검증 상태
+## 9. 요구 버전과 검증 상태
 
 - job별 `GetJobMetrics()`를 사용하므로 DXRT 3.4.0 이상이 필요하다.
 - Runtime 빌드 성공
