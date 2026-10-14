@@ -107,8 +107,39 @@ struct ModelPreprocessConfig {
     int pad_value = 114;
 };
 
-// YOLOv8 결과 필터링과 class label 변환에 사용하는 값.
+// DXNN/ORT가 노출하는 detection output tensor의 계약.
+enum class PostprocessOutputFormat
+{
+    Auto,
+    DecodedXywh,
+    EndToEndXyxy,
+    SplitHead
+};
+
+// split-head class tensor가 logit인지 이미 sigmoid가 적용된 확률인지 구분한다.
+enum class PostprocessScoreActivation
+{
+    None,
+    Sigmoid
+};
+
+// End-to-end output은 기본적으로 NMS를 생략하고 raw output에는 적용할 수 있다.
+enum class PostprocessNmsMode
+{
+    Auto,
+    Enabled,
+    Disabled
+};
+
+// 모델 output decode, 결과 필터링과 class label 변환에 사용하는 값.
 struct ModelPostprocessConfig {
+    PostprocessOutputFormat output_format = PostprocessOutputFormat::Auto;
+    int split_output_levels = 3;
+    int split_regression_bins = 16;
+    PostprocessScoreActivation split_class_score_activation =
+        PostprocessScoreActivation::None;
+    PostprocessNmsMode nms_mode = PostprocessNmsMode::Auto;
+    bool class_agnostic_nms = true;
     float confidence_threshold = 0.25F;
     float nms_threshold = 0.45F;
     int num_classes = 0;

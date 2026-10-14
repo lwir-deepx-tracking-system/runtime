@@ -1,6 +1,7 @@
 #include "config/app_config.hpp"
 #include "common/logger.hpp"
 
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
@@ -15,6 +16,35 @@ T required(const YAML::Node& node, const char* key, const std::string& path)
     catch (const YAML::Exception& e) {
         throw std::runtime_error("invalid configuration: " + path + "." + key + " (" + e.what() + ")");
     }
+}
+
+PostprocessOutputFormat parse_postprocess_output_format(const std::string& value)
+{
+    if (value == "auto") return PostprocessOutputFormat::Auto;
+    if (value == "decoded_xywh") return PostprocessOutputFormat::DecodedXywh;
+    if (value == "end_to_end_xyxy") return PostprocessOutputFormat::EndToEndXyxy;
+    if (value == "split_head") return PostprocessOutputFormat::SplitHead;
+    throw std::runtime_error(
+        "postprocess.output_format must be one of: auto, decoded_xywh, "
+        "end_to_end_xyxy, split_head");
+}
+
+PostprocessScoreActivation parse_postprocess_score_activation(
+    const std::string& value)
+{
+    if (value == "none") return PostprocessScoreActivation::None;
+    if (value == "sigmoid") return PostprocessScoreActivation::Sigmoid;
+    throw std::runtime_error(
+        "postprocess.split_class_score_activation must be one of: none, sigmoid");
+}
+
+PostprocessNmsMode parse_postprocess_nms_mode(const std::string& value)
+{
+    if (value == "auto") return PostprocessNmsMode::Auto;
+    if (value == "enabled") return PostprocessNmsMode::Enabled;
+    if (value == "disabled") return PostprocessNmsMode::Disabled;
+    throw std::runtime_error(
+        "postprocess.nms_mode must be one of: auto, enabled, disabled");
 }
 }  // namespace
 
@@ -298,6 +328,19 @@ ModelConfig load_model_config(const std::string& path)
     c.preprocess.normalize = required<bool>(root["preprocess"], "normalize", "preprocess");
     c.preprocess.pad_value = required<int>(root["preprocess"], "pad_value", "preprocess");
     const YAML::Node post = root["postprocess"];
+    c.postprocess.output_format = parse_postprocess_output_format(
+        required<std::string>(post, "output_format", "postprocess"));
+    c.postprocess.split_output_levels = required<int>(
+        post, "split_output_levels", "postprocess");
+    c.postprocess.split_regression_bins = required<int>(
+        post, "split_regression_bins", "postprocess");
+    c.postprocess.split_class_score_activation =
+        parse_postprocess_score_activation(required<std::string>(
+            post, "split_class_score_activation", "postprocess"));
+    c.postprocess.nms_mode = parse_postprocess_nms_mode(
+        required<std::string>(post, "nms_mode", "postprocess"));
+    c.postprocess.class_agnostic_nms = required<bool>(
+        post, "class_agnostic_nms", "postprocess");
     c.postprocess.confidence_threshold = required<float>(post, "confidence_threshold", "postprocess");
     c.postprocess.nms_threshold = required<float>(post, "nms_threshold", "postprocess");
     c.postprocess.num_classes = required<int>(post, "num_classes", "postprocess");
@@ -316,6 +359,23 @@ ModelConfig load_model_config(const std::string& path)
         throw std::runtime_error("only letterbox with normalize=false is supported");
     if (c.preprocess.pad_value < 0 || c.preprocess.pad_value > 255)
         throw std::runtime_error("preprocess.pad_value must be in [0, 255]");
+    if (c.postprocess.split_output_levels <= 0 ||
+        c.postprocess.split_output_levels > 16)
+        throw std::runtime_error(
+            "postprocess.split_output_levels must be in [1, 16]");
+    if (c.postprocess.split_regression_bins <= 0 ||
+        c.postprocess.split_regression_bins > 256)
+        throw std::runtime_error(
+            "postprocess.split_regression_bins must be in [1, 256]");
+    if (!std::isfinite(c.postprocess.confidence_threshold) ||
+        c.postprocess.confidence_threshold < 0.0F ||
+        c.postprocess.confidence_threshold > 1.0F)
+        throw std::runtime_error(
+            "postprocess.confidence_threshold must be in [0, 1]");
+    if (!std::isfinite(c.postprocess.nms_threshold) ||
+        c.postprocess.nms_threshold < 0.0F ||
+        c.postprocess.nms_threshold > 1.0F)
+        throw std::runtime_error("postprocess.nms_threshold must be in [0, 1]");
     if (c.postprocess.num_classes <= 0 || static_cast<int>(c.postprocess.class_names.size()) != c.postprocess.num_classes)
         throw std::runtime_error("postprocess.class_names size must equal num_classes");
     return c;

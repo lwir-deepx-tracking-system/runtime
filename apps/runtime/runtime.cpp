@@ -229,7 +229,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 
     camera_ = std::make_unique<Camera>();
 
-    // 이 런타임의 고정 조합인 YOLOv8 + DX App pipeline을 생성한다.
+    // model YAML의 전처리·후처리 계약으로 DX App pipeline을 생성한다.
     detection_pipeline_ = std::make_unique<DxAppDetectionPipeline>(
         config_.model, config_.detection);
 

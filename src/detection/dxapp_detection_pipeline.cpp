@@ -286,8 +286,6 @@ struct DxAppDetectionPipeline::NpuState
     request->job_cv.notify_all();
   }
 
-  bool ort_configured() const { return engine.IsOrtConfigured(); }
-
   void register_callback(IPostprocessor *postprocessor)
   {
     engine.RegisterCallback(
@@ -342,7 +340,7 @@ DxAppDetectionPipeline::DxAppDetectionPipeline(
       npu_(std::make_unique<NpuState>(model_config, detection_config))
 {
   postprocessor_ =
-      std::make_unique<Postprocessor>(model_config, npu_->ort_configured());
+      std::make_unique<Postprocessor>(model_config);
   npu_->register_callback(postprocessor_.get());
 }
 

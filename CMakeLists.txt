@@ -379,6 +379,15 @@ if(BUILD_TESTING)
     target_link_libraries(test_detection_thread PRIVATE lwir_runtime_core)
     add_test(NAME detection_thread COMMAND test_detection_thread)
 
+    if(LWIR_ENABLE_DX_APP)
+        add_executable(
+            test_postprocessor
+            tests/detection/test_postprocessor.cpp
+        )
+        target_link_libraries(test_postprocessor PRIVATE lwir_vision)
+        add_test(NAME postprocessor COMMAND test_postprocessor)
+    endif()
+
 
     # --------------------------------------------------------------------------
     # 선택 ID 상태 테스트

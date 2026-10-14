@@ -24,12 +24,12 @@ int main()
         benchmark.use_ort)
         return 2;
 
-    const BenchmarkSequenceConfig all_sequences =
+    const BenchmarkSequenceConfig configured_range =
         config_parser::load_benchmark_sequence_config(
             benchmark_root["sequence"]);
-    if (all_sequences.range_enabled ||
-        all_sequences.start != "seq_001" ||
-        all_sequences.end != "seq_010")
+    if (!configured_range.range_enabled ||
+        configured_range.start != "seq_001" ||
+        configured_range.end != "seq_001")
         return 3;
 
     const YAML::Node selected_range = YAML::Load(

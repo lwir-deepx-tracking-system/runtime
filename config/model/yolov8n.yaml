@@ -20,6 +20,13 @@ preprocess:
   pad_value: 114
 
 postprocess:
+  # auto: DXRT output shape를 검증해 decoded_xywh 또는 split_head를 선택한다.
+  output_format: auto
+  split_output_levels: 3
+  split_regression_bins: 16
+  split_class_score_activation: sigmoid
+  nms_mode: enabled
+  class_agnostic_nms: true
   confidence_threshold: 0.1
   nms_threshold: 0.45
   num_classes: 80

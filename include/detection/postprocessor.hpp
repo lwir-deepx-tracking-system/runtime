@@ -6,11 +6,11 @@
 #include "detection/i_postprocessor.hpp"
 #include "detection/lwir_preprocessor.hpp"
 
-// YOLOv8 출력 tensor를 runtime 공통 Detection 타입으로 직접 변환한다.
+// AppConfig가 검증한 model output 계약에 따라 tensor를 Detection으로 변환한다.
 class Postprocessor : public IPostprocessor
 {
 public:
-    Postprocessor(const ModelConfig& config, bool ort_configured);
+    explicit Postprocessor(const ModelConfig& config);
 
     std::vector<Detection> process(
         const dxrt::TensorPtrs& outputs,
@@ -27,16 +27,22 @@ private:
         int class_id = -1;
     };
 
-    std::vector<Candidate> decode_ort(const dxrt::TensorPtrs& outputs) const;
-    std::vector<Candidate> decode_npu(const dxrt::TensorPtrs& outputs) const;
+    PostprocessOutputFormat resolve_output_format(
+        const dxrt::TensorPtrs& outputs) const;
+    std::vector<Candidate> decode_decoded_xywh(
+        const dxrt::TensorPtrs& outputs) const;
+    std::vector<Candidate> decode_end_to_end_xyxy(
+        const dxrt::TensorPtrs& outputs) const;
+    std::vector<Candidate> decode_split_head(
+        const dxrt::TensorPtrs& outputs) const;
     std::vector<Candidate> apply_nms(std::vector<Candidate> candidates) const;
     std::vector<Detection> restore_coordinates(
         const std::vector<Candidate>& candidates,
         const PreprocessContext& context) const;
 
     std::string class_name(int class_id) const;
+    bool should_apply_nms(PostprocessOutputFormat format) const;
 
     int input_width_;
     int input_height_;
-    bool ort_configured_;
 };

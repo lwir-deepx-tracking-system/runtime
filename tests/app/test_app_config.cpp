@@ -25,8 +25,30 @@ int main()
     if (config.model.camera_input.width != 640 || config.model.camera_input.height != 480) return 4;
     if (config.model.input.width != 640 || config.model.input.height != 640) return 5;
 
-    // 전처리 padding과 class 개수가 후처리 설정까지 전달되는지 확인한다.
-    if (config.model.preprocess.pad_value != 114 || config.model.postprocess.num_classes != 1) return 6;
+    // 모델 YAML의 전처리와 output tensor 계약이 typed 설정으로 전달되는지 확인한다.
+    if (config.model.preprocess.pad_value != 114 ||
+        config.model.postprocess.output_format != PostprocessOutputFormat::Auto ||
+        config.model.postprocess.split_output_levels != 3 ||
+        config.model.postprocess.split_regression_bins != 16 ||
+        config.model.postprocess.split_class_score_activation !=
+            PostprocessScoreActivation::Sigmoid ||
+        config.model.postprocess.nms_mode != PostprocessNmsMode::Enabled ||
+        !config.model.postprocess.class_agnostic_nms ||
+        config.model.postprocess.num_classes != 80)
+        return 6;
+
+    // YOLO26은 같은 parser를 사용하되 DFL-free split-head와 NMS auto 계약을 갖는다.
+    const ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
+    if (yolo26.name != "yolo26s" ||
+        yolo26.postprocess.output_format != PostprocessOutputFormat::Auto ||
+        yolo26.postprocess.split_output_levels != 3 ||
+        yolo26.postprocess.split_regression_bins != 1 ||
+        yolo26.postprocess.split_class_score_activation !=
+            PostprocessScoreActivation::None ||
+        yolo26.postprocess.nms_mode != PostprocessNmsMode::Auto ||
+        !yolo26.postprocess.class_agnostic_nms ||
+        yolo26.postprocess.num_classes != 16)
+        return 7;
 
     // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
     if (config.gui.enabled ||
@@ -45,6 +67,6 @@ int main()
         config.gui.command.bind_address != "0.0.0.0" ||
         config.gui.command.port != 5001 ||
         config.gui.command.receive_timeout_ms != 1000)
-        return 7;
+        return 8;
     return 0;
 }

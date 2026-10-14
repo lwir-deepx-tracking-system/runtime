@@ -20,6 +20,16 @@ preprocess:
   pad_value: 114
 
 postprocess:
+  # YOLO26 export에 따라 [1, N, 6], [1, 4+C, N], split-head를 구분한다.
+  output_format: auto
+  split_output_levels: 3
+  # 표준 YOLO26은 reg_max=1인 DFL-free regression을 사용한다.
+  split_regression_bins: 1
+  # DEEPX split class output은 Sigmoid 이후 확률 tensor로 가정한다.
+  split_class_score_activation: none
+  # end-to-end output은 NMS를 생략하고 raw/split output에는 적용한다.
+  nms_mode: auto
+  class_agnostic_nms: true
   confidence_threshold: 0.01
   nms_threshold: 0.45
   num_classes: 16

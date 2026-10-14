@@ -5,7 +5,7 @@ LWIR 카메라 영상에서 객체를 검출하고 추적한 뒤, 같은 프레�
 현재 기준 조합은 다음과 같습니다.
 
 - 입력: `CV_16UC1` LWIR 영상
-- Detection: YOLOv8 + DEEPX `dx_app` 구조
+- Detection: 모델 YAML 기반 YOLOv8/YOLO26 + DEEPX `dx_app` 구조
 - Tracking: ByteTrack
 - 실행 구조: POSIX pthread + `ThreadSafeQueue`
 - 동기화/통신: POSIX pthread mutex와 POSIX socket API
