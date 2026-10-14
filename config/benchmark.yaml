@@ -13,7 +13,7 @@ logging:
 
 model:
   # 사용할 모델 설정 파일
-  config: config/model/yolov8n.yaml
+  config: config/model/yolo26s.yaml
 
 
 # ============================================================
@@ -38,10 +38,10 @@ detection:
 
 tracking:
   # Track으로 사용할 Detection confidence 기준
-  track_threshold: 0.5
+  track_threshold: 0.2
 
   # ByteTrack 매칭 기준
-  match_threshold: 0.8
+  match_threshold: 0.3
 
   # Detection이 일시적으로 사라졌을 때 Track을 유지할 프레임 수
   track_buffer: 30
@@ -54,11 +54,11 @@ tracking:
 sequence:
   # false이면 dataset_root 아래의 모든 Sequence를 처리한다.
   # true이면 start부터 end까지 양끝을 포함하여 처리한다.
-  range_enabled: false
+  range_enabled: true
 
   # 숫자 순서와 문자열 정렬 순서가 같도록 seq_001 형식의 zero-padding을 사용한다.
   start: seq_001
-  end: seq_010
+  end: seq_001
 
 
 # ============================================================
