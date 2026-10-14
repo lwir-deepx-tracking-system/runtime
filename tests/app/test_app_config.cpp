@@ -44,7 +44,7 @@ int main()
         yolo26.postprocess.split_output_levels != 3 ||
         yolo26.postprocess.split_regression_bins != 1 ||
         yolo26.postprocess.split_class_score_activation !=
-            PostprocessScoreActivation::None ||
+            PostprocessScoreActivation::Sigmoid ||
         yolo26.postprocess.nms_mode != PostprocessNmsMode::Auto ||
         !yolo26.postprocess.class_agnostic_nms ||
         yolo26.postprocess.num_classes != 16)

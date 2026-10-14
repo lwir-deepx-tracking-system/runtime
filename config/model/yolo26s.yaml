@@ -25,8 +25,8 @@ postprocess:
   split_output_levels: 3
   # 표준 YOLO26은 reg_max=1인 DFL-free regression을 사용한다.
   split_regression_bins: 1
-  # DEEPX split class output은 Sigmoid 이후 확률 tensor로 가정한다.
-  split_class_score_activation: none
+  # use_ort=false에서 반환되는 cv3 Conv output은 Sigmoid 전 class logit이다.
+  split_class_score_activation: sigmoid
   # end-to-end output은 NMS를 생략하고 raw/split output에는 적용한다.
   nms_mode: auto
   class_agnostic_nms: true

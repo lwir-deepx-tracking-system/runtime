@@ -108,6 +108,8 @@ int main()
         config.input.height = 8;
         config.postprocess.split_output_levels = 1;
         config.postprocess.split_regression_bins = 1;
+        config.postprocess.split_class_score_activation =
+            PostprocessScoreActivation::Sigmoid;
         Postprocessor postprocessor(config);
 
         PreprocessContext context;
@@ -118,14 +120,16 @@ int main()
         context.scale = 1.0F;
 
         const dxrt::TensorPtrs outputs = {
-            make_tensor("classes", {1, 2, 1, 1}, {0.8F, 0.1F}),
+            // use_ort=false의 class Conv output은 [0, 1] 확률이 아닌 raw logit이다.
+            make_tensor("classes", {1, 2, 1, 1}, {2.0F, -2.0F}),
             make_tensor("regression", {1, 4, 1, 1},
                         {0.25F, 0.25F, 0.25F, 0.25F}),
         };
         const auto detections = postprocessor.process(outputs, context);
         if (detections.size() != 1) return 5;
         const Detection& detection = detections.front();
-        if (detection.class_id != 0 || !close(detection.confidence, 0.8F) ||
+        if (detection.class_id != 0 ||
+            !close(detection.confidence, 0.88079708F) ||
             !close(detection.x, 2.0F) || !close(detection.y, 2.0F) ||
             !close(detection.width, 4.0F) || !close(detection.height, 4.0F))
             return 6;
