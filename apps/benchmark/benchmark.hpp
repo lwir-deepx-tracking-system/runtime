@@ -12,6 +12,7 @@ struct BenchmarkConfig
     ModelConfig model;
     DetectionConfig detection;
     TrackingConfig tracking;
+    BenchmarkSequenceConfig sequence;
     BenchmarkPathConfig path;
 };
 

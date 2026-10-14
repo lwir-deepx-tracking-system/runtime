@@ -55,6 +55,7 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
     c.model = load_model_config(c.model_config_path);
     c.detection = config_parser::load_detection_config(root["detection"]);
     c.tracking = config_parser::load_tracking_config(root["tracking"]);
+    c.sequence = config_parser::load_benchmark_sequence_config(root["sequence"]);
     c.path = config_parser::load_benchmark_path_config(root["path"]);
 
     Logger::info("[Config] Benchmark Config loaded");
@@ -227,7 +228,7 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
 }
 
 
-// dataset_root 아래의 모든 Sequence를 순차적으로 처리한다.
+// dataset_root 아래에서 설정 범위에 해당하는 Sequence를 순차적으로 처리한다.
 void BenchmarkApplication::run()
 {
     const fs::path dataset_root = config_.path.dataset_root;
@@ -251,6 +252,25 @@ void BenchmarkApplication::run()
         throw std::runtime_error(
             "Dataset에 처리할 Sequence가 없습니다: " + dataset_root.string());
 
+    if (config_.sequence.range_enabled)
+    {
+        sequence_dirs.erase(
+            std::remove_if(
+                sequence_dirs.begin(),
+                sequence_dirs.end(),
+                [this](const fs::path& sequence_dir)
+                {
+                    const std::string id = sequence_dir.filename().string();
+                    return !config_.sequence.contains(id);
+                }),
+            sequence_dirs.end());
+
+        if (sequence_dirs.empty())
+            throw std::runtime_error(
+                "설정한 범위에 처리할 Sequence가 없습니다: " +
+                config_.sequence.start + " ~ " + config_.sequence.end);
+    }
+
     const fs::path run_dir = create_run_directory(
         output_root, config_.model.name, kTrackerName);
 
@@ -264,6 +284,10 @@ void BenchmarkApplication::run()
             run_dir / fs::path(config_.model_config_path).filename());
 
         Logger::info("[Benchmark] Sequence 수: " + std::to_string(sequence_dirs.size()));
+        if (config_.sequence.range_enabled)
+            Logger::info(
+                "[Benchmark] Sequence 범위: " + config_.sequence.start +
+                " ~ " + config_.sequence.end);
         Logger::info("[Benchmark] 결과 경로: " + run_dir.string());
 
         for (const fs::path& sequence_dir : sequence_dirs)

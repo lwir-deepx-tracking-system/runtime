@@ -113,6 +113,10 @@ Benchmark는 설정된 dataset root 아래의 여러 sequence를 읽습니다. D
 수 있습니다. 각 sequence는 `000001.png`부터 누락 없이 연속된 frame 이름을 사용해야 하며,
 sequence가 바뀔 때마다 Tracker 상태를 초기화합니다.
 
+`config/benchmark.yaml`의 `sequence.range_enabled`가 `false`이면 모든 sequence를 처리합니다.
+`true`이면 `sequence.start`부터 `sequence.end`까지 양끝을 포함해 처리합니다. 숫자 순서와
+문자열 정렬 순서가 일치하도록 `seq_001`과 같이 zero-padding된 ID를 사용해야 합니다.
+
 ## 결과 저장 구조
 
 Benchmark 결과는 model과 tracker 조합 아래에서 실행 시각별로 저장합니다.
@@ -153,6 +157,7 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 
 - Runtime 측정 결과 root: `measurement.output_root`
 - Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`
+- Benchmark sequence 범위: `sequence.range_enabled`, `sequence.start`, `sequence.end`
 - Benchmark dataset/result root: `path.dataset_root`, `path.output_root`
 - Runtime/Benchmark model 설정: `model.config`
 

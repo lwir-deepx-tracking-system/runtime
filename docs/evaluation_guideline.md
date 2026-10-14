@@ -106,6 +106,7 @@ Detection max_inflight
 DXRT buffer_count
 DXRT use_ort
 ByteTrack parameters
+Sequence range (inclusive)
 Dataset root
 Output root
 ```

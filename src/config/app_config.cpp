@@ -18,6 +18,11 @@ T required(const YAML::Node& node, const char* key, const std::string& path)
 }
 }  // namespace
 
+bool BenchmarkSequenceConfig::contains(const std::string& sequence_id) const
+{
+    return !range_enabled || (sequence_id >= start && sequence_id <= end);
+}
+
 namespace config_parser {
 
 // yaml-cpp 예외가 파일 경로를 잃지 않도록 runtime 오류로 변환한다.
@@ -188,6 +193,28 @@ BenchmarkPathConfig load_benchmark_path_config(const YAML::Node& node)
 
     if (c.output_root.empty())
         throw std::runtime_error("path.output_root must not be empty");
+
+    return c;
+}
+
+BenchmarkSequenceConfig load_benchmark_sequence_config(const YAML::Node& node)
+{
+    BenchmarkSequenceConfig c{};
+
+    c.range_enabled = required<bool>(
+        node, "range_enabled", "sequence");
+    c.start = required<std::string>(node, "start", "sequence");
+    c.end = required<std::string>(node, "end", "sequence");
+
+    if (c.range_enabled)
+    {
+        if (c.start.empty())
+            throw std::runtime_error("sequence.start must not be empty when range is enabled");
+        if (c.end.empty())
+            throw std::runtime_error("sequence.end must not be empty when range is enabled");
+        if (c.start > c.end)
+            throw std::runtime_error("sequence.start must not be greater than sequence.end");
+    }
 
     return c;
 }

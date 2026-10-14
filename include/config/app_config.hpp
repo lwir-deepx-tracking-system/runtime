@@ -133,6 +133,16 @@ struct BenchmarkPathConfig
     std::string output_root;
 };
 
+// Benchmark가 처리할 Sequence ID의 양끝 포함 범위.
+struct BenchmarkSequenceConfig
+{
+    bool range_enabled = false;
+    std::string start;
+    std::string end;
+
+    bool contains(const std::string& sequence_id) const;
+};
+
 
 /********** Capture 어플리케이션에서 사용하는 설정 ***********/
 
@@ -175,6 +185,7 @@ ControlConfig load_control_config(const YAML::Node& node);
 MeasurementConfig load_measurement_config(const YAML::Node& node);
 GuiConfig load_gui_config(const YAML::Node& node);
 BenchmarkPathConfig load_benchmark_path_config(const YAML::Node& node);
+BenchmarkSequenceConfig load_benchmark_sequence_config(const YAML::Node& node);
 CaptureDatasetConfig load_capture_dataset_config(const YAML::Node& node);
 CaptureSequenceConfig load_capture_sequence_config(const YAML::Node& node);
 CaptureConditionConfig load_capture_condition_config(const YAML::Node& node);
