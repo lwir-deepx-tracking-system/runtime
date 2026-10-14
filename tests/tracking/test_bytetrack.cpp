@@ -68,7 +68,9 @@ int check_tracking_config()
         const TrackingConfig defaults;
         if (off.track_threshold != 0.5F || off.match_threshold != 0.8F || off.track_buffer != 30 ||
             off.fuse_score != defaults.fuse_score || off.lost_output_frames != 0 || off.buffer_scale != 0.0F ||
-            off.buffer_max_px != 0.0F || off.buffer_small_size != 0.0F || off.buffer_snap)
+            off.buffer_max_px != 0.0F || off.buffer_small_size != 0.0F || off.buffer_snap ||
+            off.low_threshold != 0.1F || off.new_track_threshold != 0.0F || off.low_match_threshold != 0.5F ||
+            off.unconfirmed_match_threshold != 0.7F)
         {
             std::cerr << "FAIL: 선택 키를 생략했는데 기능이 꺼진 기본값이 아님\n";
             ++failures;
@@ -81,6 +83,15 @@ int check_tracking_config()
             on.buffer_small_size != 40.0F || !on.buffer_snap)
         {
             std::cerr << "FAIL: 선택 키를 지정했는데 값이 그대로 읽히지 않음\n";
+            ++failures;
+        }
+        const TrackingConfig th = parse_tracking(
+            base + "low_threshold: 0.05\nnew_track_threshold: 0.7\nlow_match_threshold: 0.6\n"
+                   "unconfirmed_match_threshold: 0.8\n");
+        if (th.low_threshold != 0.05F || th.new_track_threshold != 0.7F || th.low_match_threshold != 0.6F ||
+            th.unconfirmed_match_threshold != 0.8F)
+        {
+            std::cerr << "FAIL: 세부 임계값을 지정했는데 값이 그대로 읽히지 않음\n";
             ++failures;
         }
         std::cout << "tracking 설정 읽기 성공 (선택 키 생략 / 지정)\n";
@@ -101,6 +112,12 @@ int check_tracking_config()
     failures += !rejects("huge_buffer_scale", base + "buffer_scale: 3\n");
     failures += !rejects("negative_buffer_max_px", base + "buffer_max_px: -5\n");
     failures += !rejects("negative_buffer_small_size", base + "buffer_small_size: -5\n");
+    failures += !rejects("low_above_track", base + "low_threshold: 0.5\n");
+    failures += !rejects("negative_low", base + "low_threshold: -0.1\n");
+    failures += !rejects("new_below_track", base + "new_track_threshold: 0.4\n");
+    failures += !rejects("new_above_one", base + "new_track_threshold: 1.2\n");
+    failures += !rejects("zero_low_match", base + "low_match_threshold: 0\n");
+    failures += !rejects("huge_unconfirmed_match", base + "unconfirmed_match_threshold: 1.5\n");
     return failures;
 }
 

@@ -285,7 +285,9 @@ void remove_duplicates(
 
 ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
     : config_(config),
-      new_track_threshold_(std::min(config.track_threshold + 0.1F, 1.0F))
+      new_track_threshold_(config.new_track_threshold > 0.0F ?
+                               config.new_track_threshold :
+                               std::min(config.track_threshold + 0.1F, 1.0F))
 {
     max_time_lost_ = config_.track_buffer;
 
@@ -295,9 +297,11 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
 
     std::ostringstream values;
     values << "track_threshold=" << config_.track_threshold
-           << ", low_threshold=" << kLowThreshold
+           << ", low_threshold=" << config_.low_threshold
            << ", new_track_threshold=" << new_track_threshold_
            << ", match_threshold=" << config_.match_threshold
+           << ", low_match_threshold=" << config_.low_match_threshold
+           << ", unconfirmed_match_threshold=" << config_.unconfirmed_match_threshold
            << ", track_buffer=" << config_.track_buffer
            << " (Lost 유지 " << max_time_lost_ << "프레임)";
     if (config_.fuse_score)
@@ -362,7 +366,7 @@ std::vector<Track> ByteTrackTracker::track(
 
         if (d.confidence >= config_.track_threshold)
             high_dets.push_back(std::move(det));
-        else if (d.confidence > kLowThreshold)
+        else if (d.confidence > config_.low_threshold)
             low_dets.push_back(std::move(det));
     }
 
@@ -454,7 +458,7 @@ std::vector<Track> ByteTrackTracker::track(
 
     const auto m2 = linear_assignment(
         iou_distance(remain_tracked, low_dets), remain_tracked.size(),
-        low_dets.size(), 0.5f);
+        low_dets.size(), config_.low_match_threshold);
     for (const auto& [r, c] : m2.matches)
         on_match(remain_tracked[r], low_dets[c]);
 
@@ -477,7 +481,7 @@ std::vector<Track> ByteTrackTracker::track(
     if (config_.fuse_score)
         fuse_score(cost3, remain_high);
     const auto m3 = linear_assignment(
-        cost3, unconfirmed.size(), remain_high.size(), 0.7f);
+        cost3, unconfirmed.size(), remain_high.size(), config_.unconfirmed_match_threshold);
     for (const auto& [r, c] : m3.matches)
     {
         apply_detection(*unconfirmed[r], *remain_high[c]);

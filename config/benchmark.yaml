@@ -45,6 +45,13 @@ tracking:
   # 아래 키는 생략할 수 있으며, 생략하면 기능이 꺼진다 (괄호 안이 기본값).
   # ----------------------------------------------------------
 
+  # ByteTrack 세부 임계값 (생략하면 공식 ByteTrack 값)
+  # low_threshold: 0.1                # 이 점수 이하 검출은 버림. 초과 ~ track_threshold 미만은 2차 매칭에만 사용
+  #                                   #  (detection 후처리 confidence_threshold가 이 값 이하여야 2차 매칭이 동작함)
+  # new_track_threshold: 0            # 새 ID를 만드는 최소 점수 (0: track_threshold + 0.1)
+  # low_match_threshold: 0.5          # 2차 매칭 허용 거리 (1 - IoU). 0.5면 IoU 0.5 이상
+  # unconfirmed_match_threshold: 0.7  # 미확정 Track 매칭 허용 거리 (1 - IoU). 0.7이면 IoU 0.3 이상
+
   # 1차 매칭과 미확정 Track 매칭 비용에 검출 점수를 곱한다 (비용 = 1 - IoU × 점수)
   # fuse_score: false
 

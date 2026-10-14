@@ -25,6 +25,17 @@ struct TrackingConfig {
     int track_buffer = 30;
 
     // 아래 값은 runtime/benchmark yaml에서 생략할 수 있다. 생략하면 해당 기능은 꺼진다.
+
+    // ByteTrack 세부 임계값. 생략하면 공식 ByteTrack 값을 쓴다.
+    // 이 점수 이하인 검출은 버린다. low_threshold 초과 ~ track_threshold 미만은 2차 매칭에만 쓴다.
+    float low_threshold = 0.1F;
+    // 새 Track(ID)을 만드는 최소 점수. 0이면 track_threshold + 0.1 (최대 1)
+    float new_track_threshold = 0.0F;
+    // 2차 매칭(남은 Track ↔ low 검출) 허용 거리 (1 - IoU). 0.5면 IoU 0.5 이상
+    float low_match_threshold = 0.5F;
+    // 미확정 Track(직전 프레임에 생긴 Track) ↔ 남은 high 검출 매칭 허용 거리 (1 - IoU). 0.7이면 IoU 0.3 이상
+    float unconfirmed_match_threshold = 0.7F;
+
     // 1차 매칭과 미확정 Track 매칭 비용에 검출 점수를 곱한다 (cost = 1 - IoU * score).
     bool fuse_score = false;
     // 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함).

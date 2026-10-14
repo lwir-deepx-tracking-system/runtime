@@ -31,9 +31,9 @@ BASE = {"track_threshold": 0.5, "match_threshold": 0.8, "track_buffer": 30}
 EXPERIMENTS = [
     ("기본값", {}),
     # Try1: 임계값
-    # v2 Tracker는 low 0.1 고정, new = track + 0.1 이므로 track만 바꾼다 (예전 low005는 v2에서 재현 불가)
-    ("t04_n05", {"track_threshold": 0.4}),
-    ("t03_n04 (low 0.1 고정)", {"track_threshold": 0.3}),
+    ("low005", {"low_threshold": 0.05}),
+    ("t04_n05", {"track_threshold": 0.4, "new_track_threshold": 0.5}),
+    ("t03_n04", {"track_threshold": 0.3, "low_threshold": 0.05, "new_track_threshold": 0.4}),
     # Try2: track_buffer
     ("buffer 35", {"track_buffer": 35}),
     ("buffer 40", {"track_buffer": 40}),
@@ -73,7 +73,7 @@ BUFFER_TRY = [
 ]
 
 TRY = [
-    ("Try 1 – track / new 임계값 (v2: low 0.1 고정)", "기본값", ["t04_n05", "t03_n04 (low 0.1 고정)"]),
+    ("Try 1 – low / track / new 임계값", "기본값", ["low005", "t04_n05", "t03_n04"]),
     ("Try 2 – track_buffer", "기본값", ["buffer 35", "buffer 40", "buffer 50", "buffer 60", "buffer 90"]),
     ("Try 3 – fuse_score (cost = 1 − IoU × 검출 점수)", "기본값", ["buffer 50", "fuse_score", "fuse + buffer 50"]),
     ("Try 4 – 놓친 Track을 예측 위치로 N프레임 출력", "fuse + buffer 50", ["+ L1", "+ L2", "+ L5", "+ L10"]),

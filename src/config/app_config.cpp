@@ -93,7 +93,15 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
     c.track_buffer = required<int>(
         node, "track_buffer", "tracking");
 
-    // 선택 키: 생략하면 기능이 꺼진 기본값을 쓴다.
+    // 선택 키: 생략하면 기능이 꺼진 기본값(세부 임계값은 공식 ByteTrack 값)을 쓴다.
+    c.low_threshold = optional_value<float>(
+        node, "low_threshold", "tracking", c.low_threshold);
+    c.new_track_threshold = optional_value<float>(
+        node, "new_track_threshold", "tracking", c.new_track_threshold);
+    c.low_match_threshold = optional_value<float>(
+        node, "low_match_threshold", "tracking", c.low_match_threshold);
+    c.unconfirmed_match_threshold = optional_value<float>(
+        node, "unconfirmed_match_threshold", "tracking", c.unconfirmed_match_threshold);
     c.fuse_score = optional_value<bool>(
         node, "fuse_score", "tracking", c.fuse_score);
     c.lost_output_frames = optional_value<int>(
@@ -113,6 +121,16 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         throw std::runtime_error("tracking.match_threshold must be in (0, 1]");
     if (c.track_buffer <= 0)
         throw std::runtime_error("tracking.track_buffer must be positive");
+    if (c.low_threshold < 0.0F || c.low_threshold >= c.track_threshold)
+        throw std::runtime_error("tracking.low_threshold must be in [0, track_threshold)");
+    if (c.new_track_threshold != 0.0F &&
+        (c.new_track_threshold < c.track_threshold || c.new_track_threshold > 1.0F))
+        throw std::runtime_error(
+            "tracking.new_track_threshold must be 0 (auto) or in [track_threshold, 1]");
+    if (c.low_match_threshold <= 0.0F || c.low_match_threshold > 1.0F)
+        throw std::runtime_error("tracking.low_match_threshold must be in (0, 1]");
+    if (c.unconfirmed_match_threshold <= 0.0F || c.unconfirmed_match_threshold > 1.0F)
+        throw std::runtime_error("tracking.unconfirmed_match_threshold must be in (0, 1]");
     if (c.lost_output_frames < 0)
         throw std::runtime_error("tracking.lost_output_frames must not be negative");
     if (c.buffer_scale < 0.0F || c.buffer_scale > 2.0F)

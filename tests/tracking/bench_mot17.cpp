@@ -39,7 +39,7 @@
 //     --config     : Tracking 설정 YAML (기본: TrackingConfig 기본값). 두 형식 모두 읽는다
 //                    - runtime.yaml / benchmark.yaml 처럼 tracking: 섹션이 있는 파일
 //                    - track_threshold: ... 처럼 tracking 키만 나열한 파일 (sweep_mot17.py가 만드는 형식)
-//                    v2에서 없어진 low_threshold, new_track_threshold, frame_rate 키는 오류로 처리한다
+//                    모르는 키(오타)와 v2에서 없어진 frame_rate 키는 오류로 처리한다
 //     track_buffer : v2 Tracker는 fps 환산을 하지 않으므로, 예전 결과와 맞추기 위해 여기서
 //                    track_buffer × (seqinfo fps / 30)으로 환산해 넘긴다 (05는 14fps)
 //     --gmc        : 카메라 움직임 보정(CMC). 폴더 안의 GMC-MOT17-XX.txt를 읽어 프레임마다 적용한다
@@ -222,9 +222,11 @@ void preprocess(const std::vector<GtRow>& gt_all, std::vector<Track>& tracks,
     tracks.swap(kept);
 }
 
-// v2 ByteTrackTracker의 고정값과 같게 맞춘다 (low 0.1, new = track + 0.1)
-constexpr float kLowThreshold = 0.1f;
-float new_track_threshold(const TrackingConfig& c) { return std::min(c.track_threshold + 0.1f, 1.0f); }
+// ByteTrackTracker와 같은 규칙: new_track_threshold가 0이면 track_threshold + 0.1
+float new_track_threshold(const TrackingConfig& c)
+{
+    return c.new_track_threshold > 0.0f ? c.new_track_threshold : std::min(c.track_threshold + 0.1f, 1.0f);
+}
 
 // --config 파일을 읽는다. tracking: 섹션이 있으면 그 안을, 없으면 파일 전체를 tracking 설정으로 본다.
 // 오타가 조용히 무시되지 않도록 모르는 키는 오류로 처리한다.
@@ -236,8 +238,9 @@ TrackingConfig load_config(const std::string& path)
         throw std::runtime_error(path + ": tracking 설정이 key: value 형식이 아닙니다");
     static const std::set<std::string> known = {
         "track_threshold", "match_threshold", "track_buffer", "fuse_score", "lost_output_frames",
-        "buffer_scale", "buffer_max_px", "buffer_small_size", "buffer_snap"};
-    static const std::set<std::string> removed = {"low_threshold", "new_track_threshold", "frame_rate"};
+        "buffer_scale", "buffer_max_px", "buffer_small_size", "buffer_snap",
+        "low_threshold", "new_track_threshold", "low_match_threshold", "unconfirmed_match_threshold"};
+    static const std::set<std::string> removed = {"frame_rate"};
     for (const auto& kv : node)
     {
         const std::string key = kv.first.as<std::string>();
@@ -251,7 +254,7 @@ TrackingConfig load_config(const std::string& path)
 
 void print_score_distribution(const std::vector<float>& scores, const TrackingConfig& c)
 {
-    const float low = kLowThreshold, new_thresh = new_track_threshold(c);
+    const float low = c.low_threshold, new_thresh = new_track_threshold(c);
     int band[4] = {0, 0, 0, 0};
     float lo = scores.empty() ? 0.0f : scores[0], hi = lo;
     for (float s : scores)
@@ -367,8 +370,10 @@ int main(int argc, char** argv)
         fs::create_directories(out_dir);
 
     std::printf("\n[MOT17 %s, 시퀀스 %zu개]  ByteTrack track %.2f / low %.2f / new %.2f / match %.2f / buffer %d\n",
-                det_name.c_str(), seqs.size(), base.track_threshold, kLowThreshold, new_track_threshold(base),
+                det_name.c_str(), seqs.size(), base.track_threshold, base.low_threshold, new_track_threshold(base),
                 base.match_threshold, base.track_buffer);
+    std::printf("  2차 매칭 %.2f / 미확정 매칭 %.2f (1 - IoU)\n", base.low_match_threshold,
+                base.unconfirmed_match_threshold);
     std::printf("  fuse_score %s / lost_output_frames %d / buffer_scale %.2f (max_px %.0f, small %.0f, snap %s)\n",
                 base.fuse_score ? "켬" : "끔", base.lost_output_frames, base.buffer_scale, base.buffer_max_px,
                 base.buffer_small_size, base.buffer_snap ? "켬" : "끔");

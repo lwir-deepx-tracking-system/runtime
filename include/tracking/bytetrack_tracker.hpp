@@ -46,8 +46,6 @@ using STrackPtr = std::shared_ptr<STrack>;
 class ByteTrackTracker : public Tracker
 {
 private:
-    static constexpr float kLowThreshold = 0.1F;
-
     TrackingConfig config_;
     float new_track_threshold_ = 0.6F;
     KalmanFilter kalman_;
