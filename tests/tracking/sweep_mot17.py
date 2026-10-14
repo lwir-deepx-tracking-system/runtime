@@ -2,8 +2,9 @@
 """개선 1차 실험(Try1~4)을 지정한 MOT17 시퀀스만으로 다시 돌리고, 문서와 같은 형식의 표를 만든다.
 
 사용법 (저장소 루트에서)
-  python3 tests/tracking/sweep_mot17.py datasets/MOT17 [--seqs 05 10 13] [--bench 실행파일] [--out 폴더] [--buffer] [--gmc GMC폴더]
+  python3 tests/tracking/sweep_mot17.py datasets/MOT17 [--seqs 05 10 13] [--bench 실행파일] [--out 폴더] [--buffer] [--nsa] [--gmc GMC폴더]
     --buffer: Buffered IoU 실험(Try 5)도 돌린다
+    --nsa:    NSA Kalman 실험(Try 6)도 돌린다
     --gmc   : 모든 실험에 카메라 움직임 보정(CMC)을 켠다 (예: --gmc datasets/MOT17_gmc)
     --seqs  : 평가할 시퀀스 번호 (기본 05 10 13 = 이동 카메라 중 3개)
     --bench : bench_mot17 경로 (기본: build/ 아래에서 자동으로 찾음)
@@ -80,6 +81,17 @@ TRY = [
     ("Try 4b – L1 + fuse에서 track_buffer 비교", "기본값",
      ["L1 + fuse + buffer 35", "L1 + fuse + buffer 50", "L1 + fuse + buffer 60"]),
 ]
+# --nsa 를 주면 추가로 돌린다 (nsa_kalman 코드가 들어간 빌드에서만)
+NSA_EXPERIMENTS = [
+    ("nsa", {"nsa_kalman": True}),
+    ("+ L1 + biou 0.5 (nsa 기준)", dict(BEST, buffer_scale=0.5)),
+    ("+ L1 + biou 0.5 + nsa", dict(BEST, buffer_scale=0.5, nsa_kalman=True)),
+]
+NSA_TRY = [
+    ("Try 6 – NSA Kalman (측정 노이즈 × (1 − 검출 점수))", "기본값", ["nsa"]),
+    ("Try 6b – NSA Kalman + 최종 조합", "+ L1 + biou 0.5 (nsa 기준)", ["+ L1 + biou 0.5 + nsa"]),
+]
+
 FINAL = "+ L1"  # 문서의 최종 조합: fuse + buffer 50 + L1
 
 ROW = re.compile(r"^\s+(MOT17-\S+|합계)\s+(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+)\s+(\d+)\s+([\d.]+)%\s+(-?[\d.]+)%\s+([\d.]+)")
@@ -148,10 +160,11 @@ def main():
     p.add_argument("--bench")
     p.add_argument("--out")
     p.add_argument("--buffer", action="store_true", help="Buffered IoU 실험(Try 5)도 돌린다")
+    p.add_argument("--nsa", action="store_true", help="NSA Kalman 실험(Try 6)도 돌린다")
     p.add_argument("--gmc", help="카메라 움직임 보정(CMC)을 켠다. GMC-MOT17-XX.txt가 있는 폴더 (예: datasets/MOT17_gmc)")
     a = p.parse_args()
-    experiments = EXPERIMENTS + (BUFFER_EXPERIMENTS if a.buffer else [])
-    tries = TRY + (BUFFER_TRY if a.buffer else [])
+    experiments = EXPERIMENTS + (BUFFER_EXPERIMENTS if a.buffer else []) + (NSA_EXPERIMENTS if a.nsa else [])
+    tries = TRY + (BUFFER_TRY if a.buffer else []) + (NSA_TRY if a.nsa else [])
 
     bench = a.bench or find_bench()
     out = a.out or f"results/sweep_{'_'.join(a.seqs)}" + ("_cmc" if a.gmc else "")

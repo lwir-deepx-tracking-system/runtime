@@ -28,5 +28,7 @@ public:
     void predict(KalmanState& s) const;
 
     // 매칭된 검출로 상태를 보정한다. 혁신 공분산이 특이행렬이면 상태를 바꾸지 않는다.
-    void update(KalmanState& s, const KalmanMeasurement& z) const;
+    // noise_scale: 측정 노이즈 표준편차에 곱하는 값 (1: 공식 ByteTrack, 작을수록 검출을 더 믿음).
+    //              NSA Kalman에서 검출 점수로 계산해 넘긴다.
+    void update(KalmanState& s, const KalmanMeasurement& z, double noise_scale = 1.0) const;
 };

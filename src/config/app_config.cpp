@@ -104,6 +104,8 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         node, "unconfirmed_match_threshold", "tracking", c.unconfirmed_match_threshold);
     c.fuse_score = optional_value<bool>(
         node, "fuse_score", "tracking", c.fuse_score);
+    c.nsa_kalman = optional_value<bool>(
+        node, "nsa_kalman", "tracking", c.nsa_kalman);
     c.lost_output_frames = optional_value<int>(
         node, "lost_output_frames", "tracking", c.lost_output_frames);
     c.buffer_scale = optional_value<float>(

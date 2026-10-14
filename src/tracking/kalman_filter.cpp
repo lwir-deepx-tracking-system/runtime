@@ -101,10 +101,12 @@ void KalmanFilter::predict(KalmanState& s) const
 }
 
 
-void KalmanFilter::update(KalmanState& s, const KalmanMeasurement& z) const
+void KalmanFilter::update(KalmanState& s, const KalmanMeasurement& z, double noise_scale) const
 {
     const double h = s.mean[3];
-    const double r[4] = {kStdPos * h, kStdPos * h, 1e-1, kStdPos * h};
+    const double r[4] = {
+        noise_scale * kStdPos * h, noise_scale * kStdPos * h,
+        noise_scale * 1e-1, noise_scale * kStdPos * h};
     const KalmanMat8& p = s.covariance;
 
     // S = H P H^T + R  (H = [I 0])

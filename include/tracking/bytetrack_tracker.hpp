@@ -63,6 +63,8 @@ private:
 
     void activate(bytetrack::STrack& track);
     void apply_detection(bytetrack::STrack& track, const bytetrack::STrack& det);
+    // Kalman update의 측정 노이즈 배율 (nsa_kalman이 꺼져 있으면 1)
+    double measurement_noise_scale(float score) const;
 
 public:
     // AppConfig가 검증한 runtime tracking 설정을 적용한다.

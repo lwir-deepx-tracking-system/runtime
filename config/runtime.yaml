@@ -51,7 +51,7 @@ tracking:
 
   # ByteTrack 세부 임계값 (생략하면 공식 ByteTrack 값)
   low_threshold: 0.1                # 이 점수 이하 검출은 버림. 초과 ~ track_threshold 미만은 2차 매칭에만 사용
-  #                                   #  (detection 후처리 confidence_threshold가 이 값 이하여야 2차 매칭이 동작함)
+  #                                 #  (detection 후처리 confidence_threshold가 이 값 이하여야 2차 매칭이 동작함)
   new_track_threshold: 0            # 새 ID를 만드는 최소 점수 (0: track_threshold + 0.1)
   low_match_threshold: 0.5          # 2차 매칭 허용 거리 (1 - IoU). 0.5면 IoU 0.5 이상
   unconfirmed_match_threshold: 0.7  # 미확정 Track 매칭 허용 거리 (1 - IoU). 0.7이면 IoU 0.3 이상
@@ -63,6 +63,10 @@ tracking:
 
   # 1차 매칭과 미확정 Track 매칭 비용에 검출 점수를 곱한다 (비용 = 1 - IoU × 점수)
   fuse_score: false
+  
+  # NSA Kalman: Kalman 보정 때 측정 노이즈를 (1 - 검출 점수)배 한다 (StrongSORT)
+  # 점수가 높은 검출은 더 믿고, 낮은 검출(가려짐 등)은 Track 위치를 덜 흔든다
+  nsa_kalman: false
 
   # 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함)
   # 출력된 박스는 검출이 아니라 예측이다

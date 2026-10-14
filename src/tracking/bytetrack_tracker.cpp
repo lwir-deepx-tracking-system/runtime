@@ -1,6 +1,7 @@
 #include "tracking/bytetrack_tracker.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <unordered_set>
@@ -283,6 +284,19 @@ void remove_duplicates(
 }  // namespace
 
 
+// NSA Kalman (StrongSORT): 측정 노이즈 공분산 R을 (1 - 검출 점수)배 한다.
+// 점수가 높을수록 검출을 더 믿고, 낮은(가려진) 검출은 Track 상태를 덜 흔든다.
+// update()는 표준편차에 곱하므로 sqrt를 넘긴다. 점수 1에서 R이 0이 되지 않게 (1 - 점수)를 kNsaMinRatio 이상으로 둔다.
+double ByteTrackTracker::measurement_noise_scale(float score) const
+{
+    if (!config_.nsa_kalman)
+        return 1.0;
+    constexpr double kNsaMinRatio = 0.05;
+    const double ratio = std::max(1.0 - static_cast<double>(score), kNsaMinRatio);
+    return std::sqrt(std::min(ratio, 1.0));
+}
+
+
 ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
     : config_(config),
       new_track_threshold_(config.new_track_threshold > 0.0F ?
@@ -306,6 +320,8 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
            << " (Lost 유지 " << max_time_lost_ << "프레임)";
     if (config_.fuse_score)
         values << ", fuse_score=true";
+    if (config_.nsa_kalman)
+        values << ", nsa_kalman=true";
     if (config_.lost_output_frames > 0)
         values << ", lost_output_frames=" << config_.lost_output_frames;
     if (config_.buffer_scale > 0.0F)
@@ -336,7 +352,7 @@ void ByteTrackTracker::activate(STrack& t)
 void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
 {
     t.tracklet_len = (t.state == TrackState::Tracked) ? t.tracklet_len + 1 : 0;
-    kalman_.update(t.kf, to_xyah(det.det_tlwh));
+    kalman_.update(t.kf, to_xyah(det.det_tlwh), measurement_noise_scale(det.score));
     t.state = TrackState::Tracked;
     t.is_activated = true;
     t.score = det.score;

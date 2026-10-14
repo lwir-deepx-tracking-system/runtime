@@ -38,6 +38,9 @@ struct TrackingConfig {
 
     // 1차 매칭과 미확정 Track 매칭 비용에 검출 점수를 곱한다 (cost = 1 - IoU * score).
     bool fuse_score = false;
+    // NSA Kalman (StrongSORT): Kalman update의 측정 노이즈를 (1 - 검출 점수)배 한다.
+    // 점수가 높은 검출은 더 믿고, 낮은 검출(가려짐 등)은 Track 상태를 덜 흔든다.
+    bool nsa_kalman = false;
     // 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함).
     int lost_output_frames = 0;
     // Buffered IoU: 1차 매칭 뒤 남은 Track과 high 검출을 박스를 넓혀 한 번 더 매칭한다.

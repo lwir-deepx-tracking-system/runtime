@@ -70,7 +70,7 @@ int check_tracking_config()
             off.fuse_score != defaults.fuse_score || off.lost_output_frames != 0 || off.buffer_scale != 0.0F ||
             off.buffer_max_px != 0.0F || off.buffer_small_size != 0.0F || off.buffer_snap ||
             off.low_threshold != 0.1F || off.new_track_threshold != 0.0F || off.low_match_threshold != 0.5F ||
-            off.unconfirmed_match_threshold != 0.7F)
+            off.unconfirmed_match_threshold != 0.7F || off.nsa_kalman)
         {
             std::cerr << "FAIL: 선택 키를 생략했는데 기능이 꺼진 기본값이 아님\n";
             ++failures;
@@ -78,8 +78,8 @@ int check_tracking_config()
 
         const TrackingConfig on = parse_tracking(
             base + "fuse_score: true\nlost_output_frames: 1\nbuffer_scale: 0.5\n"
-                   "buffer_max_px: 20\nbuffer_small_size: 40\nbuffer_snap: true\n");
-        if (!on.fuse_score || on.lost_output_frames != 1 || on.buffer_scale != 0.5F || on.buffer_max_px != 20.0F ||
+                   "buffer_max_px: 20\nbuffer_small_size: 40\nbuffer_snap: true\nnsa_kalman: true\n");
+        if (!on.fuse_score || !on.nsa_kalman || on.lost_output_frames != 1 || on.buffer_scale != 0.5F || on.buffer_max_px != 20.0F ||
             on.buffer_small_size != 40.0F || !on.buffer_snap)
         {
             std::cerr << "FAIL: 선택 키를 지정했는데 값이 그대로 읽히지 않음\n";
@@ -118,6 +118,7 @@ int check_tracking_config()
     failures += !rejects("new_above_one", base + "new_track_threshold: 1.2\n");
     failures += !rejects("zero_low_match", base + "low_match_threshold: 0\n");
     failures += !rejects("huge_unconfirmed_match", base + "unconfirmed_match_threshold: 1.5\n");
+    failures += !rejects("nsa_not_bool", base + "nsa_kalman: maybe\n");
     return failures;
 }
 
@@ -350,6 +351,49 @@ int check_buffered_iou()
     return failures;
 }
 
+// NSA Kalman: 정지한 물체(x=100)를 10프레임 추적한 뒤 검출이 x=110으로 튀었을 때의 출력 x.
+// 켜면 점수 높은 검출(0.95)은 끈 경우보다 검출 쪽으로 더 붙고, 점수 낮은 검출(0.3, 2차 매칭)은
+// 점수 높은 검출보다 덜 붙어야 한다. 끄면 점수와 상관없이 같아야 한다. 반환: 실패 수
+int check_nsa_kalman()
+{
+    auto x_after_jump = [](bool nsa, float jump_score) {
+        TrackingConfig c;
+        c.nsa_kalman = nsa;
+        ByteTrackTracker tracker(c);
+        float x = -1.0f;
+        for (int f = 1; f <= 11; ++f)
+        {
+            const float score = (f == 11) ? jump_score : 0.95f;
+            const Detection d = make_detection(f == 11 ? 110.0f : 100.0f, 200.0f, 40.0f, 80.0f, score);
+            const auto tracks = tracker.track({d});
+            if (f == 11 && !tracks.empty())
+                x = tracks.front().x;
+        }
+        return x;
+    };
+    const float off_high = x_after_jump(false, 0.95f), off_low = x_after_jump(false, 0.3f);
+    const float on_high = x_after_jump(true, 0.95f), on_low = x_after_jump(true, 0.3f);
+    std::cout << "NSA Kalman 검사 (검출 x 100 -> 110): 끔 " << off_high << " / " << off_low
+              << ", 켬 점수 0.95 " << on_high << ", 점수 0.3 " << on_low << "\n";
+    int failures = 0;
+    if (off_high < 100.0f || std::abs(off_high - off_low) > 1e-3f)
+    {
+        std::cerr << "FAIL: nsa_kalman을 껐는데 검출 점수에 따라 위치 보정이 달라짐\n";
+        ++failures;
+    }
+    if (!(on_high > off_high && on_high <= 110.0f))
+    {
+        std::cerr << "FAIL: nsa_kalman을 켰는데 점수 높은 검출 쪽으로 더 붙지 않음\n";
+        ++failures;
+    }
+    if (!(on_low < on_high && on_low > 100.0f))
+    {
+        std::cerr << "FAIL: nsa_kalman을 켰는데 점수 낮은 검출이 점수 높은 검출보다 덜 반영되지 않음\n";
+        ++failures;
+    }
+    return failures;
+}
+
 }  // namespace
 
 
@@ -431,6 +475,7 @@ int main(int argc, char** argv)
     failures += check_lost_output();
     failures += check_camera_motion();
     failures += check_buffered_iou();
+    failures += check_nsa_kalman();
 
     if (failures > 0)
     {
