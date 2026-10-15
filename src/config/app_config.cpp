@@ -324,10 +324,12 @@ ModelConfig load_model_config(const std::string& path)
     c.camera_input.channel_mode = required<std::string>(camera, "channel_mode", "camera_input");
     c.input.width = required<int>(root["input"], "width", "input");
     c.input.height = required<int>(root["input"], "height", "input");
+    c.preprocess.type = required<std::string>(root["preprocess"], "type", "preprocess");
     c.preprocess.resize = required<std::string>(root["preprocess"], "resize", "preprocess");
     c.preprocess.normalize = required<bool>(root["preprocess"], "normalize", "preprocess");
     c.preprocess.pad_value = required<int>(root["preprocess"], "pad_value", "preprocess");
     const YAML::Node post = root["postprocess"];
+    c.postprocess.type = required<std::string>(post, "type", "postprocess");
     c.postprocess.output_format = parse_postprocess_output_format(
         required<std::string>(post, "output_format", "postprocess"));
     c.postprocess.split_output_levels = required<int>(
@@ -355,6 +357,8 @@ ModelConfig load_model_config(const std::string& path)
     c.camera_input.clip_min = static_cast<std::uint16_t>(clip_min);
     c.camera_input.clip_max = static_cast<std::uint16_t>(clip_max);
     if (c.camera_input.channel_mode != "replicate_gray_to_rgb") throw std::runtime_error("unsupported camera_input.channel_mode");
+    if (c.preprocess.type != "lwir_letterbox") throw std::runtime_error("unsupported preprocess.type");
+    if (c.postprocess.type != "yolov8" && c.postprocess.type != "yolo26") throw std::runtime_error("postprocess.type must be yolov8 or yolo26");
     if (c.preprocess.resize != "letterbox" || c.preprocess.normalize)
         throw std::runtime_error("only letterbox with normalize=false is supported");
     if (c.preprocess.pad_value < 0 || c.preprocess.pad_value > 255)

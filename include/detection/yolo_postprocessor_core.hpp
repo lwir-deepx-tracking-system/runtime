@@ -7,10 +7,10 @@
 #include "detection/lwir_preprocessor.hpp"
 
 // AppConfig가 검증한 model output 계약에 따라 tensor를 Detection으로 변환한다.
-class Postprocessor : public IPostprocessor
+class YoloPostprocessorCore : public IPostprocessor
 {
 public:
-    explicit Postprocessor(const ModelConfig& config);
+    explicit YoloPostprocessorCore(const ModelConfig& config);
 
     std::vector<Detection> process(
         const dxrt::TensorPtrs& outputs,

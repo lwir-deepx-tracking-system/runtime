@@ -5,7 +5,7 @@
 #include "common/detection.hpp"
 #include "common/track.hpp"
 
-#include "detection/dxapp_detection_pipeline.hpp"
+#include "detection/detector_factory.hpp"
 #include "tracking/bytetrack_tracker.hpp"
 
 #include "camera/camera.hpp"
@@ -229,9 +229,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 
     camera_ = std::make_unique<Camera>();
 
-    // model YAML의 전처리·후처리 계약으로 DX App pipeline을 생성한다.
-    detection_pipeline_ = std::make_unique<DxAppDetectionPipeline>(
-        config_.model, config_.detection);
+    // model YAML의 전처리·후처리 계약으로 DXRT detection pipeline을 생성한다.
+    detection_pipeline_ = DetectorFactory::create(config_.model, config_.detection);
 
     // AppConfig가 검증한 runtime 설정으로 고정 ByteTrack 구현체를 생성한다.
     tracker_ = std::make_unique<ByteTrackTracker>(config_.tracking);

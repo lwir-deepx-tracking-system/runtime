@@ -1,4 +1,4 @@
-#include "detection/postprocessor.hpp"
+#include "detection/yolo_postprocessor_core.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -215,7 +215,7 @@ float box_iou(const Candidate& a, const Candidate& b)
 }
 }  // namespace
 
-Postprocessor::Postprocessor(const ModelConfig& config)
+YoloPostprocessorCore::YoloPostprocessorCore(const ModelConfig& config)
     : IPostprocessor(config),
       input_width_(config.input.width),
       input_height_(config.input.height)
@@ -245,7 +245,7 @@ Postprocessor::Postprocessor(const ModelConfig& config)
             "Postprocess class_names size must match num_classes");
 }
 
-std::vector<Detection> Postprocessor::process(
+std::vector<Detection> YoloPostprocessorCore::process(
     const dxrt::TensorPtrs& outputs,
     const PreprocessContext& context) const
 {
@@ -277,7 +277,7 @@ std::vector<Detection> Postprocessor::process(
     return restore_coordinates(candidates, context);
 }
 
-PostprocessOutputFormat Postprocessor::resolve_output_format(
+PostprocessOutputFormat YoloPostprocessorCore::resolve_output_format(
     const dxrt::TensorPtrs& outputs) const
 {
     if (config_.postprocess.output_format != PostprocessOutputFormat::Auto)
@@ -315,7 +315,7 @@ PostprocessOutputFormat Postprocessor::resolve_output_format(
     return PostprocessOutputFormat::SplitHead;
 }
 
-std::vector<Postprocessor::Candidate> Postprocessor::decode_decoded_xywh(
+std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_decoded_xywh(
     const dxrt::TensorPtrs& outputs) const
 {
     const auto& tensor = select_unique_tensor(
@@ -363,7 +363,7 @@ std::vector<Postprocessor::Candidate> Postprocessor::decode_decoded_xywh(
     return candidates;
 }
 
-std::vector<Postprocessor::Candidate> Postprocessor::decode_end_to_end_xyxy(
+std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_end_to_end_xyxy(
     const dxrt::TensorPtrs& outputs) const
 {
     const auto& tensor = select_unique_tensor(
@@ -405,7 +405,7 @@ std::vector<Postprocessor::Candidate> Postprocessor::decode_end_to_end_xyxy(
     return candidates;
 }
 
-std::vector<Postprocessor::Candidate> Postprocessor::decode_split_head(
+std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_split_head(
     const dxrt::TensorPtrs& outputs) const
 {
     const int levels = config_.postprocess.split_output_levels;
@@ -528,7 +528,7 @@ std::vector<Postprocessor::Candidate> Postprocessor::decode_split_head(
     return candidates;
 }
 
-bool Postprocessor::should_apply_nms(PostprocessOutputFormat format) const
+bool YoloPostprocessorCore::should_apply_nms(PostprocessOutputFormat format) const
 {
     switch (config_.postprocess.nms_mode)
     {
@@ -542,7 +542,7 @@ bool Postprocessor::should_apply_nms(PostprocessOutputFormat format) const
     throw std::logic_error("Unknown postprocess NMS mode");
 }
 
-std::vector<Postprocessor::Candidate> Postprocessor::apply_nms(
+std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::apply_nms(
     std::vector<Candidate> candidates) const
 {
     std::sort(candidates.begin(), candidates.end(),
@@ -569,7 +569,7 @@ std::vector<Postprocessor::Candidate> Postprocessor::apply_nms(
     return kept;
 }
 
-std::vector<Detection> Postprocessor::restore_coordinates(
+std::vector<Detection> YoloPostprocessorCore::restore_coordinates(
     const std::vector<Candidate>& candidates,
     const PreprocessContext& context) const
 {
@@ -604,7 +604,7 @@ std::vector<Detection> Postprocessor::restore_coordinates(
     return detections;
 }
 
-std::string Postprocessor::class_name(int class_id) const
+std::string YoloPostprocessorCore::class_name(int class_id) const
 {
     if (class_id >= 0 &&
         static_cast<std::size_t>(class_id) <

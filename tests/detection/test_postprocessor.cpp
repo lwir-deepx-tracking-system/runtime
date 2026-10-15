@@ -1,4 +1,4 @@
-#include "detection/postprocessor.hpp"
+#include "detection/yolo_postprocessor_core.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -65,7 +65,7 @@ int main()
     // [1, 4+C, N]의 xywh + class score output을 원본 frame 좌표로 복원한다.
     {
         ModelConfig config = make_config();
-        Postprocessor postprocessor(config);
+        YoloPostprocessorCore postprocessor(config);
         const dxrt::TensorPtrs outputs = {make_tensor(
             "decoded",
             {1, 6, 1},
@@ -83,7 +83,7 @@ int main()
     // [1, N, 6] end-to-end xyxy output은 class ID를 읽고 auto NMS를 생략한다.
     {
         ModelConfig config = make_config();
-        Postprocessor postprocessor(config);
+        YoloPostprocessorCore postprocessor(config);
         const dxrt::TensorPtrs outputs = {make_tensor(
             "end_to_end",
             {1, 2, 6},
@@ -110,7 +110,7 @@ int main()
         config.postprocess.split_regression_bins = 1;
         config.postprocess.split_class_score_activation =
             PostprocessScoreActivation::Sigmoid;
-        Postprocessor postprocessor(config);
+        YoloPostprocessorCore postprocessor(config);
 
         PreprocessContext context;
         context.original_width = 8;

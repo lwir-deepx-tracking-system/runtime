@@ -102,6 +102,7 @@ struct ModelInputConfig {
 
 // 전처리 방식은 학습·모델 변환 시 사용한 조건과 일치해야 한다.
 struct ModelPreprocessConfig {
+    std::string type;
     std::string resize;
     bool normalize = false;
     int pad_value = 114;
@@ -133,6 +134,7 @@ enum class PostprocessNmsMode
 
 // 모델 output decode, 결과 필터링과 class label 변환에 사용하는 값.
 struct ModelPostprocessConfig {
+    std::string type;
     PostprocessOutputFormat output_format = PostprocessOutputFormat::Auto;
     int split_output_levels = 3;
     int split_regression_bins = 16;

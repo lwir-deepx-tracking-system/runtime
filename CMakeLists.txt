@@ -153,7 +153,7 @@ endif()
 if(LWIR_NEEDS_VISION)
     add_library(lwir_vision
         src/detection/lwir_preprocessor.cpp
-        src/detection/dxapp_detection_pipeline.cpp
+        src/detection/dxrt_detection_pipeline.cpp
         src/tracking/bytetrack_tracker.cpp
     )
 
@@ -171,7 +171,11 @@ if(LWIR_NEEDS_VISION)
     )
 
     if(LWIR_ENABLE_DX_APP)
-        target_sources(lwir_vision PRIVATE src/detection/postprocessor.cpp)
+        target_sources(lwir_vision PRIVATE
+            src/detection/yolo_postprocessor_core.cpp
+            src/detection/yolov8_postprocessor.cpp
+            src/detection/yolo26_postprocessor.cpp
+            src/detection/detector_factory.cpp)
         target_link_libraries(lwir_vision
             PRIVATE
                 dx_app_dependency

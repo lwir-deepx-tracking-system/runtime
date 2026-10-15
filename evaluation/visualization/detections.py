@@ -53,10 +53,12 @@ TRACK_COLORS: tuple[Color, ...] = (
 
 DEFAULT_DATASET_ROOT = Path("/mnt/lwir_data/datasets")
 DEFAULT_BENCHMARK_ROOT = Path(
-    "/mnt/lwir_data/results/benchmark/yolov8n_bytetrack"
+    # "/mnt/lwir_data/results/benchmark/yolov8n_bytetrack"
+    "/mnt/lwir_data/results/benchmark/yolo26s_bytetrack"
 )
 DEFAULT_OUTPUT_ROOT = Path(
-    "/mnt/lwir_data/results/visualization/yolov8n_bytetrack"
+    # "/mnt/lwir_data/results/visualization/yolov8n_bytetrack"
+    "/mnt/lwir_data/results/visualization/yolo26s_bytetrack"
 )
 
 
