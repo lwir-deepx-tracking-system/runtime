@@ -237,7 +237,7 @@ TrackingConfig load_config(const std::string& path)
     if (!node.IsMap())
         throw std::runtime_error(path + ": tracking 설정이 key: value 형식이 아닙니다");
     static const std::set<std::string> known = {
-        "track_threshold", "match_threshold", "track_buffer", "fuse_score", "nsa_kalman", "lost_output_frames",
+        "track_threshold", "match_threshold", "track_buffer", "fuse_score", "nsa_kalman", "kalman_format", "lost_output_frames",
         "buffer_scale", "buffer_max_px", "buffer_small_size", "buffer_snap",
         "low_threshold", "new_track_threshold", "low_match_threshold", "unconfirmed_match_threshold"};
     static const std::set<std::string> removed = {"frame_rate"};
@@ -374,8 +374,8 @@ int main(int argc, char** argv)
                 base.match_threshold, base.track_buffer);
     std::printf("  2차 매칭 %.2f / 미확정 매칭 %.2f (1 - IoU)\n", base.low_match_threshold,
                 base.unconfirmed_match_threshold);
-    std::printf("  fuse_score %s / nsa_kalman %s / lost_output_frames %d / buffer_scale %.2f (max_px %.0f, small %.0f, snap %s)\n",
-                base.fuse_score ? "켬" : "끔", base.nsa_kalman ? "켬" : "끔", base.lost_output_frames, base.buffer_scale, base.buffer_max_px,
+    std::printf("  kalman %s / fuse_score %s / nsa_kalman %s / lost_output_frames %d / buffer_scale %.2f (max_px %.0f, small %.0f, snap %s)\n",
+                base.kalman_format.c_str(), base.fuse_score ? "켬" : "끔", base.nsa_kalman ? "켬" : "끔", base.lost_output_frames, base.buffer_scale, base.buffer_max_px,
                 base.buffer_small_size, base.buffer_snap ? "켬" : "끔");
     if (!gmc_dir.empty())
         std::printf("  CMC 켬: %s/GMC-<시퀀스>.txt\n", gmc_dir.c_str());

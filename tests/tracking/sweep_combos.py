@@ -10,6 +10,7 @@
   기본값, buffer 50, fuse_score, fuse + buffer 50, L1, C1,
   biou 0.5, biou 0.5 + snap, C1 + biou 0.5, nsa, C1 + nsa, C1 + biou 0.5 + nsa
   --gmc 를 주면 위 12개를 CMC 끔/켬으로 두 번 돌린다 (24개). 주지 않으면 CMC 끔 12개만.
+  --set 키=값 을 주면 모든 조합에 그 설정을 덧붙인다. 예) --set kalman_format=xywh  (XYWH Kalman으로 24개 전부)
 
 결과: <out>/summary.md, <out>/raw.csv, <out>/configs/, <out>/logs/  (기본 out = results/combos_<det>)
 """
@@ -91,17 +92,24 @@ def main():
     p.add_argument("--det", default="SIM")
     p.add_argument("--gmc", help="GMC 파일 폴더. 주면 CMC 켬 12개를 추가로 돌린다")
     p.add_argument("--ids", action="store_true", help="IDSW·IDF1·MOTA도 표에 넣는다 (정답에 track ID가 있을 때만)")
+    p.add_argument("--set", nargs="+", default=[], metavar="키=값", help="모든 조합에 덧붙일 설정")
     p.add_argument("--out")
     p.add_argument("--bench")
     a = p.parse_args()
+    extra = {}
+    for kv in a.set:
+        k, _, v = kv.partition("=")
+        if not k or not v:
+            p.error(f"--set 형식은 키=값 입니다: {kv}")
+        extra[k] = v
 
     bench = a.bench or find_bench()
-    out = a.out or f"results/combos_{a.det}"
+    out = a.out or f"results/combos_{a.det}" + "".join(f"_{v}" for v in extra.values())
     os.makedirs(os.path.join(out, "configs"), exist_ok=True)
     os.makedirs(os.path.join(out, "logs"), exist_ok=True)
     modes = [("CMC X", None)] + ([("CMC O", a.gmc)] if a.gmc else [])
     print(f"bench: {bench}\n데이터: {a.root} (--det {a.det}) {' '.join(a.filters)}\n"
-          f"CMC: {a.gmc or '끔 (켬 조합을 보려면 --gmc)'}\n결과: {out}\n")
+          f"CMC: {a.gmc or '끔 (켬 조합을 보려면 --gmc)'}\n추가 설정: {extra or '없음'}\n결과: {out}\n")
 
     res = {}
     n_total, k = len(COMBOS) * len(modes), 0
@@ -110,7 +118,7 @@ def main():
             k += 1
             slug = f"{i:02d}_" + re.sub(r"[^0-9A-Za-z]+", "_", name).strip("_")
             cfg = os.path.join(out, "configs", slug + ".yaml")
-            write_yaml(cfg, changes)
+            write_yaml(cfg, dict(changes, **extra))
             cmd = [bench, a.root, "--det", a.det, "--config", cfg] + (["--gmc", gmc] if gmc else []) + a.filters
             log = os.path.join(out, "logs", f"{'cmc_' if gmc else ''}{slug}.txt")
             r = res[(mode, name)] = run(cmd, log)
@@ -129,7 +137,8 @@ def main():
 
     gt = next(iter(res.values()))["gt"]
     head = ["설정", "pred", "TP ↑", "헛출력 ↓", "누락 ↓", "재현율 ↑", "정밀도 ↑"] + (["IDSW ↓", "IDF1 ↑", "MOTA ↑"] if a.ids else [])
-    md = [f"# 조합 비교 – {a.root} (--det {a.det}) {' '.join(a.filters)}", "",
+    md = [f"# 조합 비교 – {a.root} (--det {a.det}) {' '.join(a.filters)}"
+          + (f"  [모든 조합에 {', '.join(a.set)}]" if a.set else ""), "",
           f"GT {gt:,}개. TP = GT − 누락 = pred − 헛출력, 재현율 = TP/GT, 정밀도 = TP/pred. "
           "C1 = fuse_score + buffer 50 + L1. 괄호는 같은 CMC 조건의 기본값 대비 변화.",
           "" if a.ids else "정답에 track ID가 없어 IDSW·IDF1·MOTA는 넣지 않았다.", ""]

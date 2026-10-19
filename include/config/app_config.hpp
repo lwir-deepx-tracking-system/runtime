@@ -41,6 +41,9 @@ struct TrackingConfig {
     // NSA Kalman (StrongSORT): Kalman update의 측정 노이즈를 (1 - 검출 점수)배 한다.
     // 점수가 높은 검출은 더 믿고, 낮은 검출(가려짐 등)은 Track 상태를 덜 흔든다.
     bool nsa_kalman = false;
+    // Kalman 상태 형식. "xyah": [cx, cy, w/h, h] (공식 ByteTrack, 가로세로비는 거의 고정이라고 가정)
+    //                   "xywh": [cx, cy, w, h] (BoT-SORT, 폭과 높이를 따로 추정해 폭 변화를 빨리 따라감)
+    std::string kalman_format = "xyah";
     // 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함).
     int lost_output_frames = 0;
     // Buffered IoU: 1차 매칭 뒤 남은 Track과 high 검출을 박스를 넓혀 한 번 더 매칭한다.

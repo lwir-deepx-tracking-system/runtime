@@ -106,6 +106,8 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         node, "fuse_score", "tracking", c.fuse_score);
     c.nsa_kalman = optional_value<bool>(
         node, "nsa_kalman", "tracking", c.nsa_kalman);
+    c.kalman_format = optional_value<std::string>(
+        node, "kalman_format", "tracking", c.kalman_format);
     c.lost_output_frames = optional_value<int>(
         node, "lost_output_frames", "tracking", c.lost_output_frames);
     c.buffer_scale = optional_value<float>(
@@ -135,6 +137,8 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         throw std::runtime_error("tracking.unconfirmed_match_threshold must be in (0, 1]");
     if (c.lost_output_frames < 0)
         throw std::runtime_error("tracking.lost_output_frames must not be negative");
+    if (c.kalman_format != "xyah" && c.kalman_format != "xywh")
+        throw std::runtime_error("tracking.kalman_format must be xyah or xywh");
     if (c.buffer_scale < 0.0F || c.buffer_scale > 2.0F)
         throw std::runtime_error("tracking.buffer_scale must be in [0, 2]");
     if (c.buffer_max_px < 0.0F)

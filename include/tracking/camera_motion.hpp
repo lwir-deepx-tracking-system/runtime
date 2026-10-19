@@ -40,11 +40,11 @@ struct CameraMotion
     }
 };
 
-// Kalman 상태 [cx, cy, aspect, h, vcx, vcy, vaspect, vh]를 카메라 움직임만큼 옮긴다.
+// Kalman 상태 [cx, cy, aspect 또는 w, h, vcx, vcy, vaspect 또는 vw, vh]를 카메라 움직임만큼 옮긴다.
 //   중심 (cx, cy)   : 회전·확대 후 평행이동
 //   속도 (vcx, vcy) : 회전·확대만 (평행이동은 속도에 영향 없음)
 //   높이 h, vh      : 확대 비율만큼
-//   aspect          : 균일 확대에서는 변하지 않음
+//   aspect (XYAH)   : 균일 확대에서는 변하지 않음 / 폭 w, vw (XYWH): 확대 비율만큼
 // 공분산도 같은 변환 T로 P' = T P T^T 를 적용해 불확실성의 방향과 크기를 맞춘다.
 inline void apply_camera_motion(KalmanState& s, const CameraMotion& m)
 {
@@ -58,11 +58,15 @@ inline void apply_camera_motion(KalmanState& s, const CameraMotion& m)
     x[0] = m.a * cx + m.b * cy + m.tx;
     x[1] = m.c * cx + m.d * cy + m.ty;
     x[3] *= k;
+    if (s.xywh)
+        x[2] *= k;
 
     const double vx = x[4], vy = x[5];
     x[4] = m.a * vx + m.b * vy;
     x[5] = m.c * vx + m.d * vy;
     x[7] *= k;
+    if (s.xywh)
+        x[6] *= k;
 
     // T: (0,1)과 (4,5)는 2x2 회전·확대 블록, 3과 7은 k, 2와 6은 1
     KalmanMat8 t{};
@@ -73,8 +77,8 @@ inline void apply_camera_motion(KalmanState& s, const CameraMotion& m)
         t[base + 1][base] = m.c;
         t[base + 1][base + 1] = m.d;
     }
-    t[2][2] = 1.0;
-    t[6][6] = 1.0;
+    t[2][2] = s.xywh ? k : 1.0;
+    t[6][6] = s.xywh ? k : 1.0;
     t[3][3] = k;
     t[7][7] = k;
 

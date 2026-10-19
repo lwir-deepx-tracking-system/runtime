@@ -59,6 +59,9 @@ tracking:
   # 점수가 높은 검출은 더 믿고, 낮은 검출(가려짐 등)은 Track 위치를 덜 흔든다
   # nsa_kalman: false
 
+  # Kalman 상태 형식: xyah (공식 ByteTrack, 가로세로비 거의 고정) / xywh (BoT-SORT, 폭·높이 따로 추정)
+  # kalman_format: xyah
+
   # 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함)
   # 출력된 박스는 검출이 아니라 예측이다
   # lost_output_frames: 0

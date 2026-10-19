@@ -59,13 +59,15 @@ bool invert4(const double in[4][4], double out[4][4])
 KalmanState KalmanFilter::initiate(const KalmanMeasurement& z) const
 {
     KalmanState s;
+    s.xywh = (format_ == KalmanFormat::XYWH);
     for (int i = 0; i < 4; ++i)
         s.mean[i] = z[i];
 
     const double h = z[3];
+    const double w = s.xywh ? z[2] : h;  // XYAH는 모든 노이즈가 h 기준
     const double std_dev[8] = {
-        2 * kStdPos * h, 2 * kStdPos * h, 1e-2, 2 * kStdPos * h,
-        10 * kStdVel * h, 10 * kStdVel * h, 1e-5, 10 * kStdVel * h};
+        2 * kStdPos * w, 2 * kStdPos * h, s.xywh ? 2 * kStdPos * w : 1e-2, 2 * kStdPos * h,
+        10 * kStdVel * w, 10 * kStdVel * h, s.xywh ? 10 * kStdVel * w : 1e-5, 10 * kStdVel * h};
     for (int i = 0; i < 8; ++i)
         s.covariance[i][i] = std_dev[i] * std_dev[i];
     return s;
@@ -75,9 +77,10 @@ KalmanState KalmanFilter::initiate(const KalmanMeasurement& z) const
 void KalmanFilter::predict(KalmanState& s) const
 {
     const double h = s.mean[3];
+    const double w = s.xywh ? s.mean[2] : h;
     const double q[8] = {
-        kStdPos * h, kStdPos * h, 1e-2, kStdPos * h,
-        kStdVel * h, kStdVel * h, 1e-5, kStdVel * h};
+        kStdPos * w, kStdPos * h, s.xywh ? kStdPos * w : 1e-2, kStdPos * h,
+        kStdVel * w, kStdVel * h, s.xywh ? kStdVel * w : 1e-5, kStdVel * h};
 
     for (int i = 0; i < 4; ++i)
         s.mean[i] += s.mean[i + 4];
@@ -104,9 +107,10 @@ void KalmanFilter::predict(KalmanState& s) const
 void KalmanFilter::update(KalmanState& s, const KalmanMeasurement& z, double noise_scale) const
 {
     const double h = s.mean[3];
+    const double w = s.xywh ? s.mean[2] : h;
     const double r[4] = {
-        noise_scale * kStdPos * h, noise_scale * kStdPos * h,
-        noise_scale * 1e-1, noise_scale * kStdPos * h};
+        noise_scale * kStdPos * w, noise_scale * kStdPos * h,
+        noise_scale * (s.xywh ? kStdPos * w : 1e-1), noise_scale * kStdPos * h};
     const KalmanMat8& p = s.covariance;
 
     // S = H P H^T + R  (H = [I 0])

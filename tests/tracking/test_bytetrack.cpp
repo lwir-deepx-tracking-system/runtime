@@ -70,7 +70,7 @@ int check_tracking_config()
             off.fuse_score != defaults.fuse_score || off.lost_output_frames != 0 || off.buffer_scale != 0.0F ||
             off.buffer_max_px != 0.0F || off.buffer_small_size != 0.0F || off.buffer_snap ||
             off.low_threshold != 0.1F || off.new_track_threshold != 0.0F || off.low_match_threshold != 0.5F ||
-            off.unconfirmed_match_threshold != 0.7F || off.nsa_kalman)
+            off.unconfirmed_match_threshold != 0.7F || off.nsa_kalman || off.kalman_format != "xyah")
         {
             std::cerr << "FAIL: 선택 키를 생략했는데 기능이 꺼진 기본값이 아님\n";
             ++failures;
@@ -78,8 +78,9 @@ int check_tracking_config()
 
         const TrackingConfig on = parse_tracking(
             base + "fuse_score: true\nlost_output_frames: 1\nbuffer_scale: 0.5\n"
-                   "buffer_max_px: 20\nbuffer_small_size: 40\nbuffer_snap: true\nnsa_kalman: true\n");
-        if (!on.fuse_score || !on.nsa_kalman || on.lost_output_frames != 1 || on.buffer_scale != 0.5F || on.buffer_max_px != 20.0F ||
+                   "buffer_max_px: 20\nbuffer_small_size: 40\nbuffer_snap: true\nnsa_kalman: true\n"
+                   "kalman_format: xywh\n");
+        if (!on.fuse_score || !on.nsa_kalman || on.kalman_format != "xywh" || on.lost_output_frames != 1 || on.buffer_scale != 0.5F || on.buffer_max_px != 20.0F ||
             on.buffer_small_size != 40.0F || !on.buffer_snap)
         {
             std::cerr << "FAIL: 선택 키를 지정했는데 값이 그대로 읽히지 않음\n";
@@ -119,6 +120,7 @@ int check_tracking_config()
     failures += !rejects("zero_low_match", base + "low_match_threshold: 0\n");
     failures += !rejects("huge_unconfirmed_match", base + "unconfirmed_match_threshold: 1.5\n");
     failures += !rejects("nsa_not_bool", base + "nsa_kalman: maybe\n");
+    failures += !rejects("bad_kalman_format", base + "kalman_format: xyz\n");
     return failures;
 }
 
@@ -394,6 +396,44 @@ int check_nsa_kalman()
     return failures;
 }
 
+// XYWH Kalman: 높이는 그대로(80)이고 폭만 40 → 80으로 10프레임 동안 늘어나는 물체.
+// 마지막 프레임의 출력 폭이 XYWH에서 XYAH보다 검출 폭(80)에 더 가까워야 한다.
+// 정지·크기 고정 물체는 두 형식의 출력이 같은 위치·크기여야 한다. 반환: 실패 수
+int check_kalman_format()
+{
+    auto run = [](const std::string& fmt, bool grow) {
+        TrackingConfig c;
+        c.kalman_format = fmt;
+        ByteTrackTracker tracker(c);
+        Track last{};
+        for (int f = 1; f <= 20; ++f)
+        {
+            const float w = (grow && f > 10) ? 40.0f + 4.0f * (f - 10) : 40.0f;
+            const auto tracks = tracker.track({make_detection(200.0f - w / 2, 200.0f, w, 80.0f, 0.9f)});
+            if (!tracks.empty())
+                last = tracks.front();
+        }
+        return last;
+    };
+    const Track ah = run("xyah", true), wh = run("xywh", true);
+    const Track ah_s = run("xyah", false), wh_s = run("xywh", false);
+    std::cout << "Kalman 형식 검사 (폭 40 -> 80, 높이 80 고정): 마지막 출력 폭 xyah " << ah.width << ", xywh " << wh.width
+              << " / 크기 고정 물체 폭 xyah " << ah_s.width << ", xywh " << wh_s.width << "\n";
+    int failures = 0;
+    if (!(std::abs(wh.width - 80.0f) < std::abs(ah.width - 80.0f)))
+    {
+        std::cerr << "FAIL: xywh가 폭 변화를 xyah보다 빨리 따라가지 못함\n";
+        ++failures;
+    }
+    if (std::abs(ah_s.width - 40.0f) > 0.5f || std::abs(wh_s.width - 40.0f) > 0.5f ||
+        std::abs(ah_s.x - wh_s.x) > 0.5f || std::abs(ah_s.height - wh_s.height) > 0.5f)
+    {
+        std::cerr << "FAIL: 크기가 고정된 물체에서 xyah와 xywh 출력이 다름\n";
+        ++failures;
+    }
+    return failures;
+}
+
 }  // namespace
 
 
@@ -476,6 +516,7 @@ int main(int argc, char** argv)
     failures += check_camera_motion();
     failures += check_buffered_iou();
     failures += check_nsa_kalman();
+    failures += check_kalman_format();
 
     if (failures > 0)
     {

@@ -23,15 +23,16 @@ Box track_box(const STrack& t)
 {
     const auto& m = t.kf.mean;
     const float h = static_cast<float>(m[3]);
-    const float w = static_cast<float>(m[2] * m[3]);
+    const float w = static_cast<float>(t.kf.xywh ? m[2] : m[2] * m[3]);
     return {static_cast<float>(m[0]) - w / 2.0f,
             static_cast<float>(m[1]) - h / 2.0f, w, h};
 }
 
-KalmanMeasurement to_xyah(const Box& b)
+// 검출 박스(tlwh) → Kalman 측정값. XYAH는 [cx, cy, w/h, h], XYWH는 [cx, cy, w, h]
+KalmanMeasurement to_measurement(const Box& b, KalmanFormat format)
 {
     return {b[0] + b[2] / 2.0, b[1] + b[3] / 2.0,
-            static_cast<double>(b[2]) / b[3], b[3]};
+            format == KalmanFormat::XYWH ? static_cast<double>(b[2]) : static_cast<double>(b[2]) / b[3], b[3]};
 }
 
 float iou(const Box& a, const Box& b)
@@ -301,7 +302,8 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
     : config_(config),
       new_track_threshold_(config.new_track_threshold > 0.0F ?
                                config.new_track_threshold :
-                               std::min(config.track_threshold + 0.1F, 1.0F))
+                               std::min(config.track_threshold + 0.1F, 1.0F)),
+      kalman_(config.kalman_format == "xywh" ? KalmanFormat::XYWH : KalmanFormat::XYAH)
 {
     max_time_lost_ = config_.track_buffer;
 
@@ -322,6 +324,8 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
         values << ", fuse_score=true";
     if (config_.nsa_kalman)
         values << ", nsa_kalman=true";
+    if (config_.kalman_format != "xyah")
+        values << ", kalman_format=" << config_.kalman_format;
     if (config_.lost_output_frames > 0)
         values << ", lost_output_frames=" << config_.lost_output_frames;
     if (config_.buffer_scale > 0.0F)
@@ -339,7 +343,7 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
 void ByteTrackTracker::activate(STrack& t)
 {
     t.track_id = ++next_track_id_;
-    t.kf = kalman_.initiate(to_xyah(t.det_tlwh));
+    t.kf = kalman_.initiate(to_measurement(t.det_tlwh, kalman_.format()));
     t.state = TrackState::Tracked;
     t.is_activated = (frame_id_ == 1);  // 첫 프레임이 아니면 다음 프레임에 확정
     t.tracklet_len = 0;
@@ -352,7 +356,7 @@ void ByteTrackTracker::activate(STrack& t)
 void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
 {
     t.tracklet_len = (t.state == TrackState::Tracked) ? t.tracklet_len + 1 : 0;
-    kalman_.update(t.kf, to_xyah(det.det_tlwh), measurement_noise_scale(det.score));
+    kalman_.update(t.kf, to_measurement(det.det_tlwh, kalman_.format()), measurement_noise_scale(det.score));
     t.state = TrackState::Tracked;
     t.is_activated = true;
     t.score = det.score;
@@ -395,7 +399,11 @@ std::vector<Track> ByteTrackTracker::track(
     for (auto& t : pool)
     {
         if (t->state != TrackState::Tracked)
+        {
             t->kf.mean[7] = 0.0;  // 놓친 Track은 높이 변화 속도를 멈춘다
+            if (t->kf.xywh)
+                t->kf.mean[6] = 0.0;  // XYWH는 폭 변화 속도도 멈춘다 (BoT-SORT와 같음)
+        }
         kalman_.predict(t->kf);
     }
 
@@ -451,7 +459,7 @@ std::vector<Track> ByteTrackTracker::track(
             // (프레임 누락에는 유리, 검출이 흔들리는 작은 표적에는 평활이 사라져 불리)
             if (config_.buffer_snap)
             {
-                const KalmanMeasurement z = to_xyah(bd[c]->det_tlwh);
+                const KalmanMeasurement z = to_measurement(bd[c]->det_tlwh, kalman_.format());
                 for (int k = 0; k < 4; ++k)
                     bt[r]->kf.mean[k] = z[k];
             }
