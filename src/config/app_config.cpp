@@ -27,6 +27,7 @@ T optional_value(const YAML::Node& node, const char* key, const std::string& pat
     catch (const YAML::Exception& e) {
         throw std::runtime_error("invalid configuration: " + path + "." + key + " (" + e.what() + ")");
     }
+}
 PostprocessOutputFormat parse_postprocess_output_format(const std::string& value)
 {
     if (value == "auto") return PostprocessOutputFormat::Auto;
