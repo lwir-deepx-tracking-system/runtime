@@ -10,16 +10,19 @@ namespace benchmark_result_writer {
 
 struct DxrtProfilerSample
 {
+    double preprocess_us = 0.0;
     double input_format_us = 0.0;
     double h2d_us = 0.0;
     double inference_core_all_us = 0.0;
     double d2h_us = 0.0;
     double output_format_us = 0.0;
     double npu_task_total_us = 0.0;
+    double postprocess_us = 0.0;
+    double tracking_us = 0.0;
     double host_latency_us = 0.0;
 };
 
-// CSV 형식을 유지하면서 timing 열의 시작 위치를 맞춰 기록한다.
+// timing 파일에 고정 폭 표를 기록한다.
 void write_timing_header(std::ostream& file);
 void write_timing_row(
     std::ostream& file,
@@ -29,6 +32,7 @@ void write_timing_row(
     double npu_processing_ms,
     double postprocess_ms,
     double tracking_ms);
+void write_timing_footer(std::ostream& file);
 
 // Sequence의 DXRT profiler 통계를 터미널용 표로 기록한다.
 void write_dxrt_profiler_summary(

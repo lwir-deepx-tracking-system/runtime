@@ -10,11 +10,11 @@ namespace benchmark_result_writer {
 namespace {
 
 constexpr int kFrameIdWidth = 8;
-constexpr int kPreprocessWidth = 13;
-constexpr int kLatencyWidth = 10;
-constexpr int kNpuProcessingWidth = 17;
-constexpr int kPostprocessWidth = 14;
-constexpr int kTrackingWidth = 11;
+constexpr int kTimingValueWidth = 17;
+constexpr int kTimingColumnCount = 6;
+constexpr int kTimingTableWidth =
+    kFrameIdWidth + (kTimingColumnCount - 1) * kTimingValueWidth +
+    3 * kTimingColumnCount + 1;
 constexpr int kProfilerNameWidth = 29;
 constexpr int kProfilerValueWidth = 12;
 
@@ -62,8 +62,15 @@ void write_profiler_row(
 
 void write_timing_header(std::ostream& file)
 {
-    file << "frame_id,preprocess_ms,latency_ms,npu_processing_ms,"
-            "postprocess_ms,tracking_ms\n";
+    const std::string separator(kTimingTableWidth, '-');
+    file << separator << '\n'
+         << "| " << std::left << std::setw(kFrameIdWidth) << "frame_id"
+         << " | " << std::setw(kTimingValueWidth) << "preprocess_ms"
+         << " | " << std::setw(kTimingValueWidth) << "latency_ms"
+         << " | " << std::setw(kTimingValueWidth) << "npu_processing_ms"
+         << " | " << std::setw(kTimingValueWidth) << "postprocess_ms"
+         << " | " << std::setw(kTimingValueWidth) << "tracking_ms"
+         << " |\n" << separator << '\n';
 }
 
 void write_timing_row(
@@ -76,12 +83,18 @@ void write_timing_row(
     double tracking_ms)
 {
     file << std::fixed << std::setprecision(6) << std::right
-         << std::setw(kFrameIdWidth) << frame_id << ','
-         << std::setw(kPreprocessWidth) << preprocess_ms << ','
-         << std::setw(kLatencyWidth) << latency_ms << ','
-         << std::setw(kNpuProcessingWidth) << npu_processing_ms << ','
-         << std::setw(kPostprocessWidth) << postprocess_ms << ','
-         << std::setw(kTrackingWidth) << tracking_ms << '\n';
+         << "| " << std::setw(kFrameIdWidth) << frame_id
+         << " | " << std::setw(kTimingValueWidth) << preprocess_ms
+         << " | " << std::setw(kTimingValueWidth) << latency_ms
+         << " | " << std::setw(kTimingValueWidth) << npu_processing_ms
+         << " | " << std::setw(kTimingValueWidth) << postprocess_ms
+         << " | " << std::setw(kTimingValueWidth) << tracking_ms
+         << " |\n";
+}
+
+void write_timing_footer(std::ostream& file)
+{
+    file << std::string(kTimingTableWidth, '-') << '\n';
 }
 
 void write_dxrt_profiler_summary(
@@ -107,6 +120,10 @@ void write_dxrt_profiler_summary(
            << " |\n"
            << separator << '\n';
 
+    write_profiler_row(output, "Preprocess", calculate_statistics(
+        samples, [](const DxrtProfilerSample& s) { return s.preprocess_us; }));
+    output << separator << '\n';
+
     write_profiler_row(output, "NPU Input Format Handler", calculate_statistics(
         samples, [](const DxrtProfilerSample& s) { return s.input_format_us; }));
     write_profiler_row(output, "H2D (PCIe Write)", calculate_statistics(
@@ -119,6 +136,14 @@ void write_dxrt_profiler_summary(
         samples, [](const DxrtProfilerSample& s) { return s.output_format_us; }));
     write_profiler_row(output, "NPU Task Total", calculate_statistics(
         samples, [](const DxrtProfilerSample& s) { return s.npu_task_total_us; }));
+    output << separator << '\n';
+
+    write_profiler_row(output, "Postprocess", calculate_statistics(
+        samples, [](const DxrtProfilerSample& s) { return s.postprocess_us; }));
+    write_profiler_row(output, "Tracking", calculate_statistics(
+        samples, [](const DxrtProfilerSample& s) { return s.tracking_us; }));
+    output << separator << '\n';
+
     write_profiler_row(output, "Host Latency", calculate_statistics(
         samples, [](const DxrtProfilerSample& s) { return s.host_latency_us; }));
 

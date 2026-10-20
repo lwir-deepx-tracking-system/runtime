@@ -418,12 +418,15 @@ void BenchmarkApplication::run()
                         sequence_name + "/" + std::to_string(frame_id));
 
                 profiler_samples.push_back({
+                    detection_timing.preprocess_ms() * 1000.0,
                     detection_timing.npu_input_format_duration_us,
                     detection_timing.h2d_duration_us,
                     detection_timing.npu_processing_ms() * 1000.0,
                     detection_timing.d2h_duration_us,
                     detection_timing.npu_output_format_duration_us,
                     detection_timing.npu_task_total_duration_us,
+                    detection_timing.postprocess_ms() * 1000.0,
+                    0.0,
                     detection_timing.latency_ms() * 1000.0});
 
                 write_detections(detection_file, frame_id, detections);
@@ -437,6 +440,7 @@ void BenchmarkApplication::run()
                 const auto tracking_finished_at = std::chrono::steady_clock::now();
                 const double tracking_ms = std::chrono::duration<double, std::milli>(
                     tracking_finished_at - tracking_started_at).count();
+                profiler_samples.back().tracking_us = tracking_ms * 1000.0;
 
                 write_tracks(track_file, frame_id, tracks);
                 if (!track_file)
@@ -464,6 +468,7 @@ void BenchmarkApplication::run()
             }
 
             // close 시점의 flush 오류까지 확인해 불완전한 파일을 성공 처리하지 않는다.
+            benchmark_result_writer::write_timing_footer(timing_file);
             detection_file.close();
             track_file.close();
             timing_file.close();
