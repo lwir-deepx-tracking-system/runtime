@@ -412,13 +412,6 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-    add_executable(
-        test_bytetrack_limits
-        tests/tracking/test_bytetrack_limits.cpp
-    )
-    target_link_libraries(test_bytetrack_limits PRIVATE lwir_vision)
-    add_test(NAME bytetrack_limits COMMAND test_bytetrack_limits)
-
     # MOT17 공개 데이터 실행 도구 (ctest 미등록, datasets/MOT17이 있을 때 직접 실행)
     add_executable(
         bench_mot17

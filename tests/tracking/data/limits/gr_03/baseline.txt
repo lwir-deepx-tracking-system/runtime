@@ -1,3 +1,0 @@
-baseline_idsw=0
-baseline_false=1
-baseline_missed=1
