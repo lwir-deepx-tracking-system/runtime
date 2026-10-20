@@ -1,4 +1,5 @@
 #include "benchmark.hpp"
+#include "result_writer.hpp"
 
 #include "common/detection.hpp"
 #include "common/frame.hpp"
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <future>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -341,7 +343,16 @@ void BenchmarkApplication::run()
             std::ofstream timing_file(
                 run_dir / "timing" / (sequence_name + ".csv"));
 
-            if (!detection_file || !track_file || !timing_file)
+            std::ofstream detection_summary_file(
+                run_dir / "detections" /
+                (sequence_name + "_summary.txt"));
+
+            std::ofstream track_summary_file(
+                run_dir / "tracks" /
+                (sequence_name + "_summary.txt"));
+
+            if (!detection_file || !track_file || !timing_file ||
+                !detection_summary_file || !track_summary_file)
                 throw std::runtime_error(
                     "Benchmark 결과 파일을 생성하지 못했습니다: " + sequence_name);
 
@@ -350,8 +361,13 @@ void BenchmarkApplication::run()
             timing_file << std::fixed << std::setprecision(6)
                         << "frame_id,preprocess_ms,latency_ms,"
                            "npu_processing_ms,postprocess_ms,tracking_ms\n";
+            benchmark_result_writer::write_detection_summary_header(
+                detection_summary_file);
+            benchmark_result_writer::write_track_summary_header(
+                track_summary_file);
 
-            if (!detection_file || !track_file || !timing_file)
+            if (!detection_file || !track_file || !timing_file ||
+                !detection_summary_file || !track_summary_file)
                 throw std::runtime_error(
                     "Benchmark 결과 파일 초기화에 실패했습니다: " + sequence_name);
 
@@ -361,6 +377,9 @@ void BenchmarkApplication::run()
             Logger::info("[Benchmark] Sequence 시작: " + sequence_name);
 
             std::size_t processed_frames = 0;
+            std::vector<benchmark_result_writer::DxrtProfilerSample>
+                profiler_samples;
+            profiler_samples.reserve(frames.size());
 
             for (const auto& frame_entry : frames)
             {
@@ -409,8 +428,24 @@ void BenchmarkApplication::run()
                         "Detection timing Frame ID가 일치하지 않습니다: " +
                         sequence_name + "/" + std::to_string(frame_id));
 
+                if (!detection_timing.npu_profiler_valid)
+                    throw std::runtime_error(
+                        "DXRT profiler timing이 유효하지 않습니다: " +
+                        sequence_name + "/" + std::to_string(frame_id));
+
+                profiler_samples.push_back({
+                    detection_timing.npu_input_format_duration_us,
+                    detection_timing.h2d_duration_us,
+                    detection_timing.npu_processing_ms() * 1000.0,
+                    detection_timing.d2h_duration_us,
+                    detection_timing.npu_output_format_duration_us,
+                    detection_timing.npu_task_total_duration_us,
+                    detection_timing.latency_ms() * 1000.0});
+
                 write_detections(detection_file, frame_id, detections);
-                if (!detection_file)
+                benchmark_result_writer::write_detection_summary_rows(
+                    detection_summary_file, frame_id, detections);
+                if (!detection_file || !detection_summary_file)
                     throw std::runtime_error(
                         "Detection 결과 저장에 실패했습니다: " + sequence_name);
 
@@ -422,7 +457,9 @@ void BenchmarkApplication::run()
                     tracking_finished_at - tracking_started_at).count();
 
                 write_tracks(track_file, frame_id, tracks);
-                if (!track_file)
+                benchmark_result_writer::write_track_summary_rows(
+                    track_summary_file, frame_id, tracks);
+                if (!track_file || !track_summary_file)
                     throw std::runtime_error(
                         "Tracking 결과 저장에 실패했습니다: " + sequence_name);
 
@@ -445,13 +482,27 @@ void BenchmarkApplication::run()
             }
 
             // close 시점의 flush 오류까지 확인해 불완전한 파일을 성공 처리하지 않는다.
+            benchmark_result_writer::write_summary_footer(
+                detection_summary_file);
+            benchmark_result_writer::write_summary_footer(
+                track_summary_file);
+
             detection_file.close();
             track_file.close();
             timing_file.close();
+            detection_summary_file.close();
+            track_summary_file.close();
 
-            if (detection_file.fail() || track_file.fail() || timing_file.fail())
+            if (detection_file.fail() || track_file.fail() || timing_file.fail() ||
+                detection_summary_file.fail() || track_summary_file.fail())
                 throw std::runtime_error(
                     "Benchmark 결과 파일 마무리에 실패했습니다: " + sequence_name);
+
+            benchmark_result_writer::write_dxrt_profiler_summary(
+                std::cout,
+                sequence_name,
+                processed_frames,
+                profiler_samples);
 
             Logger::info(
                 "[Benchmark] Sequence 완료: " + sequence_name +

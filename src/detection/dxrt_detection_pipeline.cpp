@@ -133,14 +133,13 @@ struct DxrtDetectionPipeline::NpuState
                      { return inflight == 0; });
   }
 
-  static double get_npu_processing_ms(int job_id)
+  static void populate_npu_timing(int job_id, DetectionTiming &timing)
   {
     const dxrt::JobMetrics metrics =
         dxrt::Profiler::GetInstance().GetJobMetrics(job_id);
     if(!metrics.valid)
       throw std::runtime_error("DXRT job profiler metrics are unavailable");
 
-    double inference_core_us = 0.0;
     bool   found_npu_metric  = false;
     for(const dxrt::TaskMetrics &task : metrics.tasks)
     {
@@ -149,14 +148,20 @@ struct DxrtDetectionPipeline::NpuState
         const dxrt::NpuDeviceMetrics &device = device_entry.second;
         if(!device.valid || device.inference_core_all_us <= 0.0)
           continue;
-        inference_core_us += device.inference_core_all_us;
+        timing.npu_input_format_duration_us += device.input_format_us;
+        timing.h2d_duration_us += device.h2d_us;
+        timing.npu_processing_duration_ms +=
+            device.inference_core_all_us / 1000.0;
+        timing.d2h_duration_us += device.d2h_us;
+        timing.npu_output_format_duration_us += device.output_format_us;
+        timing.npu_task_total_duration_us += device.total_us;
         found_npu_metric = true;
       }
     }
 
     if(!found_npu_metric)
       throw std::runtime_error("DXRT job has no valid NPU core timing");
-    return inference_core_us / 1000.0;
+    timing.npu_profiler_valid = true;
   }
 
   static int wait_for_job_id(const std::shared_ptr<Request> &request)
@@ -204,8 +209,7 @@ struct DxrtDetectionPipeline::NpuState
           throw std::runtime_error(
               message ? message : "DXRT failed while waiting for a job");
         }
-        request->timing.npu_processing_duration_ms =
-            get_npu_processing_ms(job_id);
+        populate_npu_timing(job_id, request->timing);
       }
       catch(...)
       {

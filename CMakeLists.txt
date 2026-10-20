@@ -259,6 +259,7 @@ if(LWIR_BUILD_BENCHMARK)
     add_executable(lwir_benchmark
         apps/benchmark/main.cpp
         apps/benchmark/benchmark.cpp
+        apps/benchmark/result_writer.cpp
     )
 
     target_link_libraries(lwir_benchmark
@@ -342,6 +343,20 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_detection_config PRIVATE lwir_common)
     add_test(NAME detection_config COMMAND test_detection_config)
+
+    add_executable(
+        test_benchmark_result_writer
+        tests/benchmark/test_result_writer.cpp
+        apps/benchmark/result_writer.cpp
+    )
+    target_include_directories(test_benchmark_result_writer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/benchmark
+    )
+    target_link_libraries(test_benchmark_result_writer PRIVATE
+        lwir_common
+        ${OpenCV_LIBS}
+    )
+    add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
 
     add_executable(
         test_gui_protocol

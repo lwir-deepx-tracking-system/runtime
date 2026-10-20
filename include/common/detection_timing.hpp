@@ -17,7 +17,16 @@ struct DetectionTiming
     TimePoint inference_finished_at{};
     TimePoint postprocess_started_at{};
     TimePoint postprocess_finished_at{};
+
+    // DXRT job profiler가 제공하는 장치 내부 구간별 시간이다.
+    // 여러 NPU task/device가 있으면 한 job 안의 유효한 값을 합산한다.
+    double npu_input_format_duration_us = 0.0;
+    double h2d_duration_us = 0.0;
     double npu_processing_duration_ms = 0.0;
+    double d2h_duration_us = 0.0;
+    double npu_output_format_duration_us = 0.0;
+    double npu_task_total_duration_us = 0.0;
+    bool npu_profiler_valid = false;
 
     double preprocess_ms() const
     {
