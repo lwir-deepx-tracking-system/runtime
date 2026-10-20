@@ -6,7 +6,7 @@
 #include "common/detection.hpp"
 #include "common/frame.hpp"
 #include "common/threadsafequeue.hpp"
-#include "detection/dxapp_detection_pipeline.hpp"
+#include "detection/i_detection_pipeline.hpp"
 #include "pipeline/detection_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
 #include "tracking/tracker.hpp"
@@ -14,12 +14,17 @@
 class FakeDetectionPipeline : public IDetectionPipeline
 {
 public:
-    std::vector<Detection> detect(const FrameContext&) override
+    void submit_async(
+        const FrameContextPtr& frame,
+        Completion completion) override
     {
         Detection detection;
         detection.width = 10.0f;
         detection.height = 10.0f;
-        return {detection};
+
+        DetectionTiming timing;
+        timing.frame_id = frame->metadata.frame_id;
+        completion({detection}, nullptr, timing);
     }
 };
 

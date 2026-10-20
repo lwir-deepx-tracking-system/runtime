@@ -172,7 +172,7 @@ inline bool isVersionGreaterOrEqual(const std::string& v1, const std::string& v2
 /**
  * @brief Check minimum version compatibility for RT and Compiler
  * 
- * Validates that the DXRT library version is >= 3.0.0 and
+ * Validates that the DXRT library version is >= 3.4.0 and
  * the compiled model version is >= v7 (matching Legacy behavior).
  * 
  * @param ie Pointer to InferenceEngine
@@ -184,7 +184,7 @@ inline bool minversionforRTandCompiler(dxrt::InferenceEngine* ie) {
     std::string rt_version = dxrt::Configuration::GetInstance().GetVersion();
     std::string compiler_version = ie->GetModelVersion();
 
-    if (isVersionGreaterOrEqual(rt_version, "3.0.0")) {
+    if (isVersionGreaterOrEqual(rt_version, "3.4.0")) {
         if (isVersionGreaterOrEqual(compiler_version, "v7")) {
             return true;
         } else {
@@ -197,7 +197,7 @@ inline bool minversionforRTandCompiler(dxrt::InferenceEngine* ie) {
         }
     } else {
         std::cerr << "[DXAPP] [ERROR] DXRT library version is too low. (required: "
-                     ">= 3.0.0, current: "
+                     ">= 3.4.0, current: "
                   << rt_version << ")" << std::endl;
         std::cerr << DXAPP_GREEN << "[HINT] Please update DXRT: ./install.sh --all"
                   << DXAPP_RESET << std::endl;

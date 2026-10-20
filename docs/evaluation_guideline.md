@@ -103,7 +103,10 @@ config/
 ```text
 Model config
 Detection max_inflight
+DXRT buffer_count
+DXRT use_ort
 ByteTrack parameters
+Sequence range (inclusive)
 Dataset root
 Output root
 ```
@@ -199,14 +202,33 @@ timing/seq_001.csv
 ```
 
 ```text
-frame_id,detection_ms,tracking_ms
+------------------------------------------------------------------------------------------------------------------------------------
+| frame_id | preprocess_ms     | latency_ms        | npu_processing_ms | postprocess_ms    | tracking_ms       | total_latency_ms  |
+------------------------------------------------------------------------------------------------------------------------------------
+|        1 |          0.125000 |          8.500000 |          7.312184 |          0.250000 |          0.031250 |          8.906250 |
+------------------------------------------------------------------------------------------------------------------------------------
 ```
+
+Benchmark의 `timing/*.csv`는 화면에서 열을 읽기 쉽도록 `|`로 구분한 고정 폭 표다. 파일 확장자는 `.csv`지만 일반적인 쉼표 구분 CSV 파서로 읽을 수 없다.
+`total_latency_ms`는 같은 프레임의 `preprocess_ms + latency_ms + postprocess_ms + tracking_ms`를 합산한 값이다. `npu_processing_ms`는 `latency_ms`에 포함되므로 다시 더하지 않는다.
 
 측정 범위:
 
 ```text
-detection_ms
-detect() 시작 ─────────────→ detect() 반환
+preprocess_ms
+전처리 시작 ───────────────→ NPU 입력 buffer 준비 완료
+
+latency_ms
+RunAsync() 호출 직전 ──────→ DXRT callback 진입
+
+npu_processing_ms
+해당 job에서 DXRT profiler가 측정한 순수 NPU core 실행 시간
+
+`npu_processing_ms`는 `latency_ms` 안에 포함되는 구간이므로 두 값을 합산하지 않는다.
+job별 측정에는 `GetJobMetrics()`를 제공하는 DXRT 3.4.0 이상이 필요하다.
+
+postprocess_ms
+DXRT callback 진입 ────────→ postprocess 완료
 
 tracking_ms
 track() 시작 ──────────────→ track() 반환
@@ -322,8 +344,8 @@ seqinfo.ini
 |---|---|
 | Detection | mAP@50, Precision, Recall |
 | Tracking | HOTA, IDF1, MOTA, MOTP |
-| Benchmark 성능 | detection_ms, tracking_ms |
-| Runtime 성능 | queue_wait_ms, processing_ms, e2e_ms |
+| Benchmark 성능 | preprocess_ms, latency_ms, npu_processing_ms, postprocess_ms, tracking_ms |
+| Runtime 성능 | queue_wait_ms, processing_ms, e2e_ms, Detection 단계별 시간 |
 
 ### Tracking 핵심
 
@@ -412,7 +434,9 @@ model
 └── config
 
 detection
-└── max_inflight
+├── max_inflight
+├── buffer_count
+└── use_ort
 
 tracking
 ├── track_threshold
@@ -452,7 +476,8 @@ gui
 YYYYMMDD_HHMMSS/
 ├── runtime.yaml
 ├── yolov8n.yaml
-└── metrics.csv
+├── metrics.csv
+└── detection_timing.csv
 ```
 
 실패한 run은 timestamp 디렉터리를 삭제한다.
@@ -485,6 +510,12 @@ Camera frame 수신 완료 ─────→ Control 완료
 ```
 
 GUI 자체 latency는 Orange Pi `metrics.csv`에서 계산하지 않는다.
+
+Detection 내부 단계 시간은 별도의 `detection_timing.csv`에 저장한다.
+
+```text
+frame_id,preprocess_ms,latency_ms,npu_processing_ms,postprocess_ms
+```
 
 ---
 
