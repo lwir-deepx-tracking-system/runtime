@@ -6,18 +6,27 @@
 
 namespace {
 
-bool all_lines_have_width(const std::string& text, std::size_t expected_width)
+bool commas_align(const std::string& text)
 {
     std::istringstream input(text);
-    std::string line;
-    while (std::getline(input, line))
+    std::string header;
+    std::string row;
+    if (!std::getline(input, header) || !std::getline(input, row))
+        return false;
+
+    std::size_t header_position = 0;
+    std::size_t row_position = 0;
+    for (int column = 0; column < 5; ++column)
     {
-        if (line.size() != expected_width)
+        header_position = header.find(',', header_position);
+        row_position = row.find(',', row_position);
+        if (header_position == std::string::npos ||
+            row_position != header_position)
         {
-            std::cerr << "expected width " << expected_width
-                      << ", actual width " << line.size() << '\n';
             return false;
         }
+        ++header_position;
+        ++row_position;
     }
     return true;
 }
@@ -26,53 +35,21 @@ bool all_lines_have_width(const std::string& text, std::size_t expected_width)
 
 int main()
 {
-    Detection detection;
-    detection.class_id = 2;
-    detection.confidence = 0.9213f;
-    detection.x = 120.5f;
-    detection.y = 75.2f;
-    detection.width = 42.1f;
-    detection.height = 105.8f;
+    std::ostringstream timing;
+    benchmark_result_writer::write_timing_header(timing);
+    benchmark_result_writer::write_timing_row(
+        timing, 1, 0.125, 8.5, 7.312184, 0.25, 0.03125);
 
-    std::ostringstream detections;
-    benchmark_result_writer::write_detection_summary_header(detections);
-    benchmark_result_writer::write_detection_summary_rows(
-        detections, 1, {detection});
-    benchmark_result_writer::write_summary_footer(detections);
-
-    const std::string detection_text = detections.str();
-    if (detection_text.find("frame_id") == std::string::npos ||
-        detection_text.find("class_id") == std::string::npos ||
-        detection_text.find("0.921300") == std::string::npos ||
-        detection_text.find("120.500000") == std::string::npos ||
-        !all_lines_have_width(detection_text, 112))
+    const std::string timing_text = timing.str();
+    if (timing_text.find(
+            "frame_id,preprocess_ms,latency_ms,npu_processing_ms,"
+            "postprocess_ms,tracking_ms") == std::string::npos ||
+        timing_text.find("0.125000") == std::string::npos ||
+        timing_text.find("7.312184") == std::string::npos ||
+        !commas_align(timing_text))
     {
-        std::cerr << detection_text;
+        std::cerr << timing_text;
         return 1;
-    }
-
-    Track track;
-    track.track_id = 17;
-    track.confidence = 0.875f;
-    track.x = 9.5f;
-    track.y = 10.25f;
-    track.width = 30.0f;
-    track.height = 40.0f;
-
-    std::ostringstream tracks;
-    benchmark_result_writer::write_track_summary_header(tracks);
-    benchmark_result_writer::write_track_summary_rows(tracks, 23, {track});
-    benchmark_result_writer::write_summary_footer(tracks);
-
-    const std::string track_text = tracks.str();
-    if (track_text.find("frame_id") == std::string::npos ||
-        track_text.find("track_id") == std::string::npos ||
-        track_text.find("0.875000") == std::string::npos ||
-        track_text.find("17") == std::string::npos ||
-        !all_lines_have_width(track_text, 112))
-    {
-        std::cerr << track_text;
-        return 2;
     }
 
     benchmark_result_writer::DxrtProfilerSample first;
@@ -108,7 +85,7 @@ int main()
         profiler_text.find("Host Latency") == std::string::npos)
     {
         std::cerr << profiler_text;
-        return 3;
+        return 2;
     }
 
     return 0;

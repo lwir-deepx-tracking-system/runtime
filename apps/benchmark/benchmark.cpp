@@ -343,31 +343,15 @@ void BenchmarkApplication::run()
             std::ofstream timing_file(
                 run_dir / "timing" / (sequence_name + ".csv"));
 
-            std::ofstream detection_summary_file(
-                run_dir / "detections" /
-                (sequence_name + "_summary.txt"));
-
-            std::ofstream track_summary_file(
-                run_dir / "tracks" /
-                (sequence_name + "_summary.txt"));
-
-            if (!detection_file || !track_file || !timing_file ||
-                !detection_summary_file || !track_summary_file)
+            if (!detection_file || !track_file || !timing_file)
                 throw std::runtime_error(
                     "Benchmark 결과 파일을 생성하지 못했습니다: " + sequence_name);
 
             detection_file << std::fixed << std::setprecision(6);
             track_file << std::fixed << std::setprecision(6);
-            timing_file << std::fixed << std::setprecision(6)
-                        << "frame_id,preprocess_ms,latency_ms,"
-                           "npu_processing_ms,postprocess_ms,tracking_ms\n";
-            benchmark_result_writer::write_detection_summary_header(
-                detection_summary_file);
-            benchmark_result_writer::write_track_summary_header(
-                track_summary_file);
+            benchmark_result_writer::write_timing_header(timing_file);
 
-            if (!detection_file || !track_file || !timing_file ||
-                !detection_summary_file || !track_summary_file)
+            if (!detection_file || !track_file || !timing_file)
                 throw std::runtime_error(
                     "Benchmark 결과 파일 초기화에 실패했습니다: " + sequence_name);
 
@@ -443,9 +427,7 @@ void BenchmarkApplication::run()
                     detection_timing.latency_ms() * 1000.0});
 
                 write_detections(detection_file, frame_id, detections);
-                benchmark_result_writer::write_detection_summary_rows(
-                    detection_summary_file, frame_id, detections);
-                if (!detection_file || !detection_summary_file)
+                if (!detection_file)
                     throw std::runtime_error(
                         "Detection 결과 저장에 실패했습니다: " + sequence_name);
 
@@ -457,18 +439,18 @@ void BenchmarkApplication::run()
                     tracking_finished_at - tracking_started_at).count();
 
                 write_tracks(track_file, frame_id, tracks);
-                benchmark_result_writer::write_track_summary_rows(
-                    track_summary_file, frame_id, tracks);
-                if (!track_file || !track_summary_file)
+                if (!track_file)
                     throw std::runtime_error(
                         "Tracking 결과 저장에 실패했습니다: " + sequence_name);
 
-                timing_file << frame_id << ','
-                            << detection_timing.preprocess_ms() << ','
-                            << detection_timing.latency_ms() << ','
-                            << detection_timing.npu_processing_ms() << ','
-                            << detection_timing.postprocess_ms() << ','
-                            << tracking_ms << '\n';
+                benchmark_result_writer::write_timing_row(
+                    timing_file,
+                    frame_id,
+                    detection_timing.preprocess_ms(),
+                    detection_timing.latency_ms(),
+                    detection_timing.npu_processing_ms(),
+                    detection_timing.postprocess_ms(),
+                    tracking_ms);
                 if (!timing_file)
                     throw std::runtime_error(
                         "Timing 결과 저장에 실패했습니다: " + sequence_name);
@@ -482,19 +464,11 @@ void BenchmarkApplication::run()
             }
 
             // close 시점의 flush 오류까지 확인해 불완전한 파일을 성공 처리하지 않는다.
-            benchmark_result_writer::write_summary_footer(
-                detection_summary_file);
-            benchmark_result_writer::write_summary_footer(
-                track_summary_file);
-
             detection_file.close();
             track_file.close();
             timing_file.close();
-            detection_summary_file.close();
-            track_summary_file.close();
 
-            if (detection_file.fail() || track_file.fail() || timing_file.fail() ||
-                detection_summary_file.fail() || track_summary_file.fail())
+            if (detection_file.fail() || track_file.fail() || timing_file.fail())
                 throw std::runtime_error(
                     "Benchmark 결과 파일 마무리에 실패했습니다: " + sequence_name);
 

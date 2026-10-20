@@ -6,9 +6,6 @@
 #include <string>
 #include <vector>
 
-#include "common/detection.hpp"
-#include "common/track.hpp"
-
 namespace benchmark_result_writer {
 
 struct DxrtProfilerSample
@@ -22,22 +19,16 @@ struct DxrtProfilerSample
     double host_latency_us = 0.0;
 };
 
-// 사람이 읽기 위한 고정 폭 Detection 표의 헤더와 행을 기록한다.
-void write_detection_summary_header(std::ostream& file);
-void write_detection_summary_rows(
+// CSV 형식을 유지하면서 timing 열의 시작 위치를 맞춰 기록한다.
+void write_timing_header(std::ostream& file);
+void write_timing_row(
     std::ostream& file,
     std::uint64_t frame_id,
-    const std::vector<Detection>& detections);
-
-// 사람이 읽기 위한 고정 폭 Tracking 표의 헤더와 행을 기록한다.
-void write_track_summary_header(std::ostream& file);
-void write_track_summary_rows(
-    std::ostream& file,
-    std::uint64_t frame_id,
-    const std::vector<Track>& tracks);
-
-// 표의 마지막 구분선을 기록한다.
-void write_summary_footer(std::ostream& file);
+    double preprocess_ms,
+    double latency_ms,
+    double npu_processing_ms,
+    double postprocess_ms,
+    double tracking_ms);
 
 // Sequence의 DXRT profiler 통계를 터미널용 표로 기록한다.
 void write_dxrt_profiler_summary(

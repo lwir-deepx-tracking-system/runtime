@@ -352,10 +352,6 @@ if(BUILD_TESTING)
     target_include_directories(test_benchmark_result_writer PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/apps/benchmark
     )
-    target_link_libraries(test_benchmark_result_writer PRIVATE
-        lwir_common
-        ${OpenCV_LIBS}
-    )
     add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
 
     add_executable(
