@@ -1,4 +1,4 @@
-#include "detection/dxapp_detection_pipeline.hpp"
+#include "detection/dxrt_detection_pipeline.hpp"
 
 #include <algorithm>
 #include <condition_variable>
@@ -13,7 +13,7 @@
 
 #include "common/common_util.hpp"
 
-struct DxAppDetectionPipeline::NpuState
+struct DxrtDetectionPipeline::NpuState
 {
   struct Request
   {
@@ -333,23 +333,24 @@ struct DxAppDetectionPipeline::NpuState
   }
 };
 
-DxAppDetectionPipeline::DxAppDetectionPipeline(
+DxrtDetectionPipeline::DxrtDetectionPipeline(
     const ModelConfig     &model_config,
-    const DetectionConfig &detection_config)
-    : preprocessor_(std::make_unique<LwirPreprocessor>(model_config)),
+    const DetectionConfig &detection_config,
+    std::unique_ptr<IPreprocessor> preprocessor,
+    std::unique_ptr<IPostprocessor> postprocessor)
+    : preprocessor_(std::move(preprocessor)), postprocessor_(std::move(postprocessor)),
       npu_(std::make_unique<NpuState>(model_config, detection_config))
 {
-  postprocessor_ =
-      std::make_unique<Postprocessor>(model_config);
+  if (!preprocessor_ || !postprocessor_) throw std::invalid_argument("Detection strategies must not be null");
   npu_->register_callback(postprocessor_.get());
 }
 
-DxAppDetectionPipeline::~DxAppDetectionPipeline()
+DxrtDetectionPipeline::~DxrtDetectionPipeline()
 {
   wait_idle();
 }
 
-void DxAppDetectionPipeline::submit_async(
+void DxrtDetectionPipeline::submit_async(
     const FrameContextPtr &frame,
     Completion            completion)
 {
@@ -375,7 +376,7 @@ void DxAppDetectionPipeline::submit_async(
   }
 }
 
-void DxAppDetectionPipeline::wait_idle()
+void DxrtDetectionPipeline::wait_idle()
 {
   if(npu_)
     npu_->wait_idle();

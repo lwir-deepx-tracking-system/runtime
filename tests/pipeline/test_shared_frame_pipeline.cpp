@@ -6,7 +6,7 @@
 #include "common/detection.hpp"
 #include "common/frame.hpp"
 #include "common/threadsafequeue.hpp"
-#include "detection/dxapp_detection_pipeline.hpp"
+#include "detection/i_detection_pipeline.hpp"
 #include "pipeline/detection_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
 #include "tracking/tracker.hpp"

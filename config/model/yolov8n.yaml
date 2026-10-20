@@ -15,11 +15,13 @@ input:
   height: 640
 
 preprocess:
+  type: lwir_letterbox
   resize: letterbox
   normalize: false
   pad_value: 114
 
 postprocess:
+  type: yolov8
   # auto: DXRT output shape를 검증해 decoded_xywh 또는 split_head를 선택한다.
   output_format: auto
   split_output_levels: 3

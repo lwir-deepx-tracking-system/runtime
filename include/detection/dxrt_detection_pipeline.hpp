@@ -1,18 +1,20 @@
 #pragma once
 
 #include <memory>
+#include <detection/i_preprocessor.hpp>
+#include <detection/i_postprocessor.hpp>
 #include "config/app_config.hpp"
 #include "detection/i_detection_pipeline.hpp"
-#include "detection/lwir_preprocessor.hpp"
-#include "detection/postprocessor.hpp"
 
-class DxAppDetectionPipeline final : public IDetectionPipeline
+class DxrtDetectionPipeline final : public IDetectionPipeline
 {
 public:
-    DxAppDetectionPipeline(
+    DxrtDetectionPipeline(
         const ModelConfig& model_config,
-        const DetectionConfig& detection_config);
-    ~DxAppDetectionPipeline() override;
+        const DetectionConfig& detection_config,
+        std::unique_ptr<IPreprocessor> preprocessor,
+        std::unique_ptr<IPostprocessor> postprocessor);
+    ~DxrtDetectionPipeline() override;
 
     void submit_async(
         const FrameContextPtr& frame,

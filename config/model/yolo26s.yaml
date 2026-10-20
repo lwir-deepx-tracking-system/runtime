@@ -15,11 +15,13 @@ input:
   height: 640
 
 preprocess:
+  type: lwir_letterbox
   resize: letterbox
   normalize: false
   pad_value: 114
 
 postprocess:
+  type: yolo26
   # YOLO26 export에 따라 [1, N, 6], [1, 4+C, N], split-head를 구분한다.
   output_format: auto
   split_output_levels: 3

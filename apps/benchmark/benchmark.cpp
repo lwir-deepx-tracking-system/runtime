@@ -5,7 +5,7 @@
 #include "common/logger.hpp"
 #include "common/track.hpp"
 
-#include "detection/dxapp_detection_pipeline.hpp"
+#include "detection/detector_factory.hpp"
 #include "tracking/bytetrack_tracker.hpp"
 #include "tracking/tracker.hpp"
 
@@ -220,8 +220,7 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
     : config_(load_benchmark_config(config_path)),
       config_path_(config_path)
 {
-    detection_pipeline_ = std::make_unique<DxAppDetectionPipeline>(
-        config_.model, config_.detection);
+    detection_pipeline_ = DetectorFactory::create(config_.model, config_.detection);
 
     tracker_ = std::make_unique<ByteTrackTracker>(
         config_.tracking);
