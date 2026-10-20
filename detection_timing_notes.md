@@ -75,8 +75,10 @@ frame_id,preprocess_ms,latency_ms,npu_processing_ms,postprocess_ms
 Benchmark의 sequence별 timing 파일(확장자는 `.csv`, 내용은 `|` 구분 고정 폭 표):
 
 ```text
-| frame_id | preprocess_ms     | latency_ms        | npu_processing_ms | postprocess_ms    | tracking_ms       |
+| frame_id | preprocess_ms     | latency_ms        | npu_processing_ms | postprocess_ms    | tracking_ms       | total_latency_ms  |
 ```
+
+`total_latency_ms`는 프레임별 `preprocess_ms + latency_ms + postprocess_ms + tracking_ms`의 합이다. `npu_processing_ms`는 `latency_ms`에 포함되므로 별도로 더하지 않는다.
 
 ## 4. Runtime과 Benchmark 차이
 

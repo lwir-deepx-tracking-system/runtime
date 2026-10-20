@@ -11,7 +11,7 @@ namespace {
 
 constexpr int kFrameIdWidth = 8;
 constexpr int kTimingValueWidth = 17;
-constexpr int kTimingColumnCount = 6;
+constexpr int kTimingColumnCount = 7;
 constexpr int kTimingTableWidth =
     kFrameIdWidth + (kTimingColumnCount - 1) * kTimingValueWidth +
     3 * kTimingColumnCount + 1;
@@ -58,6 +58,12 @@ void write_profiler_row(
            << " |\n";
 }
 
+double total_latency_us(const DxrtProfilerSample& sample)
+{
+    return sample.preprocess_us + sample.host_latency_us +
+        sample.postprocess_us + sample.tracking_us;
+}
+
 }  // namespace
 
 void write_timing_header(std::ostream& file)
@@ -70,6 +76,7 @@ void write_timing_header(std::ostream& file)
          << " | " << std::setw(kTimingValueWidth) << "npu_processing_ms"
          << " | " << std::setw(kTimingValueWidth) << "postprocess_ms"
          << " | " << std::setw(kTimingValueWidth) << "tracking_ms"
+         << " | " << std::setw(kTimingValueWidth) << "total_latency_ms"
          << " |\n" << separator << '\n';
 }
 
@@ -89,6 +96,8 @@ void write_timing_row(
          << " | " << std::setw(kTimingValueWidth) << npu_processing_ms
          << " | " << std::setw(kTimingValueWidth) << postprocess_ms
          << " | " << std::setw(kTimingValueWidth) << tracking_ms
+         << " | " << std::setw(kTimingValueWidth)
+         << (preprocess_ms + latency_ms + postprocess_ms + tracking_ms)
          << " |\n";
 }
 
@@ -136,6 +145,8 @@ void write_dxrt_profiler_summary(
         samples, [](const DxrtProfilerSample& s) { return s.output_format_us; }));
     write_profiler_row(output, "NPU Task Total", calculate_statistics(
         samples, [](const DxrtProfilerSample& s) { return s.npu_task_total_us; }));
+    write_profiler_row(output, "Host Latency", calculate_statistics(
+        samples, [](const DxrtProfilerSample& s) { return s.host_latency_us; }));
     output << separator << '\n';
 
     write_profiler_row(output, "Postprocess", calculate_statistics(
@@ -144,8 +155,8 @@ void write_dxrt_profiler_summary(
         samples, [](const DxrtProfilerSample& s) { return s.tracking_us; }));
     output << separator << '\n';
 
-    write_profiler_row(output, "Host Latency", calculate_statistics(
-        samples, [](const DxrtProfilerSample& s) { return s.host_latency_us; }));
+    write_profiler_row(output, "total_latency", calculate_statistics(
+        samples, total_latency_us));
 
     output << separator << '\n';
 }

@@ -51,9 +51,12 @@ int main()
 
     const std::string timing_text = timing.str();
     if (timing_text.find("| frame_id | preprocess_ms") == std::string::npos ||
+        timing_text.find("| total_latency_ms  |") == std::string::npos ||
         timing_text.find("0.125000") == std::string::npos ||
         timing_text.find("7.312184") == std::string::npos ||
         timing_text.find("20534.020000") == std::string::npos ||
+        timing_text.find("|          0.031250 |          8.906250 |") == std::string::npos ||
+        timing_text.find("|          4.000000 |      20654.270000 |") == std::string::npos ||
         !timing_columns_align(timing_text))
     {
         std::cerr << timing_text;
@@ -95,6 +98,7 @@ int main()
     const auto postprocess_position = profiler_text.find("| Postprocess ");
     const auto tracking_position = profiler_text.find("| Tracking ");
     const auto latency_position = profiler_text.find("| Host Latency ");
+    const auto total_position = profiler_text.find("| total_latency ");
     if (profiler_text.find(
             "[Benchmark] DXRT PROFILER SUMMARY: seq_001 (2 frames)") ==
             std::string::npos ||
@@ -103,13 +107,15 @@ int main()
         postprocess_position == std::string::npos ||
         tracking_position == std::string::npos ||
         latency_position == std::string::npos ||
+        total_position == std::string::npos ||
         !(preprocess_position < npu_position &&
-          npu_position < postprocess_position &&
+          npu_position < latency_position &&
+          latency_position < postprocess_position &&
           postprocess_position < tracking_position &&
-          tracking_position < latency_position) ||
+          tracking_position < total_position) ||
         profiler_text.find(separator, preprocess_position) > npu_position ||
-        profiler_text.find(separator, npu_position) > postprocess_position ||
-        profiler_text.find(separator, tracking_position) > latency_position ||
+        profiler_text.find(separator, latency_position) > postprocess_position ||
+        profiler_text.find(separator, tracking_position) > total_position ||
         profiler_text.find("Preprocess (Host)") != std::string::npos ||
         profiler_text.find("Postprocess (Host)") != std::string::npos ||
         profiler_text.find("Tracking (Host)") != std::string::npos ||
@@ -117,7 +123,8 @@ int main()
         profiler_text.find("       8.000") == std::string::npos ||
         profiler_text.find("      12.000") == std::string::npos ||
         profiler_text.find("      10.000") == std::string::npos ||
-        profiler_text.find("      10.000 |       20.000 |       15.000") == std::string::npos)
+        profiler_text.find("      10.000 |       20.000 |       15.000") == std::string::npos ||
+        profiler_text.find("    8430.000 |     8960.000 |     8695.000") == std::string::npos)
     {
         std::cerr << profiler_text;
         return 2;
