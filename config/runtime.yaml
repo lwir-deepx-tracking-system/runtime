@@ -32,6 +32,12 @@ detection:
   # 동시에 처리할 수 있는 최대 inference 요청 수
   max_inflight: 4
 
+  # DXRT 내부 입력·출력 buffer 수. 0이면 DXRT가 자동으로 결정한다.
+  buffer_count: 6
+
+  # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
+  use_ort: false
+
 
 # ============================================================
 # 4. Tracking - ByteTrack

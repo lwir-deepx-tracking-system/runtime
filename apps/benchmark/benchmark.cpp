@@ -1,11 +1,12 @@
 #include "benchmark.hpp"
+#include "result_writer.hpp"
 
 #include "common/detection.hpp"
 #include "common/frame.hpp"
 #include "common/logger.hpp"
 #include "common/track.hpp"
 
-#include "detection/dxapp_detection_pipeline.hpp"
+#include "detection/detector_factory.hpp"
 #include "tracking/bytetrack_tracker.hpp"
 #include "tracking/tracker.hpp"
 
@@ -15,7 +16,9 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -54,6 +57,7 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
     c.model = load_model_config(c.model_config_path);
     c.detection = config_parser::load_detection_config(root["detection"]);
     c.tracking = config_parser::load_tracking_config(root["tracking"]);
+    c.sequence = config_parser::load_benchmark_sequence_config(root["sequence"]);
     c.path = config_parser::load_benchmark_path_config(root["path"]);
 
     Logger::info("[Config] Benchmark Config loaded");
@@ -205,7 +209,7 @@ private:
     BenchmarkConfig config_;
     std::string config_path_;
 
-    std::unique_ptr<DetectionPipeline> detection_pipeline_;
+    std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<Tracker> tracker_;
 
 public:
@@ -218,15 +222,14 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
     : config_(load_benchmark_config(config_path)),
       config_path_(config_path)
 {
-    detection_pipeline_ = std::make_unique<DxAppDetectionPipeline>(
-        config_.model, config_.detection);
+    detection_pipeline_ = DetectorFactory::create(config_.model, config_.detection);
 
     tracker_ = std::make_unique<ByteTrackTracker>(
         config_.tracking);
 }
 
 
-// dataset_root 아래의 모든 Sequence를 순차적으로 처리한다.
+// dataset_root 아래에서 설정 범위에 해당하는 Sequence를 순차적으로 처리한다.
 void BenchmarkApplication::run()
 {
     const fs::path dataset_root = config_.path.dataset_root;
@@ -250,6 +253,25 @@ void BenchmarkApplication::run()
         throw std::runtime_error(
             "Dataset에 처리할 Sequence가 없습니다: " + dataset_root.string());
 
+    if (config_.sequence.range_enabled)
+    {
+        sequence_dirs.erase(
+            std::remove_if(
+                sequence_dirs.begin(),
+                sequence_dirs.end(),
+                [this](const fs::path& sequence_dir)
+                {
+                    const std::string id = sequence_dir.filename().string();
+                    return !config_.sequence.contains(id);
+                }),
+            sequence_dirs.end());
+
+        if (sequence_dirs.empty())
+            throw std::runtime_error(
+                "설정한 범위에 처리할 Sequence가 없습니다: " +
+                config_.sequence.start + " ~ " + config_.sequence.end);
+    }
+
     const fs::path run_dir = create_run_directory(
         output_root, config_.model.name, kTrackerName);
 
@@ -263,6 +285,10 @@ void BenchmarkApplication::run()
             run_dir / fs::path(config_.model_config_path).filename());
 
         Logger::info("[Benchmark] Sequence 수: " + std::to_string(sequence_dirs.size()));
+        if (config_.sequence.range_enabled)
+            Logger::info(
+                "[Benchmark] Sequence 범위: " + config_.sequence.start +
+                " ~ " + config_.sequence.end);
         Logger::info("[Benchmark] 결과 경로: " + run_dir.string());
 
         for (const fs::path& sequence_dir : sequence_dirs)
@@ -323,8 +349,7 @@ void BenchmarkApplication::run()
 
             detection_file << std::fixed << std::setprecision(6);
             track_file << std::fixed << std::setprecision(6);
-            timing_file << std::fixed << std::setprecision(6)
-                        << "frame_id,detection_ms,tracking_ms\n";
+            benchmark_result_writer::write_timing_header(timing_file);
 
             if (!detection_file || !track_file || !timing_file)
                 throw std::runtime_error(
@@ -336,28 +361,73 @@ void BenchmarkApplication::run()
             Logger::info("[Benchmark] Sequence 시작: " + sequence_name);
 
             std::size_t processed_frames = 0;
+            std::vector<benchmark_result_writer::DxrtProfilerSample>
+                profiler_samples;
+            profiler_samples.reserve(frames.size());
 
             for (const auto& frame_entry : frames)
             {
                 const std::uint64_t frame_id = frame_entry.first;
                 const fs::path& image_path = frame_entry.second;
 
-                FrameContext frame;
-                frame.image = cv::imread(image_path.string(), cv::IMREAD_UNCHANGED);
+                auto mutable_frame = std::make_shared<FrameContext>();
+                mutable_frame->image =
+                    cv::imread(image_path.string(), cv::IMREAD_UNCHANGED);
 
-                if (frame.image.empty())
+                if (mutable_frame->image.empty())
                     throw std::runtime_error(
                         "이미지 읽기에 실패했습니다: " + image_path.string());
 
-                frame.metadata.frame_id = frame_id;
+                mutable_frame->metadata.frame_id = frame_id;
+                FrameContextPtr frame = mutable_frame;
 
-                // 파일 I/O를 제외하고 detect() 호출 자체만 측정한다.
-                const auto detection_started_at = std::chrono::steady_clock::now();
-                const std::vector<Detection> detections =
-                    detection_pipeline_->detect(frame);
-                const auto detection_finished_at = std::chrono::steady_clock::now();
-                const double detection_ms = std::chrono::duration<double, std::milli>(
-                    detection_finished_at - detection_started_at).count();
+                // Runtime과 동일한 비동기 Detection 경로를 실행하고 이 프레임의
+                // Completion이 전달하는 결과와 단계별 시간을 기다린다.
+                using DetectionResult =
+                    std::pair<std::vector<Detection>, DetectionTiming>;
+                std::promise<DetectionResult> completion_promise;
+                std::future<DetectionResult> completion_future =
+                    completion_promise.get_future();
+                detection_pipeline_->submit_async(
+                    frame,
+                    [&completion_promise](
+                        std::vector<Detection> completed_detections,
+                        std::exception_ptr error,
+                        DetectionTiming timing)
+                    {
+                        if (error)
+                            completion_promise.set_exception(error);
+                        else
+                            completion_promise.set_value(
+                                DetectionResult{
+                                    std::move(completed_detections), timing});
+                    });
+
+                DetectionResult detection_result = completion_future.get();
+                std::vector<Detection> detections =
+                    std::move(detection_result.first);
+                const DetectionTiming& detection_timing = detection_result.second;
+                if (detection_timing.frame_id != frame_id)
+                    throw std::runtime_error(
+                        "Detection timing Frame ID가 일치하지 않습니다: " +
+                        sequence_name + "/" + std::to_string(frame_id));
+
+                if (!detection_timing.npu_profiler_valid)
+                    throw std::runtime_error(
+                        "DXRT profiler timing이 유효하지 않습니다: " +
+                        sequence_name + "/" + std::to_string(frame_id));
+
+                profiler_samples.push_back({
+                    detection_timing.preprocess_ms() * 1000.0,
+                    detection_timing.npu_input_format_duration_us,
+                    detection_timing.h2d_duration_us,
+                    detection_timing.npu_processing_ms() * 1000.0,
+                    detection_timing.d2h_duration_us,
+                    detection_timing.npu_output_format_duration_us,
+                    detection_timing.npu_task_total_duration_us,
+                    detection_timing.postprocess_ms() * 1000.0,
+                    0.0,
+                    detection_timing.latency_ms() * 1000.0});
 
                 write_detections(detection_file, frame_id, detections);
                 if (!detection_file)
@@ -370,14 +440,21 @@ void BenchmarkApplication::run()
                 const auto tracking_finished_at = std::chrono::steady_clock::now();
                 const double tracking_ms = std::chrono::duration<double, std::milli>(
                     tracking_finished_at - tracking_started_at).count();
+                profiler_samples.back().tracking_us = tracking_ms * 1000.0;
 
                 write_tracks(track_file, frame_id, tracks);
                 if (!track_file)
                     throw std::runtime_error(
                         "Tracking 결과 저장에 실패했습니다: " + sequence_name);
 
-                timing_file << frame_id << ',' << detection_ms << ','
-                            << tracking_ms << '\n';
+                benchmark_result_writer::write_timing_row(
+                    timing_file,
+                    frame_id,
+                    detection_timing.preprocess_ms(),
+                    detection_timing.latency_ms(),
+                    detection_timing.npu_processing_ms(),
+                    detection_timing.postprocess_ms(),
+                    tracking_ms);
                 if (!timing_file)
                     throw std::runtime_error(
                         "Timing 결과 저장에 실패했습니다: " + sequence_name);
@@ -391,6 +468,7 @@ void BenchmarkApplication::run()
             }
 
             // close 시점의 flush 오류까지 확인해 불완전한 파일을 성공 처리하지 않는다.
+            benchmark_result_writer::write_timing_footer(timing_file);
             detection_file.close();
             track_file.close();
             timing_file.close();
@@ -398,6 +476,12 @@ void BenchmarkApplication::run()
             if (detection_file.fail() || track_file.fail() || timing_file.fail())
                 throw std::runtime_error(
                     "Benchmark 결과 파일 마무리에 실패했습니다: " + sequence_name);
+
+            benchmark_result_writer::write_dxrt_profiler_summary(
+                std::cout,
+                sequence_name,
+                processed_frames,
+                profiler_samples);
 
             Logger::info(
                 "[Benchmark] Sequence 완료: " + sequence_name +

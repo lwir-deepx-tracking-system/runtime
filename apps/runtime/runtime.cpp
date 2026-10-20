@@ -5,7 +5,7 @@
 #include "common/detection.hpp"
 #include "common/track.hpp"
 
-#include "detection/dxapp_detection_pipeline.hpp"
+#include "detection/detector_factory.hpp"
 #include "tracking/bytetrack_tracker.hpp"
 
 #include "camera/camera.hpp"
@@ -21,6 +21,7 @@
 #include "pipeline/gui_receiver_thread.hpp"
 #include "pipeline/gui_sender_thread.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <ctime>
@@ -157,7 +158,7 @@ private:
     std::unique_ptr<CameraThread> camera_thread_;
 
     // DX 전처리, 추론, 후처리를 소유하는 통합 Detection 단계
-    std::unique_ptr<DetectionPipeline> detection_pipeline_;
+    std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<DetectionThread> detection_thread_;
 
     // 현재 사용하는 Tracker 객체를 Application이 소유한다.
@@ -228,9 +229,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 
     camera_ = std::make_unique<Camera>();
 
-    // 이 런타임의 고정 조합인 YOLOv8 + DX App pipeline을 생성한다.
-    detection_pipeline_ = std::make_unique<DxAppDetectionPipeline>(
-        config_.model, config_.detection);
+    // model YAML의 전처리·후처리 계약으로 DXRT detection pipeline을 생성한다.
+    detection_pipeline_ = DetectorFactory::create(config_.model, config_.detection);
 
     // AppConfig가 검증한 runtime 설정으로 고정 ByteTrack 구현체를 생성한다.
     tracker_ = std::make_unique<ByteTrackTracker>(config_.tracking);
@@ -263,6 +263,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             measurement_enabled_
         );
 
+    /// TODO: add control enabled
+
     // Tracking 결과와 GUI 선택 ID를 Orange Pi 짐벌 제어 단계에 직접 연결한다.
     control_thread_ =
         std::make_unique<ControlThread>(
@@ -272,6 +274,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             config_.control.enabled,
             measurement_enabled_
         );
+
 
     if (config_.gui.enabled)
     {
@@ -416,6 +419,43 @@ void RuntimeApplication::run()
         metrics_file.close();
         if (metrics_file.fail())
             throw std::runtime_error("metrics.csv 파일을 저장하지 못했습니다");
+
+        // 모든 Detection callback이 끝난 뒤 프레임별 내부 단계 시간을 저장한다.
+        std::vector<DetectionTiming> detection_timings =
+            detection_thread_->detection_timings();
+        std::sort(
+            detection_timings.begin(), detection_timings.end(),
+            [](const DetectionTiming& lhs, const DetectionTiming& rhs)
+            {
+                return lhs.frame_id < rhs.frame_id;
+            });
+
+        std::ofstream detection_timing_file(
+            result_dir / "detection_timing.csv");
+        if (!detection_timing_file)
+            throw std::runtime_error(
+                "detection_timing.csv 파일을 생성하지 못했습니다");
+
+        detection_timing_file
+            << "frame_id,preprocess_ms,latency_ms,"
+               "npu_processing_ms,postprocess_ms\n"
+            << std::fixed << std::setprecision(6);
+        for (const DetectionTiming& timing : detection_timings)
+        {
+            detection_timing_file
+                << timing.frame_id << ','
+                << timing.preprocess_ms() << ','
+                << timing.latency_ms() << ','
+                << timing.npu_processing_ms() << ','
+                << timing.postprocess_ms() << '\n';
+        }
+        if (!detection_timing_file)
+            throw std::runtime_error(
+                "detection_timing.csv 파일 쓰기에 실패했습니다");
+        detection_timing_file.close();
+        if (detection_timing_file.fail())
+            throw std::runtime_error(
+                "detection_timing.csv 파일을 저장하지 못했습니다");
 
         Logger::info("[Measurement] 측정 결과 저장 완료: " + result_dir.string());
     }

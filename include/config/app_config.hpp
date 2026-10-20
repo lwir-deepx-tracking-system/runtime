@@ -17,6 +17,8 @@ struct LoggingConfig {
 
 struct DetectionConfig {
     std::size_t max_inflight = 1;
+    int buffer_count = 0;
+    bool use_ort = false;
 };
 
 struct TrackingConfig {
@@ -132,13 +134,46 @@ struct ModelInputConfig {
 
 // 전처리 방식은 학습·모델 변환 시 사용한 조건과 일치해야 한다.
 struct ModelPreprocessConfig {
+    std::string type;
     std::string resize;
     bool normalize = false;
     int pad_value = 114;
 };
 
-// YOLOv8 결과 필터링과 class label 변환에 사용하는 값.
+// DXNN/ORT가 노출하는 detection output tensor의 계약.
+enum class PostprocessOutputFormat
+{
+    Auto,
+    DecodedXywh,
+    EndToEndXyxy,
+    SplitHead
+};
+
+// split-head class tensor가 logit인지 이미 sigmoid가 적용된 확률인지 구분한다.
+enum class PostprocessScoreActivation
+{
+    None,
+    Sigmoid
+};
+
+// End-to-end output은 기본적으로 NMS를 생략하고 raw output에는 적용할 수 있다.
+enum class PostprocessNmsMode
+{
+    Auto,
+    Enabled,
+    Disabled
+};
+
+// 모델 output decode, 결과 필터링과 class label 변환에 사용하는 값.
 struct ModelPostprocessConfig {
+    std::string type;
+    PostprocessOutputFormat output_format = PostprocessOutputFormat::Auto;
+    int split_output_levels = 3;
+    int split_regression_bins = 16;
+    PostprocessScoreActivation split_class_score_activation =
+        PostprocessScoreActivation::None;
+    PostprocessNmsMode nms_mode = PostprocessNmsMode::Auto;
+    bool class_agnostic_nms = true;
     float confidence_threshold = 0.25F;
     float nms_threshold = 0.45F;
     int num_classes = 0;
@@ -161,6 +196,16 @@ struct BenchmarkPathConfig
 {
     std::string dataset_root;
     std::string output_root;
+};
+
+// Benchmark가 처리할 Sequence ID의 양끝 포함 범위.
+struct BenchmarkSequenceConfig
+{
+    bool range_enabled = false;
+    std::string start;
+    std::string end;
+
+    bool contains(const std::string& sequence_id) const;
 };
 
 
@@ -205,6 +250,7 @@ ControlConfig load_control_config(const YAML::Node& node);
 MeasurementConfig load_measurement_config(const YAML::Node& node);
 GuiConfig load_gui_config(const YAML::Node& node);
 BenchmarkPathConfig load_benchmark_path_config(const YAML::Node& node);
+BenchmarkSequenceConfig load_benchmark_sequence_config(const YAML::Node& node);
 CaptureDatasetConfig load_capture_dataset_config(const YAML::Node& node);
 CaptureSequenceConfig load_capture_sequence_config(const YAML::Node& node);
 CaptureConditionConfig load_capture_condition_config(const YAML::Node& node);

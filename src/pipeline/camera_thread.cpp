@@ -66,7 +66,7 @@ void CameraThread::run()
     {
         if (!camera_.open())
             throw std::runtime_error("카메라를 열지 못했습니다");
-
+        
         std::uint64_t next_frame_id = 1;
         while (!stop_requested_.load())
         {

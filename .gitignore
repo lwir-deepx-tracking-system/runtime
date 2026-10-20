@@ -5,8 +5,8 @@
 /results/
 
 # 컴파일된 모델 파일은 별도로 배포하되 사용 안내는 추적한다.
-/models/*
-!/models/README.md
+# /models/*
+# !/models/README.md
 
 # 개인별 실행 설정. 공용 기준 설정은 /config/*.yaml에 유지한다.
 /config/local/

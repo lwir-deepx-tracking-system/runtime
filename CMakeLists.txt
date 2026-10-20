@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.16)
 
 project(lwir_deepx_tracking_system LANGUAGES CXX)
 
+# PROJECT_ROOT_DIR is consumed by common_util.hpp in several targets.
+add_compile_definitions(PROJECT_ROOT_DIR="${CMAKE_SOURCE_DIR}")
+
 
 # ==============================================================================
 # C++ 빌드 설정
@@ -16,6 +19,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 빌드 옵션
 # ==============================================================================
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LWIR_BUILD_RUNTIME "Build runtime application" ON)
 option(LWIR_BUILD_BENCHMARK "Build benchmark application" ON)
 option(LWIR_BUILD_CAPTURE "Build capture application" ON)
@@ -53,7 +57,7 @@ endif()
 if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
     list(APPEND LWIR_OPENCV_COMPONENTS imgproc)
 endif()
-if(LWIR_BUILD_CAPTURE)
+if(LWIR_BUILD_CAPTURE OR LWIR_BUILD_BENCHMARK)
     list(APPEND LWIR_OPENCV_COMPONENTS imgcodecs)
 endif()
 list(REMOVE_DUPLICATES LWIR_OPENCV_COMPONENTS)
@@ -62,8 +66,11 @@ if(LWIR_OPENCV_COMPONENTS)
     find_package(OpenCV REQUIRED COMPONENTS ${LWIR_OPENCV_COMPONENTS})
 endif()
 
-if(LWIR_NEEDS_RUNTIME_CORE)
+if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
     find_package(Threads REQUIRED)
+endif()
+
+if(LWIR_NEEDS_RUNTIME_CORE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(
         GSTREAMER
@@ -146,7 +153,7 @@ endif()
 if(LWIR_NEEDS_VISION)
     add_library(lwir_vision
         src/detection/lwir_preprocessor.cpp
-        src/detection/dxapp_detection_pipeline.cpp
+        src/detection/dxrt_detection_pipeline.cpp
         src/tracking/bytetrack_tracker.cpp
         src/tracking/kalman_filter.cpp
     )
@@ -160,10 +167,16 @@ if(LWIR_NEEDS_VISION)
     target_link_libraries(lwir_vision
         PUBLIC
             lwir_common
+            Threads::Threads
             ${OpenCV_LIBS}
     )
 
     if(LWIR_ENABLE_DX_APP)
+        target_sources(lwir_vision PRIVATE
+            src/detection/yolo_postprocessor_core.cpp
+            src/detection/yolov8_postprocessor.cpp
+            src/detection/yolo26_postprocessor.cpp
+            src/detection/detector_factory.cpp)
         target_link_libraries(lwir_vision
             PRIVATE
                 dx_app_dependency
@@ -171,6 +184,7 @@ if(LWIR_NEEDS_VISION)
         target_compile_definitions(lwir_vision
             PRIVATE
                 LWIR_ENABLE_DX_APP=1
+                PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
     endif()
 endif()
@@ -246,6 +260,7 @@ if(LWIR_BUILD_BENCHMARK)
     add_executable(lwir_benchmark
         apps/benchmark/main.cpp
         apps/benchmark/benchmark.cpp
+        apps/benchmark/result_writer.cpp
     )
 
     target_link_libraries(lwir_benchmark
@@ -324,6 +339,23 @@ if(BUILD_TESTING)
     add_test(NAME app_config COMMAND test_app_config)
 
     add_executable(
+        test_detection_config
+        tests/app/test_detection_config.cpp
+    )
+    target_link_libraries(test_detection_config PRIVATE lwir_common)
+    add_test(NAME detection_config COMMAND test_detection_config)
+
+    add_executable(
+        test_benchmark_result_writer
+        tests/benchmark/test_result_writer.cpp
+        apps/benchmark/result_writer.cpp
+    )
+    target_include_directories(test_benchmark_result_writer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/benchmark
+    )
+    add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
+
+    add_executable(
         test_gui_protocol
         tests/gui/test_gui_protocol.cpp
     )
@@ -362,6 +394,15 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_detection_thread PRIVATE lwir_runtime_core)
     add_test(NAME detection_thread COMMAND test_detection_thread)
+
+    if(LWIR_ENABLE_DX_APP)
+        add_executable(
+            test_postprocessor
+            tests/detection/test_postprocessor.cpp
+        )
+        target_link_libraries(test_postprocessor PRIVATE lwir_vision)
+        add_test(NAME postprocessor COMMAND test_postprocessor)
+    endif()
 
 
     # --------------------------------------------------------------------------
@@ -426,6 +467,7 @@ if(BUILD_TESTING)
 
     set_tests_properties(
         app_config
+        detection_config
         lwir_preprocessor
         PROPERTIES
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
