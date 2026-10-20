@@ -52,12 +52,9 @@ TRACK_COLORS: tuple[Color, ...] = (
 )
 
 DEFAULT_DATASET_ROOT = Path("/mnt/lwir_data/datasets")
-DEFAULT_BENCHMARK_ROOT = Path(
-    "/mnt/lwir_data/results/benchmark/yolov8n_bytetrack"
-)
-DEFAULT_OUTPUT_ROOT = Path(
-    "/mnt/lwir_data/results/visualization/yolov8n_bytetrack"
-)
+DEFAULT_BENCHMARK_ROOT = Path("/mnt/lwir_data/results/benchmark")
+DEFAULT_OUTPUT_ROOT = Path("/mnt/lwir_data/results/visualization")
+TRACKER_NAME = "bytetrack"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -68,6 +65,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     )
     parser.add_argument("run_id", help="benchmark 실행 ID (예: 20261007_190531)")
+    parser.add_argument(
+        "-m",
+        "--model",
+        required=True,
+        help="model.name 값 (예: yolov8n, yolo26s)",
+    )
     parser.add_argument(
         "-s",
         "--sequence",
@@ -326,14 +329,20 @@ def render_frame(
 
 
 def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
-    if Path(args.run_id).name != args.run_id or Path(args.sequence).name != args.sequence:
-        raise ValueError("run_id와 sequence는 경로가 아닌 디렉터리 이름이어야 합니다")
+    for value, description in (
+        (args.model, "model"),
+        (args.run_id, "run_id"),
+        (args.sequence, "sequence"),
+    ):
+        if value in ("", ".", "..") or Path(value).name != value:
+            raise ValueError(f"{description}은 경로가 아닌 디렉터리 이름이어야 합니다")
 
-    run_dir = args.benchmark_root / args.run_id
+    model_tracker_name = f"{args.model}_{TRACKER_NAME}"
+    run_dir = args.benchmark_root / model_tracker_name / args.run_id
     image_dir = args.dataset_root / args.sequence / "images"
     detection_path = run_dir / "detections" / f"{args.sequence}.txt"
     track_path = run_dir / "tracks" / f"{args.sequence}.txt"
-    output_dir = args.output_root / args.run_id / args.sequence
+    output_dir = args.output_root / model_tracker_name / args.run_id / args.sequence
 
     for path, description in (
         (image_dir, "image 디렉터리"),
