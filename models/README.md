@@ -11,4 +11,6 @@
 - DX compiler 버전
 - 호환 DX-RT 버전
 
-현재 설정이 기대하는 기본 경로는 `models/yolov8n.dxnn`입니다.
+현재 Runtime 설정은 `models/yolov8n.dxnn`, Benchmark 설정은
+`models/best_full_ft_epoch29.dxnn`을 기대합니다. 실제 모델별 입출력과 후처리 계약은
+각각 `config/model/yolov8n.yaml`, `config/model/yolo26s.yaml`에 기록합니다.

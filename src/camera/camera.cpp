@@ -1,74 +1,138 @@
 #include "camera/camera.hpp"
 
-#include <opencv2/core.hpp>
 #include <string>
-#include "common/logger.hpp"
-#include "i3system_TE.h"
 
+#include "common/logger.hpp"
+
+#include <i3system_TE.h>
+#include <i3_types.h>
+
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 Camera::~Camera()
 {
-    close();
+  close();
 }
-
 
 // Camera를 초기화한다.
 bool Camera::open()
 {
-    Logger::info("[Camera] TE-EV1 열기 시도");
 
-    // TE-EV1 열기. devnum_ 은 0으로 고정
-    te_ = i3::OpenTE_A(0);
+  // STEP 1: Scan for connected devices
+  // -----------------------------------------------------------------
+  Logger::info("[Camera] 연결된 카메라 스캔");
 
-    if (!te_)
+  i3::SCANINFO scanDevs[MAX_USB_NUM];
+  int          scanResult = ScanTE(scanDevs);
+
+  int          targetDevIndex = -1;
+  int          targetProdVer  = -1;
+  unsigned int targetCoreID   = 0;
+  std::string  modelName      = "Unknown";
+
+  if(scanResult == 1)
+  {
+    for(int i = 0; i < MAX_USB_NUM; ++i)
     {
-        Logger::error("[Camera] TE-EV1 열기 실패");
-        return false;
-    }
+      if(scanDevs[i].bDevCon == 1)
+      {
+        targetDevIndex = i;
+        targetProdVer  = scanDevs[i].nProdVer;
+        targetCoreID   = scanDevs[i].nCoreID;
 
-    width_ = te_->GetImageWidth();
-    height_ = te_->GetImageHeight();
-    if (width_ <= 0 || height_ <= 0)
-    {
-        Logger::error("[Camera] 유효하지 않은 영상 크기");
-        close();
-        return false;
-    }
+        switch(scanDevs[i].nProdVer)
+        {
+          case I3_TE_EQ1:
+            modelName = "EQ1 (Type A, QVGA)";
+            break;
+          case I3_TE_EV1:
+            modelName = "EV1 (Type A, VGA)";
+            break;
+          case I3_TE_EQ2:
+            modelName = "EQ2 (Type A, QVGA)";
+            break;
+          case I3_TE_EV2:
+            modelName = "EV2 (Type A, VGA)";
+            break;
+          default:
+            modelName = "Type B or Other";
+            break;
+        }
 
-    return true;
+        Logger::error("[Camera] Found Device Index [" + std::to_string(i) + "]: " + modelName + " | Core Serial: " + std::to_string(targetCoreID) + "\n");
+        break; // Select first detected device
+      }
+    }
+  }
+
+  if(targetDevIndex < 0)
+  {
+    Logger::error("[Camera] ScanTE did not detect devices. Falling back to direct-open on Device 0.\n");
+    targetDevIndex = 0;
+    modelName      = "EV1 (Default)";
+  }
+
+  // STEP 2: Connect to the Camera
+  // -----------------------------------------------------------------
+  Logger::info("[Camera] TE-EV1 열기 시도");
+
+  // TE-EV1 열기.
+  te_ = i3::OpenTE_A(targetDevIndex);
+
+  if(!te_)
+  {
+    Logger::error("[Camera] TE-EV1 열기 실패");
+    return false;
+  }
+
+  width_  = te_->GetImageWidth();
+  height_ = te_->GetImageHeight();
+  if(width_ <= 0 || height_ <= 0)
+  {
+    Logger::error("[Camera] 유효하지 않은 영상 크기");
+    close();
+    return false;
+  }
+
+  te_->SetShutterMode(I3_TEMP_SHUTTER);
+  te_->SetShutterTemperature(1);
+
+  te_->ShutterCalibrationOn();
+
+  return true;
 }
 
-
-bool Camera::capture(FrameContext& frame)
+bool Camera::capture(FrameContext &frame)
 {
-    if (!te_ || width_ <= 0 || height_ <= 0)
-        return false;
+  if(!te_ || width_ <= 0 || height_ <= 0)
+    return false;
 
-    // SDK가 애플리케이션 소유 버퍼에 직접 기록하므로 FrameContext가 영상
-    // 수명을 소유한다. 실제 장치 크기로 할당해 버퍼 오버런을 방지한다.
-    frame.image.create(height_, width_, CV_16UC1);
-    auto* buffer = reinterpret_cast<unsigned short*>(frame.image.data);
+  // SDK가 애플리케이션 소유 버퍼에 직접 기록하므로 FrameContext가 영상
+  // 수명을 소유한다. 실제 장치 크기로 할당해 버퍼 오버런을 방지한다.
+  frame.image.create(height_, width_, CV_16UC1);
+  auto *buffer = reinterpret_cast<unsigned short *>(frame.image.data);
 
-    // 학습/전처리의 고정 16-bit 입력 범위를 유지하기 위해 SDK AGC를 끈다.
-    const int receive_result = te_->RecvImage(buffer, true);
-    // Logger::info("[Camera] Frame 결과 " + std::to_string(receive_result));
-    
-    if (receive_result != 1)
-        return false;
+  // 학습/전처리의 고정 16-bit 입력 범위를 유지하기 위해 SDK AGC를 끈다.
+  const int receive_result = te_->RecvImage(buffer, true);
+  // Logger::info("[Camera] Frame 결과 " + std::to_string(receive_result));
 
-    return true;
-}   
+  if(receive_result != 1)
+    return false;
 
+  return true;
+}
 
 // Camera 자원을 해제한다.
 void Camera::close()
 {
-    if (!te_)
-        return;
+  if(!te_)
+    return;
 
-    te_->CloseTE();
-    te_ = nullptr;
-    width_ = 0;
-    height_ = 0;
-    Logger::info("[Camera] 닫기 완료");
+  te_->CloseTE();
+  te_     = nullptr;
+  width_  = 0;
+  height_ = 0;
+  Logger::info("[Camera] 닫기 완료");
 }
