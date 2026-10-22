@@ -428,6 +428,19 @@ void BenchmarkApplication::run()
                     detection_timing.postprocess_ms() * 1000.0,
                     0.0,
                     detection_timing.latency_ms() * 1000.0});
+                for (const auto& device : detection_timing.npu_devices)
+                    profiler_samples.back().npu_devices.push_back({
+                        device.task_name, device.device_id,
+                        device.input_format_us, device.h2d_us,
+                        device.inference_core_all_us,
+                        device.inference_core_0_us,
+                        device.inference_core_1_us,
+                        device.inference_core_2_us,
+                        device.d2h_us, device.output_format_us,
+                        device.total_us});
+                if (detection_timing.cpu_task_valid)
+                    profiler_samples.back().cpu_task_us =
+                        detection_timing.cpu_task_us;
 
                 write_detections(detection_file, frame_id, detections);
                 if (!detection_file)
@@ -477,10 +490,10 @@ void BenchmarkApplication::run()
                 throw std::runtime_error(
                     "Benchmark 결과 파일 마무리에 실패했습니다: " + sequence_name);
 
-            benchmark_result_writer::write_dxrt_profiler_summary(
-                std::cout,
-                sequence_name,
-                processed_frames,
+            const fs::path summary_path = run_dir / "timing" /
+                (sequence_name + "_profiler_summary.txt");
+            benchmark_result_writer::write_dxrt_profiler_summary_outputs(
+                std::cout, summary_path, sequence_name, processed_frames,
                 profiler_samples);
 
             Logger::info(

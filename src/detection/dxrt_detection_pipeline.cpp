@@ -143,6 +143,11 @@ struct DxrtDetectionPipeline::NpuState
     bool   found_npu_metric  = false;
     for(const dxrt::TaskMetrics &task : metrics.tasks)
     {
+      if(task.valid && task.task_name == "cpu_0")
+      {
+        timing.cpu_task_us = task.cpu_task_us;
+        timing.cpu_task_valid = true;
+      }
       for(const auto &device_entry : task.devices)
       {
         const dxrt::NpuDeviceMetrics &device = device_entry.second;
@@ -155,6 +160,12 @@ struct DxrtDetectionPipeline::NpuState
         timing.d2h_duration_us += device.d2h_us;
         timing.npu_output_format_duration_us += device.output_format_us;
         timing.npu_task_total_duration_us += device.total_us;
+        timing.npu_devices.push_back({
+            task.task_name, device_entry.first, device.input_format_us,
+            device.h2d_us, device.inference_core_all_us,
+            device.inference_core_0_us, device.inference_core_1_us,
+            device.inference_core_2_us, device.d2h_us,
+            device.output_format_us, device.total_us});
         found_npu_metric = true;
       }
     }
