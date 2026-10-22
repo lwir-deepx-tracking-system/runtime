@@ -25,6 +25,38 @@ struct TrackingConfig {
     float track_threshold = 0.5F;
     float match_threshold = 0.8F;
     int track_buffer = 30;
+
+    // 아래 값은 runtime/benchmark yaml에서 생략할 수 있다. 생략하면 해당 기능은 꺼진다.
+
+    // ByteTrack 세부 임계값. 생략하면 공식 ByteTrack 값을 쓴다.
+    // 이 점수 이하인 검출은 버린다. low_threshold 초과 ~ track_threshold 미만은 2차 매칭에만 쓴다.
+    float low_threshold = 0.1F;
+    // 새 Track(ID)을 만드는 최소 점수. 0이면 track_threshold + 0.1 (최대 1)
+    float new_track_threshold = 0.0F;
+    // 2차 매칭(남은 Track ↔ low 검출) 허용 거리 (1 - IoU). 0.5면 IoU 0.5 이상
+    float low_match_threshold = 0.5F;
+    // 미확정 Track(직전 프레임에 생긴 Track) ↔ 남은 high 검출 매칭 허용 거리 (1 - IoU). 0.7이면 IoU 0.3 이상
+    float unconfirmed_match_threshold = 0.7F;
+
+    // 1차 매칭과 미확정 Track 매칭 비용에 검출 점수를 곱한다 (cost = 1 - IoU * score).
+    bool fuse_score = false;
+    // NSA Kalman (StrongSORT): Kalman update의 측정 노이즈를 (1 - 검출 점수)배 한다.
+    // 점수가 높은 검출은 더 믿고, 낮은 검출(가려짐 등)은 Track 상태를 덜 흔든다.
+    bool nsa_kalman = false;
+    // Kalman 상태 형식. "xyah": [cx, cy, w/h, h] (공식 ByteTrack, 가로세로비는 거의 고정이라고 가정)
+    //                   "xywh": [cx, cy, w, h] (BoT-SORT, 폭과 높이를 따로 추정해 폭 변화를 빨리 따라감)
+    std::string kalman_format = "xyah";
+    // 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함).
+    int lost_output_frames = 0;
+    // Buffered IoU: 1차 매칭 뒤 남은 Track과 high 검출을 박스를 넓혀 한 번 더 매칭한다.
+    // 각 변을 폭·높이 × buffer_scale만큼 넓힌다 (0: 끔). 매칭 판단에만 쓰고 출력·Kalman에는 쓰지 않는다.
+    float buffer_scale = 0.0F;
+    // 한 변을 넓히는 최대 px (0: 제한 없음)
+    float buffer_max_px = 0.0F;
+    // Track 박스의 짧은 변이 이 px 이하일 때만 Buffered IoU 적용 (0: 크기 무관)
+    float buffer_small_size = 0.0F;
+    // Buffered IoU로만 맞은 Track의 위치를 검출 박스로 맞춘다 (프레임 누락에 유리, 흔들리는 작은 표적에 불리)
+    bool buffer_snap = false;
 };
 
 struct ControlConfig {

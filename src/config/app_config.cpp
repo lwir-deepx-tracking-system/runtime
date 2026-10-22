@@ -18,6 +18,16 @@ T required(const YAML::Node& node, const char* key, const std::string& path)
     }
 }
 
+// 선택 키가 없으면 기본값을 쓴다. 키가 있는데 타입이 맞지 않으면 경로가 포함된 오류를 만든다.
+template <typename T>
+T optional_value(const YAML::Node& node, const char* key, const std::string& path, const T& fallback)
+{
+    if (!node || !node[key]) return fallback;
+    try { return node[key].as<T>(); }
+    catch (const YAML::Exception& e) {
+        throw std::runtime_error("invalid configuration: " + path + "." + key + " (" + e.what() + ")");
+    }
+}
 PostprocessOutputFormat parse_postprocess_output_format(const std::string& value)
 {
     if (value == "auto") return PostprocessOutputFormat::Auto;
@@ -125,12 +135,58 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
     c.track_buffer = required<int>(
         node, "track_buffer", "tracking");
 
+    // 선택 키: 생략하면 기능이 꺼진 기본값(세부 임계값은 공식 ByteTrack 값)을 쓴다.
+    c.low_threshold = optional_value<float>(
+        node, "low_threshold", "tracking", c.low_threshold);
+    c.new_track_threshold = optional_value<float>(
+        node, "new_track_threshold", "tracking", c.new_track_threshold);
+    c.low_match_threshold = optional_value<float>(
+        node, "low_match_threshold", "tracking", c.low_match_threshold);
+    c.unconfirmed_match_threshold = optional_value<float>(
+        node, "unconfirmed_match_threshold", "tracking", c.unconfirmed_match_threshold);
+    c.fuse_score = optional_value<bool>(
+        node, "fuse_score", "tracking", c.fuse_score);
+    c.nsa_kalman = optional_value<bool>(
+        node, "nsa_kalman", "tracking", c.nsa_kalman);
+    c.kalman_format = optional_value<std::string>(
+        node, "kalman_format", "tracking", c.kalman_format);
+    c.lost_output_frames = optional_value<int>(
+        node, "lost_output_frames", "tracking", c.lost_output_frames);
+    c.buffer_scale = optional_value<float>(
+        node, "buffer_scale", "tracking", c.buffer_scale);
+    c.buffer_max_px = optional_value<float>(
+        node, "buffer_max_px", "tracking", c.buffer_max_px);
+    c.buffer_small_size = optional_value<float>(
+        node, "buffer_small_size", "tracking", c.buffer_small_size);
+    c.buffer_snap = optional_value<bool>(
+        node, "buffer_snap", "tracking", c.buffer_snap);
+
     if (c.track_threshold <= 0.0F || c.track_threshold > 1.0F)
         throw std::runtime_error("tracking.track_threshold must be in (0, 1]");
     if (c.match_threshold <= 0.0F || c.match_threshold > 1.0F)
         throw std::runtime_error("tracking.match_threshold must be in (0, 1]");
     if (c.track_buffer <= 0)
         throw std::runtime_error("tracking.track_buffer must be positive");
+    if (c.low_threshold < 0.0F || c.low_threshold >= c.track_threshold)
+        throw std::runtime_error("tracking.low_threshold must be in [0, track_threshold)");
+    if (c.new_track_threshold != 0.0F &&
+        (c.new_track_threshold < c.track_threshold || c.new_track_threshold > 1.0F))
+        throw std::runtime_error(
+            "tracking.new_track_threshold must be 0 (auto) or in [track_threshold, 1]");
+    if (c.low_match_threshold <= 0.0F || c.low_match_threshold > 1.0F)
+        throw std::runtime_error("tracking.low_match_threshold must be in (0, 1]");
+    if (c.unconfirmed_match_threshold <= 0.0F || c.unconfirmed_match_threshold > 1.0F)
+        throw std::runtime_error("tracking.unconfirmed_match_threshold must be in (0, 1]");
+    if (c.lost_output_frames < 0)
+        throw std::runtime_error("tracking.lost_output_frames must not be negative");
+    if (c.kalman_format != "xyah" && c.kalman_format != "xywh")
+        throw std::runtime_error("tracking.kalman_format must be xyah or xywh");
+    if (c.buffer_scale < 0.0F || c.buffer_scale > 2.0F)
+        throw std::runtime_error("tracking.buffer_scale must be in [0, 2]");
+    if (c.buffer_max_px < 0.0F)
+        throw std::runtime_error("tracking.buffer_max_px must not be negative");
+    if (c.buffer_small_size < 0.0F)
+        throw std::runtime_error("tracking.buffer_small_size must not be negative");
     return c;
 }
 
