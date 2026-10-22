@@ -13,7 +13,7 @@ logging:
 
 model:
   # 사용할 모델 설정 파일
-  config: config/model/yolo26s.yaml
+  config: config/model/yolov8n.yaml
 
 
 # ============================================================
@@ -29,7 +29,7 @@ detection:
   buffer_count: 6
 
   # Runtime과 동일하게 ONNX Runtime CPU fallback을 끈다.
-  use_ort: false
+  use_ort: true
 
 
 # ============================================================

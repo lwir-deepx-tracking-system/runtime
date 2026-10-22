@@ -1,6 +1,6 @@
 model:
   name: yolov8n
-  path: models/yolov8n.dxnn
+  path: models/yolov8-n_640x640.dxnn
 
 camera_input:
   opencv_type: CV_16UC1
