@@ -141,10 +141,17 @@ float probability_from_score(
         throw std::runtime_error("Postprocess class score must be finite");
     if (activation == PostprocessScoreActivation::Sigmoid)
         return sigmoid_probability(value);
-    if (value < 0.0F || value > 1.0F)
-        throw std::runtime_error(
-            "Postprocess probability must be in [0, 1] when activation is none");
-    return value;
+    constexpr float epsilon = 1e-5F;
+    if (value < -epsilon || value > 1.0F + epsilon)
+    {
+        std::ostringstream message;
+        message.precision(std::numeric_limits<float>::max_digits10);
+        message << "Postprocess probability must be in [" << -epsilon
+                << ", " << 1.0F + epsilon
+                << "] when activation is none; actual value: " << value;
+        throw std::runtime_error(message.str());
+    }
+    return std::clamp(value, 0.0F, 1.0F);
 }
 
 float split_distance(
