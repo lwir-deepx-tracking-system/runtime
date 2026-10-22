@@ -1,0 +1,73 @@
+# ============================================================
+# 1. 로그 설정
+# ============================================================
+
+logging:
+  # lwir_benchmark 실행 중 출력할 로그 레벨
+  level: info
+
+
+# ============================================================
+# 2. 모델 설정
+# ============================================================
+
+model:
+  # 사용할 모델 설정 파일
+  config: config/model/yolo26s.yaml
+
+
+# ============================================================
+# 3. Detection 설정
+# ============================================================
+
+detection:
+  # 동시에 처리할 수 있는 최대 inference 요청 수
+  # 프레임별 latency 측정을 위해 한 번에 하나씩 처리한다.
+  max_inflight: 1
+
+  # DXRT 내부 입력·출력 buffer 수. 0이면 DXRT가 자동으로 결정한다.
+  buffer_count: 6
+
+  # Runtime과 동일하게 ONNX Runtime CPU fallback을 끈다.
+  use_ort: false
+
+
+# ============================================================
+# 4. Tracking - ByteTrack
+# ============================================================
+
+tracking:
+  # Track으로 사용할 Detection confidence 기준
+  track_threshold: 0.2
+
+  # ByteTrack 매칭 기준
+  match_threshold: 0.3
+
+  # Detection이 일시적으로 사라졌을 때 Track을 유지할 프레임 수
+  track_buffer: 30
+  
+
+# ============================================================
+# 5. Benchmark Sequence 범위
+# ============================================================
+
+sequence:
+  # false이면 dataset_root 아래의 모든 Sequence를 처리한다.
+  # true이면 start부터 end까지 양끝을 포함하여 처리한다.
+  range_enabled: true
+
+  # 숫자 순서와 문자열 정렬 순서가 같도록 seq_001 형식의 zero-padding을 사용한다.
+  start: seq_006
+  end: seq_006
+
+
+# ============================================================
+# 6. Benchmark 경로
+# ============================================================
+
+path:
+  # lwir_capture가 생성한 Sequence들이 저장된 경로
+  dataset_root: /mnt/lwir_data/datasets
+
+  # Detection / Tracking 결과를 저장할 경로
+  output_root: /mnt/lwir_data/results/benchmark

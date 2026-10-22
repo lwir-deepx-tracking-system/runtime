@@ -8,15 +8,6 @@
 # /models/*
 # !/models/README.md
 
-# 개인별 실행 설정. 공용 기준 설정은 /config/*.yaml에 유지한다.
-/config/local/
-
-# 개인별 실행 설정
-/config/benchmark.yaml
-/config/runtime.yaml
-/config/capture.yaml
-/config/model/*.yaml
-
 # 개발자 PC에 종속된 VS Code 설정
 /.vscode/
 
