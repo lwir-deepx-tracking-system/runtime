@@ -108,17 +108,21 @@ gui:
   # ----------------------------------------------------------
   # 6-1. Video
   # Orange Pi -> GUI
-  # H.264 / RTP / UDP
+  # JPEG or H.264 / RTP / UDP
   # ----------------------------------------------------------
 
   video:
     host: 127.0.0.1
     port: 5000
 
-    codec: h264
-    encoder: x264enc
+    # Compare with codec: h264 / encoder: mpph264enc on Orange Pi.
+    # Software encoders (jpegenc/x264enc) are explicit development-only choices.
+    codec: jpeg
+    encoder: mppjpegenc
 
     bitrate_kbps: 3000
+    jpeg_quality: 80
+    keyframe_interval: 30
     fps: 30
     rtp_mtu: 1200
 
@@ -132,7 +136,7 @@ gui:
     enabled: true
 
     host: 127.0.0.1
-    port: 5002
+    port: 5001
 
     max_packet_bytes: 1200
 
@@ -146,6 +150,6 @@ gui:
     enabled: true
 
     bind_address: 0.0.0.0
-    port: 5001
+    port: 5002
 
     receive_timeout_ms: 1000
