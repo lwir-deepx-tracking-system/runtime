@@ -26,6 +26,12 @@ void initialize_gstreamer_once()
     gst_init(nullptr, nullptr);
 }
 
+GstClockTime frame_presentation_time(std::uint64_t frame_index, int fps)
+{
+    return gst_util_uint64_scale(
+        frame_index, GST_SECOND, static_cast<guint64>(fps));
+}
+
 bool initialize_gstreamer()
 {
     const int result = pthread_once(
@@ -235,7 +241,7 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
     // 90kHz RTP clock으로 변환하고 metadata도 같은 index를 기준으로 계산한다.
     const GstClockTime duration = gst_util_uint64_scale_int(
         1, GST_SECOND, video_config_.fps);
-    GST_BUFFER_PTS(buffer) = frame_index_ * duration;
+    GST_BUFFER_PTS(buffer) = frame_presentation_time(frame_index_, video_config_.fps);
     GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
     GST_BUFFER_DURATION(buffer) = duration;
     ++frame_index_;
@@ -317,8 +323,10 @@ bool GuiSender::send_tracking_metadata(
     metadata.frame_id = result.frame->metadata.frame_id;
     // metadata와 RTP 영상을 같은 frame으로 대응시키기 위한 timestamp이다.
     // GStreamer H.264 RTP clock의 90kHz 기준으로 현재 frame index를 변환한다.
+    const GstClockTime frame_pts =
+        frame_presentation_time(frame_index_, video_config_.fps);
     metadata.rtp_timestamp = static_cast<std::uint32_t>(
-        gst_util_uint64_scale(frame_index_, 90000, video_config_.fps));
+        gst_util_uint64_scale(frame_pts, 90000, GST_SECOND));
     metadata.gui_started_us = gui_started_us;
     metadata.width = static_cast<std::uint32_t>(result.frame->image.cols);
     metadata.height = static_cast<std::uint32_t>(result.frame->image.rows);

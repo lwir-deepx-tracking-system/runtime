@@ -186,6 +186,8 @@ if(LWIR_NEEDS_VISION)
                 LWIR_ENABLE_DX_APP=1
                 PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
+    else()
+        target_sources(lwir_vision PRIVATE src/detection/detector_factory_stub.cpp)
     endif()
 endif()
 

@@ -1,5 +1,9 @@
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
+#include <set>
+#include <vector>
 
 #include <arpa/inet.h>
 #include <poll.h>
@@ -41,12 +45,75 @@ int open_udp_receiver(std::uint16_t& port)
     return fd;
 }
 
-bool wait_for_udp(int fd)
+std::uint32_t read_rtp_timestamp(const std::uint8_t* packet)
 {
-    pollfd descriptor{};
-    descriptor.fd = fd;
-    descriptor.events = POLLIN;
-    return ::poll(&descriptor, 1, 2000) > 0;
+    return (static_cast<std::uint32_t>(packet[4]) << 24U) |
+        (static_cast<std::uint32_t>(packet[5]) << 16U) |
+        (static_cast<std::uint32_t>(packet[6]) << 8U) |
+        static_cast<std::uint32_t>(packet[7]);
+}
+
+bool receive_matching_packets(
+    int video_fd,
+    int metadata_fd,
+    std::uint64_t gui_started_us,
+    GuiTrackingMetadata& matched_metadata)
+{
+    std::set<std::uint32_t> video_timestamps;
+    std::vector<GuiTrackingMetadata> metadata_packets;
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(5);
+
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        pollfd descriptors[2]{};
+        descriptors[0].fd = video_fd;
+        descriptors[0].events = POLLIN;
+        descriptors[1].fd = metadata_fd;
+        descriptors[1].events = POLLIN;
+        if (::poll(descriptors, 2, 500) <= 0)
+            continue;
+
+        if (descriptors[0].revents & POLLIN)
+        {
+            std::uint8_t packet[2048]{};
+            const ssize_t size = ::recv(video_fd, packet, sizeof(packet), 0);
+            if (size >= 12 && (packet[0] >> 6U) == 2U &&
+                (packet[1] & 0x7fU) == 96U)
+                video_timestamps.insert(read_rtp_timestamp(packet));
+        }
+
+        if (descriptors[1].revents & POLLIN)
+        {
+            std::uint8_t packet[2048]{};
+            const ssize_t size = ::recv(metadata_fd, packet, sizeof(packet), 0);
+            GuiTrackingMetadata decoded;
+            if (size > 0 && decode_tracking_metadata(
+                    packet, static_cast<std::size_t>(size), decoded))
+                metadata_packets.push_back(decoded);
+        }
+
+        for (const GuiTrackingMetadata& metadata : metadata_packets)
+        {
+            if (metadata.width == 640 && metadata.height == 480 &&
+                metadata.gui_started_us == gui_started_us &&
+                metadata.tracks.empty() &&
+                video_timestamps.count(metadata.rtp_timestamp) != 0)
+            {
+                matched_metadata = metadata;
+                return true;
+            }
+        }
+    }
+    std::fprintf(stderr, "received video timestamps=%zu metadata packets=%zu\n",
+        video_timestamps.size(), metadata_packets.size());
+    for (const std::uint32_t timestamp : video_timestamps)
+        std::fprintf(stderr, "video RTP timestamp=%u\n", timestamp);
+    for (const GuiTrackingMetadata& metadata : metadata_packets)
+        std::fprintf(stderr, "metadata frame=%llu timestamp=%u\n",
+            static_cast<unsigned long long>(metadata.frame_id),
+            metadata.rtp_timestamp);
+    return false;
 }
 }
 
@@ -100,7 +167,9 @@ int main()
         }
     }
 
-    if (!wait_for_udp(video_fd) || !wait_for_udp(metadata_fd))
+    GuiTrackingMetadata decoded;
+    if (!receive_matching_packets(
+            video_fd, metadata_fd, kGuiStartedUs, decoded))
     {
         sender.stop();
         ::close(video_fd);
@@ -108,36 +177,8 @@ int main()
         return 3;
     }
 
-    std::uint8_t video_packet[2048]{};
-    const ssize_t video_size = ::recv(
-        video_fd, video_packet, sizeof(video_packet), 0);
-
-    std::uint8_t metadata_packet[2048]{};
-    const ssize_t metadata_size = ::recv(
-        metadata_fd, metadata_packet, sizeof(metadata_packet), 0);
-
     sender.stop();
     ::close(video_fd);
     ::close(metadata_fd);
-
-    if (video_size < 12 || (video_packet[0] >> 6U) != 2U ||
-        (video_packet[1] & 0x7fU) != 96U)
-        return 4;
-
-    GuiTrackingMetadata decoded;
-    if (metadata_size <= 0 ||
-        !decode_tracking_metadata(
-            metadata_packet, static_cast<std::size_t>(metadata_size), decoded) ||
-        decoded.width != 640 || decoded.height != 480 ||
-        decoded.gui_started_us != kGuiStartedUs ||
-        !decoded.tracks.empty())
-        return 5;
-
-    const std::uint32_t video_rtp_timestamp =
-        (static_cast<std::uint32_t>(video_packet[4]) << 24U) |
-        (static_cast<std::uint32_t>(video_packet[5]) << 16U) |
-        (static_cast<std::uint32_t>(video_packet[6]) << 8U) |
-        static_cast<std::uint32_t>(video_packet[7]);
-    if (decoded.rtp_timestamp != video_rtp_timestamp) return 6;
     return 0;
 }

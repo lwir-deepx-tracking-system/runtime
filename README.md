@@ -64,8 +64,11 @@ LWIR 카메라 프레임을 Benchmark용 데이터셋으로 저장합니다.
 ./scripts/build_runtime.sh
 ./build/runtime/lwir_runtime
 
-# Test
-./scripts/test.sh
+# CPU/unit tests
+./scripts/build_test.sh
+
+# Runtime output integration check (requires LWIR camera and DEEPX NPU)
+./scripts/test_runtime_output.sh
 ```
 
 Runtime과 Benchmark는 DEEPX 환경을 사용합니다. Capture와 Runtime은 실제 LWIR
@@ -178,7 +181,7 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 ## Test
 
 ```bash
-./scripts/test.sh
+./scripts/build_test.sh
 ```
 
 필요하면 생성된 `build/test` 디렉터리에서 특정 CTest만 직접 실행할 수 있습니다.

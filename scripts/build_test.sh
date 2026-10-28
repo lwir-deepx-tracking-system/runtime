@@ -5,7 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_dir="$(cd -- "${script_dir}/.." && pwd)"
 build_dir="${BUILD_DIR:-${project_dir}/build/test}"
 
-cmake -S "${project_dir}" -B "${build_dir}" \
+cmake -G Ninja -S "${project_dir}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Debug \
     -DBUILD_TESTING=ON \
     -DLWIR_BUILD_RUNTIME=OFF \

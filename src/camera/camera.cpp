@@ -61,7 +61,7 @@ bool Camera::open()
             break;
         }
 
-        Logger::error("[Camera] Found Device Index [" + std::to_string(i) + "]: " + modelName + " | Core Serial: " + std::to_string(targetCoreID) + "\n");
+        Logger::info("[Camera] Found Device Index [" + std::to_string(i) + "]: " + modelName + " | Core Serial: " + std::to_string(targetCoreID) + "\n");
         break; // Select first detected device
       }
     }

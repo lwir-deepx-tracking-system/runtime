@@ -230,7 +230,9 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
     camera_ = std::make_unique<Camera>();
 
     // model YAML의 전처리·후처리 계약으로 DXRT detection pipeline을 생성한다.
-    detection_pipeline_ = DetectorFactory::create(config_.model, config_.detection);
+    auto detector_factory = DetectorFactory::for_model(config_.model);
+    detection_pipeline_ = detector_factory->create(
+        config_.model, config_.detection);
 
     // AppConfig가 검증한 runtime 설정으로 고정 ByteTrack 구현체를 생성한다.
     tracker_ = std::make_unique<ByteTrackTracker>(config_.tracking);

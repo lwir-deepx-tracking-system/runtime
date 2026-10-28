@@ -26,7 +26,9 @@ int main()
     if (config.model.input.width != 640 || config.model.input.height != 640) return 5;
 
     // 모델 YAML의 전처리와 output tensor 계약이 typed 설정으로 전달되는지 확인한다.
-    if (config.model.preprocess.pad_value != 114 ||
+    if (config.model.preprocess.type != "lwir_letterbox" ||
+        config.model.postprocess.type != "yolov8" ||
+        config.model.preprocess.pad_value != 114 ||
         config.model.postprocess.output_format != PostprocessOutputFormat::Auto ||
         config.model.postprocess.split_output_levels != 3 ||
         config.model.postprocess.split_regression_bins != 16 ||
@@ -40,6 +42,8 @@ int main()
     // YOLO26은 같은 parser를 사용하되 DFL-free split-head와 NMS auto 계약을 갖는다.
     const ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
     if (yolo26.name != "yolo26s" ||
+        yolo26.preprocess.type != "lwir_letterbox" ||
+        yolo26.postprocess.type != "yolo26" ||
         yolo26.postprocess.output_format != PostprocessOutputFormat::Auto ||
         yolo26.postprocess.split_output_levels != 3 ||
         yolo26.postprocess.split_regression_bins != 1 ||

@@ -222,7 +222,9 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
     : config_(load_benchmark_config(config_path)),
       config_path_(config_path)
 {
-    detection_pipeline_ = DetectorFactory::create(config_.model, config_.detection);
+    auto detector_factory = DetectorFactory::for_model(config_.model);
+    detection_pipeline_ = detector_factory->create(
+        config_.model, config_.detection);
 
     tracker_ = std::make_unique<ByteTrackTracker>(
         config_.tracking);
