@@ -1,4 +1,6 @@
 #include "runtime/runtime.hpp"
+#include <yaml-cpp/yaml.h>
+#include <stdexcept>
 
 // 공용 YAML이 runtime에서 지원하는 Detection 및 LWIR 계약으로 파싱되는지 확인한다.
 int main()
@@ -54,19 +56,37 @@ int main()
     if (config.gui.enabled ||
         config.gui.video.host != "127.0.0.1" ||
         config.gui.video.port != 5000 ||
-        config.gui.video.codec != GuiVideoCodec::H264 ||
-        config.gui.video.encoder != "x264enc" ||
+        config.gui.video.codec != GuiVideoCodec::JPEG ||
+        config.gui.video.encoder != "mppjpegenc" ||
         config.gui.video.bitrate_kbps != 3000 ||
         config.gui.video.fps != 30 ||
         config.gui.video.rtp_mtu != 1200 ||
         !config.gui.metadata.enabled ||
         config.gui.metadata.host != "127.0.0.1" ||
-        config.gui.metadata.port != 5002 ||
+        config.gui.metadata.port != 5001 ||
         config.gui.metadata.max_packet_bytes != 1200 ||
         !config.gui.command.enabled ||
         config.gui.command.bind_address != "0.0.0.0" ||
-        config.gui.command.port != 5001 ||
+        config.gui.command.port != 5002 ||
         config.gui.command.receive_timeout_ms != 1000)
         return 8;
+    auto yaml = YAML::LoadFile("config/runtime.yaml");
+    auto gui = yaml["gui"];
+    if (config.gui.video.jpeg_quality != 80 || config.gui.video.keyframe_interval != 30) return 9;
+    gui["video"]["codec"] = "h264";
+    gui["video"]["encoder"] = "mpph264enc";
+    if (config_parser::load_gui_config(gui).video.codec != GuiVideoCodec::H264) return 10;
+    const auto rejects = [&]() {
+        try { config_parser::load_gui_config(gui); } catch (const std::runtime_error&) { return true; }
+        return false;
+    };
+    gui["video"]["encoder"] = "mppjpegenc";
+    if (!rejects()) return 11;
+    gui["video"]["encoder"] = "mpph264enc";
+    gui["video"]["jpeg_quality"] = 100;
+    if (!rejects()) return 12;
+    gui["video"]["jpeg_quality"] = 80;
+    gui["video"]["keyframe_interval"] = 0;
+    if (!rejects()) return 13;
     return 0;
 }
