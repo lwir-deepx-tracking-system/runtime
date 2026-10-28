@@ -1,6 +1,10 @@
 #pragma once
 
+#include <atomic>
+#include <mutex>
+#include <map>
 #include <cstdint>
+#include <gst/gst.h>
 
 #include <sys/socket.h>
 
@@ -15,7 +19,7 @@ struct _GstElement;
 // 입력:
 //   TrackingResult(frame + tracks)
 // 출력:
-//   1) bbox가 없는 H.264/RTP/UDP 영상
+//   1) bbox가 없는 JPEG or H.264/RTP/UDP 영상
 //   2) frame_id, RTP timestamp, bbox, track_id를 담은 metadata UDP packet
 //
 // 전체 흐름:
@@ -25,6 +29,16 @@ struct _GstElement;
 //
 // 영상과 metadata를 분리해 GUI가 원본 pixel 좌표의 bbox를 직접 그리도록 한다.
 // 이 클래스가 GStreamer pipeline과 metadata socket의 수명을 모두 소유한다.
+struct GuiVideoStats
+{
+    std::uint64_t submitted_frames;
+    std::uint64_t encoded_frames;
+    std::uint64_t preprocessing_ns;
+    std::uint64_t processing_samples;
+    std::uint64_t encode_rtp_ns;
+    std::uint64_t rtp_bytes; // RTP header + payload; excludes UDP/IP/Ethernet headers.
+};
+
 class GuiSender
 {
 private:
@@ -40,6 +54,12 @@ private:
     int frame_width_ = 0;
     int frame_height_ = 0;
     std::uint64_t frame_index_ = 0;
+    std::uint64_t last_report_ns_ = 0;
+    std::atomic<std::uint64_t> submitted_frames_{0}, encoded_frames_{0}, rtp_bytes_{0};
+    std::atomic<std::uint64_t> preprocessing_ns_{0}, processing_samples_{0}, encode_rtp_ns_{0};
+    std::mutex processing_mutex_;
+    std::map<std::uint32_t, std::uint64_t> processing_started_;
+    static GstPadProbeReturn observe_rtp(GstPad*, GstPadProbeInfo*, gpointer);
 
     // bbox metadata용 POSIX UDP socket과 목적지 주소도 GuiSender가 소유한다.
     int metadata_fd_ = -1;
@@ -81,5 +101,7 @@ public:
         std::uint64_t gui_started_us = 0);
 
     // 영상 pipeline과 metadata socket을 함께 닫아 송신 자원을 정리한다.
+    bool finish(); // Send EOS and wait up to five seconds; keeps statistics.
     void stop();
+    GuiVideoStats stats() const;
 };

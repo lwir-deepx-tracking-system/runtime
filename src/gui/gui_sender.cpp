@@ -1,5 +1,6 @@
 #include "gui/gui_sender.hpp"
 
+#include <chrono>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -18,6 +19,12 @@
 #include "gui/gui_protocol.hpp"
 
 namespace {
+std::uint64_t steady_ns()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 // 여러 GuiSender 인스턴스가 생겨도 process 전체의 GStreamer 초기화는 한 번만 한다.
 pthread_once_t g_gstreamer_once = PTHREAD_ONCE_INIT;
 
@@ -76,7 +83,7 @@ GuiSender::~GuiSender()
     stop();
 }
 
-// 첫 유효 frame의 크기와 설정값으로 H.264/RTP 송신 pipeline을 준비한다.
+// 첫 유효 frame의 크기와 설정값으로 JPEG or H.264/RTP 송신 pipeline을 준비한다.
 // 성공하면 이후 frame은 같은 appsrc와 pipeline을 계속 재사용한다.
 bool GuiSender::start_gstreamer_pipeline(int width, int height)
 {
@@ -85,114 +92,88 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
         return width == frame_width_ && height == frame_height_;
     if (!initialize_gstreamer()) return false;
 
-    // GStreamer 영상 경로:
-    //
-    // OpenCV BGR frame
-    //   -> appsrc       : C++ frame을 GStreamer에 입력
-    //   -> queue        : frame 생산과 encoder 처리 속도를 분리
-    //   -> videoconvert : encoder가 받을 수 있는 pixel format으로 변환
-    //   -> x264enc      : H.264 압축
-    //   -> h264parse    : H.264 bitstream과 parameter set 정리
-    //   -> rtph264pay   : H.264 데이터를 RTP packet으로 분할
-    //   -> udpsink      : PC GUI의 video UDP 포트로 송신
+    // BGR appsrc -> bounded queue -> common pixel conversion -> selected encoder
+    // -> RTP payloader -> UDP. H.264 needs parsing; complete JPEG buffers do not.
+    // jpegparse would regenerate timestamps and lose the frame/metadata mapping.
+    const bool jpeg = video_config_.codec == GuiVideoCodec::JPEG;
     GstElement* pipeline = gst_pipeline_new("gui-video-pipeline");
     GstElement* appsrc = gst_element_factory_make("appsrc", "gui-source");
     GstElement* queue = gst_element_factory_make("queue", "latest-frame-queue");
     GstElement* convert = gst_element_factory_make("videoconvert", "gui-convert");
-    GstElement* encoder = gst_element_factory_make(
-        video_config_.encoder.c_str(), "gui-h264-encoder");
-    GstElement* parser = gst_element_factory_make("h264parse", "gui-h264-parser");
-    GstElement* payloader = gst_element_factory_make("rtph264pay", "gui-rtp-payloader");
-    GstElement* sink = gst_element_factory_make("udpsink", "gui-udp-sink");
-
-    if (!pipeline || !appsrc || !queue || !convert || !encoder ||
-        !parser || !payloader || !sink)
+    GstElement* format = gst_element_factory_make("capsfilter", "encoder-format");
+    GstElement* encoder = gst_element_factory_make(video_config_.encoder.c_str(), "gui-encoder");
+    GstElement* parser = gst_element_factory_make(jpeg ? "identity" : "h264parse", "gui-parser");
+    GstElement* payloader = gst_element_factory_make(jpeg ? "rtpjpegpay" : "rtph264pay", "gui-payloader");
+    GstElement* sink = gst_element_factory_make("udpsink", "gui-sink");
+    if (!pipeline || !appsrc || !queue || !convert || !format || !encoder || !parser || !payloader || !sink)
     {
-        Logger::error(
-            "[GuiSender] 필요한 GStreamer element를 생성하지 못했습니다. "
-            "x264/rtp/udp plugin 설치 상태를 확인하세요");
-        if (appsrc) gst_object_unref(appsrc);
-        if (queue) gst_object_unref(queue);
-        if (convert) gst_object_unref(convert);
-        if (encoder) gst_object_unref(encoder);
-        if (parser) gst_object_unref(parser);
-        if (payloader) gst_object_unref(payloader);
-        if (sink) gst_object_unref(sink);
-        if (pipeline) gst_object_unref(pipeline);
+        Logger::error("[GuiSender] Missing GStreamer plugin for encoder " + video_config_.encoder +
+                      "; no automatic software fallback");
+        for (auto* element : {appsrc, queue, convert, format, encoder, parser, payloader, sink, pipeline})
+            if (element) gst_object_unref(element);
         return false;
     }
-
-    // appsrc 입력 계약을 BGR, 고정 크기, 설정 FPS로 명시해 downstream이
-    // OpenCV buffer 형식을 추측하지 않도록 한다.
-    GstCaps* caps = gst_caps_new_simple(
-        "video/x-raw",
-        "format", G_TYPE_STRING, "BGR",
-        "width", G_TYPE_INT, width,
-        "height", G_TYPE_INT, height,
-        "framerate", GST_TYPE_FRACTION, video_config_.fps, 1,
-        nullptr);
-    g_object_set(
-        appsrc,
-        "caps", caps,
-        "is-live", TRUE,
-        "format", GST_FORMAT_TIME,
-        "block", TRUE,
-        nullptr);
+    GstCaps* caps = gst_caps_new_simple("video/x-raw",
+        "format", G_TYPE_STRING, "BGR", "width", G_TYPE_INT, width,
+        "height", G_TYPE_INT, height, "framerate", GST_TYPE_FRACTION, video_config_.fps, 1, nullptr);
+    g_object_set(appsrc, "caps", caps, "is-live", TRUE, "format", GST_FORMAT_TIME,
+                 "block", FALSE, "max-buffers", static_cast<guint64>(1),
+                 "max-bytes", static_cast<guint64>(0), "max-time", static_cast<guint64>(0), nullptr);
+    gst_util_set_object_arg(G_OBJECT(appsrc), "leaky-type", "downstream");
     gst_caps_unref(caps);
-
-    // 실시간 화면은 모든 frame 보존보다 최신 frame 유지가 중요하다.
-    // encoder가 잠시 느려지면 이전 frame을 버려 화면 지연 누적을 막는다.
-    g_object_set(
-        queue,
-        "max-size-buffers", 1U,
-        "max-size-bytes", 0U,
-        "max-size-time", static_cast<guint64>(0),
-        "leaky", 2,
-        nullptr);
-
-    // GUI 표시 지연을 줄이기 위해 재정렬 지연을 없애고 빠른 encode 설정을 쓴다.
-    gst_util_set_object_arg(G_OBJECT(encoder), "tune", "zerolatency");
-    gst_util_set_object_arg(G_OBJECT(encoder), "speed-preset", "ultrafast");
-    g_object_set(
-        encoder,
-        "bitrate", static_cast<guint>(video_config_.bitrate_kbps),
-        "key-int-max", video_config_.fps,
-        "bframes", 0,
-        "byte-stream", TRUE,
-        nullptr);
-
-    // 수신 GUI가 중간에 연결되어도 decoder 설정을 얻을 수 있도록 parameter set을
-    // 반복하고, metadata와 대응할 RTP timestamp 시작 offset은 0으로 고정한다.
-    g_object_set(parser, "config-interval", -1, nullptr);
-    g_object_set(
-        payloader,
-        "config-interval", 1,
-        "pt", 96U,
-        "timestamp-offset", 0U,
-        "mtu", static_cast<guint>(video_config_.rtp_mtu),
-        nullptr);
-    g_object_set(
-        sink,
-        "host", video_config_.host.c_str(),
-        "port", static_cast<gint>(video_config_.port),
-        "sync", FALSE,
-        "async", FALSE,
-        nullptr);
-
-    // element를 하나의 pipeline에 넣고 위에 설명한 순서로 연결한다.
-    gst_bin_add_many(
-        GST_BIN(pipeline), appsrc, queue, convert, encoder, parser,
-        payloader, sink, nullptr);
-    if (!gst_element_link_many(
-            appsrc, queue, convert, encoder, parser, payloader, sink,
-            nullptr))
+    caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING,
+        video_config_.encoder == "jpegenc" || video_config_.encoder == "x264enc" ? "I420" : "NV12", nullptr);
+    g_object_set(format, "caps", caps, nullptr);
+    gst_caps_unref(caps);
+    g_object_set(queue, "max-size-buffers", 1U, "max-size-bytes", 0U,
+                 "max-size-time", static_cast<guint64>(0), "leaky", 2, nullptr);
+    if (jpeg)
+        g_object_set(encoder, video_config_.encoder == "mppjpegenc" ? "q-factor" : "quality",
+                     video_config_.jpeg_quality, nullptr);
+    else if (video_config_.encoder == "mpph264enc")
     {
-        Logger::error("[GuiSender] GStreamer element 연결에 실패했습니다");
+        // Baseline excludes B frames; repeat headers on IDR for late join/recovery.
+        gst_util_set_object_arg(G_OBJECT(encoder), "profile", "baseline");
+        gst_util_set_object_arg(G_OBJECT(encoder), "rc-mode", "cbr");
+        gst_util_set_object_arg(G_OBJECT(encoder), "header-mode", "each-idr");
+        g_object_set(encoder, "bps", static_cast<guint>(video_config_.bitrate_kbps * 1000),
+                     "gop", video_config_.keyframe_interval, nullptr);
+    }
+    else
+    {
+        gst_util_set_object_arg(G_OBJECT(encoder), "tune", "zerolatency");
+        gst_util_set_object_arg(G_OBJECT(encoder), "speed-preset", "ultrafast");
+        g_object_set(encoder, "bitrate", static_cast<guint>(video_config_.bitrate_kbps),
+                     "key-int-max", video_config_.keyframe_interval, "bframes", 0, "byte-stream", TRUE, nullptr);
+    }
+    if (!jpeg)
+    {
+        g_object_set(parser, "config-interval", -1, nullptr);
+        g_object_set(payloader, "config-interval", -1, nullptr);
+    }
+    g_object_set(payloader, "pt", jpeg ? 26U : 96U, "timestamp-offset", 0U,
+                 "mtu", static_cast<guint>(video_config_.rtp_mtu), "perfect-rtptime", FALSE, nullptr);
+    g_object_set(sink, "host", video_config_.host.c_str(), "port", static_cast<gint>(video_config_.port),
+                 "sync", FALSE, "async", FALSE, nullptr);
+    gst_bin_add_many(GST_BIN(pipeline), appsrc, queue, convert, format, encoder, parser, payloader, sink, nullptr);
+    if (!gst_element_link_many(appsrc, queue, convert, format, encoder, parser, payloader, sink, nullptr))
+    {
+        Logger::error("[GuiSender] Cannot link selected codec pipeline");
         gst_object_unref(pipeline);
         return false;
     }
+    preprocessing_ns_ = 0;
+    processing_samples_ = 0;
+    encode_rtp_ns_ = 0;
+    last_report_ns_ = steady_ns();
+    submitted_frames_ = 0;
+    encoded_frames_ = 0;
+    rtp_bytes_ = 0;
+    GstPad* pad = gst_element_get_static_pad(payloader, "src");
+    gst_pad_add_probe(pad, static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST),
+                     &GuiSender::observe_rtp, this, nullptr);
+    gst_object_unref(pad);
 
-    // PLAYING 이후부터 appsrc에 전달한 frame이 비동기로 encode·송신된다.
     if (gst_element_set_state(pipeline, GST_STATE_PLAYING) ==
         GST_STATE_CHANGE_FAILURE)
     {
@@ -235,9 +216,17 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
     // 90kHz RTP clock으로 변환하고 metadata도 같은 index를 기준으로 계산한다.
     const GstClockTime duration = gst_util_uint64_scale_int(
         1, GST_SECOND, video_config_.fps);
-    GST_BUFFER_PTS(buffer) = frame_index_ * duration;
+    // Use the same 90kHz ticks as metadata; round up to avoid 2999/3000 drift.
+    const auto ticks = gst_util_uint64_scale(frame_index_, 90000, video_config_.fps);
+    GST_BUFFER_PTS(buffer) = gst_util_uint64_scale_ceil(ticks, GST_SECOND, 90000);
     GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
     GST_BUFFER_DURATION(buffer) = duration;
+    {
+        std::lock_guard<std::mutex> lock(processing_mutex_);
+        // Bound tracking even when queued inputs are dropped before encoding.
+        if (processing_started_.size() >= 256) processing_started_.clear();
+        processing_started_[static_cast<std::uint32_t>(ticks)] = steady_ns();
+    }
     ++frame_index_;
 
     // push_buffer 호출 뒤 GstBuffer 소유권은 appsrc로 이동한다.
@@ -250,6 +239,7 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
         log_pipeline_error(pipeline_);
         return false;
     }
+    ++submitted_frames_;
     return !log_pipeline_error(pipeline_);
 }
 
@@ -258,7 +248,7 @@ bool GuiSender::open_metadata_socket()
 {
     if (!metadata_config_.enabled || metadata_fd_ >= 0) return true;
 
-    // metadata는 H.264/RTP pipeline과 독립된 UDP datagram 채널이다.
+    // metadata는 JPEG or H.264/RTP pipeline과 독립된 UDP datagram 채널이다.
     // getaddrinfo를 사용해 IPv4/IPv6 어느 주소든 설정값으로 지정할 수 있게 한다.
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
@@ -349,7 +339,6 @@ bool GuiSender::send(
     // 잘못된 frame이나 네트워크 설정은 pipeline 일부를 시작하기 전에 거부한다.
     if (!result.frame || result.frame->image.empty() ||
         result.frame->image.type() != CV_16UC1 || clip_min_ >= clip_max_ ||
-        video_config_.codec != GuiVideoCodec::H264 ||
         video_config_.host.empty() || video_config_.port == 0 ||
         video_config_.fps <= 0)
         return false;
@@ -360,6 +349,7 @@ bool GuiSender::send(
     // 16-bit LWIR 원본을 GUI 표시용 8-bit 영상으로 변환한다. 설정한
     // clip_min~clip_max 범위를 0~255로 매핑하며 원본 frame은 수정하지 않는다.
     // bbox는 영상에 굽지 않고 별도 metadata의 원본 좌표로 GUI가 그린다.
+    const auto preprocess_started = steady_ns();
     const double scale = 255.0 / static_cast<double>(clip_max_ - clip_min_);
     cv::Mat gray8;
     source.convertTo(
@@ -368,12 +358,25 @@ bool GuiSender::send(
 
     cv::Mat display;
     cv::cvtColor(gray8, display, cv::COLOR_GRAY2BGR);
+    preprocessing_ns_.fetch_add(steady_ns() - preprocess_started, std::memory_order_relaxed);
 
     // 영상과 Tracking metadata는 서로 다른 UDP 채널로 전송한다.
-    // Video: BGR -> H.264 -> RTP -> UDP
+    // Video: BGR -> JPEG/H.264 -> RTP -> UDP
     // Metadata: frame_id / RTP timestamp / bbox / track_id -> custom UDP packet
     if (!send_tracking_metadata(result, gui_started_us)) return false;
-    return push_frame_to_gstreamer(display);
+    if (!push_frame_to_gstreamer(display)) return false;
+    const auto now = steady_ns();
+    if (now - last_report_ns_ >= 1000000000ULL)
+    {
+        const auto values = stats();
+        if (values.submitted_frames && values.processing_samples)
+            Logger::info("[GuiSender] average preprocess=" +
+                std::to_string(double(values.preprocessing_ns) / values.submitted_frames / 1e6) +
+                " ms, encode+RTP=" + std::to_string(double(values.encode_rtp_ns) / values.processing_samples / 1e6) +
+                " ms (includes queue and pixel conversion), encoded=" + std::to_string(values.encoded_frames));
+        last_report_ns_ = now;
+    }
+    return true;
 }
 
 // 재호출해도 안전하게 GStreamer와 metadata socket 소유권을 정리한다.
@@ -392,10 +395,70 @@ void GuiSender::stop()
         frame_index_ = 0;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(processing_mutex_);
+        processing_started_.clear();
+    }
     if (metadata_fd_ >= 0)
     {
         ::close(metadata_fd_);
         metadata_fd_ = -1;
         metadata_address_size_ = 0;
     }
+}
+
+GstPadProbeReturn GuiSender::observe_rtp(GstPad*, GstPadProbeInfo* info, gpointer data)
+{
+    auto* self = static_cast<GuiSender*>(data);
+    const auto observe = [self](GstBuffer* buffer) {
+        std::uint8_t header[12]{};
+        if (buffer && gst_buffer_extract(buffer, 0, header, 12) == 12)
+        {
+            self->rtp_bytes_.fetch_add(gst_buffer_get_size(buffer), std::memory_order_relaxed);
+            if (header[1] & 0x80U)
+            {
+                self->encoded_frames_.fetch_add(1, std::memory_order_relaxed);
+                const std::uint32_t timestamp = (std::uint32_t(header[4]) << 24) |
+                    (std::uint32_t(header[5]) << 16) | (std::uint32_t(header[6]) << 8) | header[7];
+                const auto completed = steady_ns();
+                std::lock_guard<std::mutex> lock(self->processing_mutex_);
+                const auto found = self->processing_started_.find(timestamp);
+                if (found != self->processing_started_.end())
+                {
+                    self->encode_rtp_ns_.fetch_add(completed - found->second, std::memory_order_relaxed);
+                    self->processing_samples_.fetch_add(1, std::memory_order_relaxed);
+                    self->processing_started_.erase(found);
+                }
+            }
+        }
+    };
+    if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER)
+        observe(GST_PAD_PROBE_INFO_BUFFER(info));
+    else if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER_LIST)
+    {
+        GstBufferList* list = GST_PAD_PROBE_INFO_BUFFER_LIST(info);
+        for (guint i = 0; i < gst_buffer_list_length(list); ++i) observe(gst_buffer_list_get(list, i));
+    }
+    return GST_PAD_PROBE_OK;
+}
+
+GuiVideoStats GuiSender::stats() const
+{
+    return {submitted_frames_.load(std::memory_order_relaxed), encoded_frames_.load(std::memory_order_relaxed),
+            preprocessing_ns_.load(std::memory_order_relaxed), processing_samples_.load(std::memory_order_relaxed),
+            encode_rtp_ns_.load(std::memory_order_relaxed), rtp_bytes_.load(std::memory_order_relaxed)};
+}
+
+bool GuiSender::finish()
+{
+    if (!pipeline_ || !appsrc_) return false;
+    if (gst_app_src_end_of_stream(appsrc_) != GST_FLOW_OK) return false;
+    GstBus* bus = gst_element_get_bus(pipeline_);
+    GstMessage* message = gst_bus_timed_pop_filtered(bus, 5 * GST_SECOND,
+        static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+    gst_object_unref(bus);
+    const bool ok = message && GST_MESSAGE_TYPE(message) == GST_MESSAGE_EOS;
+    if (message) gst_message_unref(message);
+    if (!ok) Logger::error("[GuiSender] Pipeline failed or timed out while draining");
+    return ok;
 }
