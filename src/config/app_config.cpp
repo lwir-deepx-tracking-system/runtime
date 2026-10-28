@@ -75,7 +75,8 @@ std::string required_string(
 GuiVideoCodec parse_gui_video_codec(const std::string& value)
 {
     if (value == "h264") return GuiVideoCodec::H264;
-    throw std::runtime_error("only gui.video.codec=h264 is currently supported");
+    if (value == "jpeg") return GuiVideoCodec::JPEG;
+    throw std::runtime_error("gui.video.codec must be jpeg or h264");
 }
 
 std::uint16_t parse_port(
@@ -157,7 +158,7 @@ GuiConfig load_gui_config(const YAML::Node& node)
     GuiConfig c{};
     c.enabled = required<bool>(node, "enabled", "gui");
 
-    // 영상 전송 설정: Orange Pi -> GUI 방향의 H.264/RTP/UDP 채널이다.
+    // 영상 전송 설정: Orange Pi -> GUI 방향의 JPEG or H.264/RTP/UDP 채널이다.
     const YAML::Node video = node["video"];
     c.video.host = required<std::string>(video, "host", "gui.video");
     c.video.port = parse_port(video, "port", "gui.video");
@@ -165,15 +166,22 @@ GuiConfig load_gui_config(const YAML::Node& node)
         required<std::string>(video, "codec", "gui.video"));
     c.video.encoder = required<std::string>(video, "encoder", "gui.video");
     c.video.bitrate_kbps = required<int>(video, "bitrate_kbps", "gui.video");
+    c.video.jpeg_quality = video["jpeg_quality"].as<int>(80);
+    c.video.keyframe_interval = video["keyframe_interval"].as<int>(30);
     c.video.fps = required<int>(video, "fps", "gui.video");
     c.video.rtp_mtu = required<int>(video, "rtp_mtu", "gui.video");
     if (c.video.host.empty())
         throw std::runtime_error("gui.video.host must not be empty");
-    if (c.video.encoder != "x264enc")
-        throw std::runtime_error(
-            "only gui.video.encoder=x264enc is currently supported");
-    if (c.video.bitrate_kbps <= 0)
-        throw std::runtime_error("gui.video.bitrate_kbps must be positive");
+    const bool jpeg = c.video.codec == GuiVideoCodec::JPEG;
+    if ((jpeg && c.video.encoder != "mppjpegenc" && c.video.encoder != "jpegenc") ||
+        (!jpeg && c.video.encoder != "mpph264enc" && c.video.encoder != "x264enc"))
+        throw std::runtime_error("gui.video.encoder does not match codec (MPP or explicit software encoder required)");
+    if (c.video.bitrate_kbps <= 0 || c.video.bitrate_kbps > 2147483)
+        throw std::runtime_error("gui.video.bitrate_kbps must be in [1, 2147483]");
+    if (c.video.jpeg_quality < 1 || c.video.jpeg_quality > 99)
+        throw std::runtime_error("gui.video.jpeg_quality must be in [1, 99]");
+    if (c.video.keyframe_interval < 1)
+        throw std::runtime_error("gui.video.keyframe_interval must be positive");
     if (c.video.fps <= 0)
         throw std::runtime_error("gui.video.fps must be positive");
     if (c.video.rtp_mtu < 576 || c.video.rtp_mtu > 65507)

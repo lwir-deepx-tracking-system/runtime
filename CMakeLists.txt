@@ -57,7 +57,7 @@ endif()
 if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
     list(APPEND LWIR_OPENCV_COMPONENTS imgproc)
 endif()
-if(LWIR_BUILD_CAPTURE OR LWIR_BUILD_BENCHMARK)
+if(LWIR_BUILD_CAPTURE OR LWIR_BUILD_BENCHMARK OR LWIR_BUILD_RUNTIME)
     list(APPEND LWIR_OPENCV_COMPONENTS imgcodecs)
 endif()
 list(REMOVE_DUPLICATES LWIR_OPENCV_COMPONENTS)
@@ -76,8 +76,8 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         GSTREAMER
         REQUIRED
         IMPORTED_TARGET
-        gstreamer-1.0>=1.16
-        gstreamer-app-1.0>=1.16
+        gstreamer-1.0>=1.20
+        gstreamer-app-1.0>=1.20
     )
 endif()
 
@@ -236,6 +236,9 @@ endif()
 # ------------------------------------------------------------------------------
 
 if(LWIR_BUILD_RUNTIME)
+    add_executable(lwir_video_send tools/video_send.cpp)
+    target_link_libraries(lwir_video_send PRIVATE lwir_runtime_core)
+
     add_executable(lwir_runtime
         apps/runtime/main.cpp
         apps/runtime/runtime.cpp
@@ -373,7 +376,13 @@ if(BUILD_TESTING)
         tests/gui/test_gui_sender.cpp
     )
     target_link_libraries(test_gui_sender PRIVATE lwir_runtime_core)
-    add_test(NAME gui_sender COMMAND test_gui_sender)
+    add_test(NAME gui_sender COMMAND test_gui_sender x264enc)
+    add_test(NAME gui_sender_jpeg COMMAND test_gui_sender jpegenc)
+    option(LWIR_TEST_MPP "Run Orange Pi MPP hardware encoder tests" OFF)
+    if(LWIR_TEST_MPP)
+        add_test(NAME gui_sender_mpp_jpeg COMMAND test_gui_sender mppjpegenc)
+        add_test(NAME gui_sender_mpp_h264 COMMAND test_gui_sender mpph264enc)
+    endif()
 
 
     # --------------------------------------------------------------------------
