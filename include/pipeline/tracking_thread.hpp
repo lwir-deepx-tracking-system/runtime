@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <pthread.h>
+#include <string>
 #include <vector>
 
 #include "common/detection.hpp"
@@ -17,8 +19,11 @@ private:
     ThreadSafeQueue<DetectionResult>& input_queue_;
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue_;
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue_;
-    pthread_t thread_;
+    pthread_t thread_{};
+    bool started_ = false;
     bool measurement_enabled_;
+    std::atomic<bool> failed_{false};
+    std::string error_message_;
     std::vector<StageMetric> metrics_;
 
     static void* thread_func(void* arg);
@@ -35,5 +40,7 @@ public:
 
     void start();
     void join();
+    bool failed() const { return failed_.load(); }
+    const std::string& error_message() const { return error_message_; }
     const std::vector<StageMetric>& metrics() const { return metrics_; }
 };
