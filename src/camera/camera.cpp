@@ -1,6 +1,8 @@
 #include "camera/camera.hpp"
 
+#include <chrono>
 #include <string>
+#include <thread>
 
 #include "common/logger.hpp"
 
@@ -20,70 +22,72 @@ Camera::~Camera()
 bool Camera::open()
 {
 
-  // STEP 1: Scan for connected devices
+  // STEP 1: Scan for connected devices until one is available.
   // -----------------------------------------------------------------
-  Logger::info("[Camera] 연결된 카메라 스캔");
-
-  i3::SCANINFO scanDevs[MAX_USB_NUM];
-  int          scanResult = ScanTE(scanDevs);
-
   int          targetDevIndex = -1;
   int          targetProdVer  = -1;
   unsigned int targetCoreID   = 0;
   std::string  modelName      = "Unknown";
 
-  if(scanResult == 1)
+  while(targetDevIndex < 0)
   {
-    for(int i = 0; i < MAX_USB_NUM; ++i)
+    Logger::info("[Camera] 연결된 카메라 스캔");
+
+    i3::SCANINFO scanDevs[MAX_USB_NUM];
+    int scanResult = ScanTE(scanDevs);
+
+    if(scanResult == 1)
     {
-      if(scanDevs[i].bDevCon == 1)
+      for(int i = 0; i < MAX_USB_NUM; ++i)
       {
-        targetDevIndex = i;
-        targetProdVer  = scanDevs[i].nProdVer;
-        targetCoreID   = scanDevs[i].nCoreID;
-
-        switch(scanDevs[i].nProdVer)
+        if(scanDevs[i].bDevCon == 1)
         {
-          case I3_TE_EQ1:
-            modelName = "EQ1 (Type A, QVGA)";
-            break;
-          case I3_TE_EV1:
-            modelName = "EV1 (Type A, VGA)";
-            break;
-          case I3_TE_EQ2:
-            modelName = "EQ2 (Type A, QVGA)";
-            break;
-          case I3_TE_EV2:
-            modelName = "EV2 (Type A, VGA)";
-            break;
-          default:
-            modelName = "Type B or Other";
-            break;
-        }
+          targetDevIndex = i;
+          targetProdVer  = scanDevs[i].nProdVer;
+          targetCoreID   = scanDevs[i].nCoreID;
 
-        Logger::info("[Camera] Found Device Index [" + std::to_string(i) + "]: " + modelName + " | Core Serial: " + std::to_string(targetCoreID) + "\n");
-        break; // Select first detected device
+          switch(scanDevs[i].nProdVer)
+          {
+            case I3_TE_EQ1:
+              modelName = "EQ1 (Type A, QVGA)";
+              break;
+            case I3_TE_EV1:
+              modelName = "EV1 (Type A, VGA)";
+              break;
+            case I3_TE_EQ2:
+              modelName = "EQ2 (Type A, QVGA)";
+              break;
+            case I3_TE_EV2:
+              modelName = "EV2 (Type A, VGA)";
+              break;
+            default:
+              modelName = "Type B or Other";
+              break;
+          }
+
+          Logger::info("[Camera] Found Device Index [" + std::to_string(i) + "]: " + modelName + " | Core Serial: " + std::to_string(targetCoreID) + "\n");
+          break; // Select first detected device
+        }
       }
     }
-  }
 
-  if(targetDevIndex < 0)
-  {
-    Logger::error("[Camera] ScanTE did not detect devices. Falling back to direct-open on Device 0.\n");
-    targetDevIndex = 0;
-    modelName      = "EV1 (Default)";
+    if(targetDevIndex < 0)
+    {
+      Logger::info("[Camera] 카메라를 찾지 못했습니다. 1초 후 다시 스캔합니다.");
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
   }
 
   // STEP 2: Connect to the Camera
   // -----------------------------------------------------------------
-  Logger::info("[Camera] TE-EV1 열기 시도");
+  Logger::info("[Camera] TE-" + modelName + " 열기 시도");
 
   // TE-EV1 열기.
   te_ = i3::OpenTE_A(targetDevIndex);
 
   if(!te_)
   {
-    Logger::error("[Camera] TE-EV1 열기 실패");
+    Logger::error("[Camera] TE-" + modelName + " 열기 실패");
     return false;
   }
 
