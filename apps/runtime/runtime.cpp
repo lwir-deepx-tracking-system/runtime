@@ -22,6 +22,9 @@
 #include "pipeline/gui_sender_thread.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <mutex>
 #include <chrono>
 #include <csignal>
 #include <ctime>
@@ -42,6 +45,20 @@ namespace fs = std::filesystem;
 namespace {
 volatile std::sig_atomic_t g_stop_requested = 0;
 constexpr const char* kTrackerName = "bytetrack";
+
+enum class RuntimeState
+{
+    Running,
+    Switching,
+    SwitchFailed
+};
+
+struct ModelChangeRequest
+{
+    std::uint64_t request_id = 0;
+    std::string config_path;
+    ModelConfig model;
+};
 
 void handle_sigint(int)
 {
@@ -149,6 +166,10 @@ private:
     std::string config_path_;
     std::string runtime_mode_;
     bool measurement_enabled_ = false;
+    std::atomic<RuntimeState> runtime_state_{RuntimeState::Running};
+    std::mutex model_change_mutex_;
+    std::uint64_t next_model_request_id_ = 1;
+    ThreadSafeQueue<ModelChangeRequest> model_change_requests_;
 
 /************************************************************************/
     // Camera 객체
@@ -186,6 +207,8 @@ public:
     explicit RuntimeApplication(const std::string& config_path);
 
     // Pipeline Worker 실행
+    bool request_model_change(const std::string& model_config_path);
+    RuntimeState runtime_state() const { return runtime_state_.load(); }
     void run();
 };
 
@@ -298,6 +321,37 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 }
 
 // Pipeline Worker를 실행한다.
+bool RuntimeApplication::request_model_change(
+    const std::string& model_config_path)
+{
+    if (model_config_path.empty())
+        throw std::invalid_argument("model config path must not be empty");
+
+    ModelConfig model = load_model_config(model_config_path);
+    auto factory = DetectorFactory::for_model(model);
+    if (!factory)
+        throw std::runtime_error("Unsupported model configuration");
+
+    std::lock_guard<std::mutex> lock(model_change_mutex_);
+    if (runtime_state_.load() != RuntimeState::Running)
+        return false;
+
+    ModelChangeRequest request;
+    request.request_id = next_model_request_id_++;
+    request.config_path = model_config_path;
+    request.model = std::move(model);
+
+    runtime_state_.store(RuntimeState::Switching);
+    if (!model_change_requests_.push(std::move(request)))
+    {
+        runtime_state_.store(RuntimeState::Running);
+        return false;
+    }
+
+    Logger::info("[Runtime] 모델 변경 요청 수락됨");
+    return true;
+}
+
 void RuntimeApplication::run()
 {
     fs::path result_dir;
@@ -311,6 +365,7 @@ void RuntimeApplication::run()
         detection_queue_.close();
         control_track_queue_.close();
         gui_track_queue_.close();
+        model_change_requests_.close();
         if (gui_receiver_thread_)
             gui_receiver_thread_->stop();
     };
