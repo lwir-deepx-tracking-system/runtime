@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -32,6 +33,8 @@ struct TrackingResult
     FrameContextPtr frame;
     std::vector<Track> tracks;
     std::chrono::steady_clock::time_point enqueued_at{};
+    std::uint64_t model_generation = 0;
+    bool bypass = false;
 };
 
 // GUI 경로와 제어 경로가 같은 결과를 복사 없이 공유한다.

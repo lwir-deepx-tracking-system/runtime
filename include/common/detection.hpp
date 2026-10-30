@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -24,4 +25,5 @@ struct DetectionResult
     FrameContextPtr frame;
     std::vector<Detection> detections;
     std::chrono::steady_clock::time_point enqueued_at{};
+    std::uint64_t model_generation = 0;
 };

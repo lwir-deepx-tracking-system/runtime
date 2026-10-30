@@ -46,20 +46,6 @@ namespace {
 volatile std::sig_atomic_t g_stop_requested = 0;
 constexpr const char* kTrackerName = "bytetrack";
 
-enum class RuntimeState
-{
-    Running,
-    Switching,
-    SwitchFailed
-};
-
-struct ModelChangeRequest
-{
-    std::uint64_t request_id = 0;
-    std::string config_path;
-    ModelConfig model;
-};
-
 void handle_sigint(int)
 {
     g_stop_requested = 1;
@@ -111,6 +97,46 @@ RuntimeConfig load_runtime_config(const std::string& path)
     if (c.model_config_path.empty())
         throw std::runtime_error("model.config must not be empty");
     c.model = load_model_config(c.model_config_path);
+
+    const YAML::Node model_catalog = root["model_catalog"];
+    if (model_catalog && !model_catalog.IsSequence())
+        throw std::runtime_error("model_catalog must be a sequence");
+    if (model_catalog)
+    {
+        for (const YAML::Node& item : model_catalog)
+        {
+            ModelCatalogEntry entry;
+            entry.id = item["id"].as<int>();
+            entry.config_path = config_parser::required_string(
+                item, "config", "model_catalog");
+            if (entry.id <= 0 || entry.config_path.empty())
+                throw std::runtime_error(
+                    "model_catalog entries need a positive id and config path");
+            entry.model = load_model_config(entry.config_path);
+            if (!c.model_catalog.emplace(entry.id, std::move(entry)).second)
+                throw std::runtime_error("Duplicate model_catalog id");
+        }
+    }
+    if (c.model_catalog.empty())
+    {
+        ModelCatalogEntry entry;
+        entry.id = 1;
+        entry.config_path = c.model_config_path;
+        entry.model = c.model;
+        c.model_catalog.emplace(entry.id, std::move(entry));
+    }
+
+    const std::string active_config =
+        fs::path(c.model_config_path).lexically_normal().string();
+    for (const auto& item : c.model_catalog)
+    {
+        if (fs::path(item.second.config_path).lexically_normal().string() ==
+            active_config)
+            c.initial_model_id = item.first;
+    }
+    if (c.initial_model_id == 0)
+        throw std::runtime_error(
+            "model.config must be listed in model_catalog");
 
     c.detection = config_parser::load_detection_config(root["detection"]);
     c.tracking = config_parser::load_tracking_config(root["tracking"]);
@@ -166,7 +192,8 @@ private:
     std::string config_path_;
     std::string runtime_mode_;
     bool measurement_enabled_ = false;
-    std::atomic<RuntimeState> runtime_state_{RuntimeState::Running};
+    RuntimeControl runtime_control_;
+    ActivePipelineSlot active_pipeline_;
     std::mutex model_change_mutex_;
     std::uint64_t next_model_request_id_ = 1;
     ThreadSafeQueue<ModelChangeRequest> model_change_requests_;
@@ -178,8 +205,8 @@ private:
     // Camera pthread
     std::unique_ptr<CameraThread> camera_thread_;
 
-    // DX 전처리, 추론, 후처리를 소유하는 통합 Detection 단계
-    std::unique_ptr<IDetectionPipeline> detection_pipeline_;
+    // ModelManager owns model lifecycle; DetectionThread only borrows a snapshot.
+    std::unique_ptr<ModelManagerThread> model_manager_thread_;
     std::unique_ptr<DetectionThread> detection_thread_;
 
     // 현재 사용하는 Tracker 객체를 Application이 소유한다.
@@ -207,8 +234,7 @@ public:
     explicit RuntimeApplication(const std::string& config_path);
 
     // Pipeline Worker 실행
-    bool request_model_change(const std::string& model_config_path);
-    RuntimeState runtime_state() const { return runtime_state_.load(); }
+    bool request_model_change(int model_id);
     void run();
 };
 
@@ -252,10 +278,12 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 
     camera_ = std::make_unique<Camera>();
 
-    // model YAML의 전처리·후처리 계약으로 DXRT detection pipeline을 생성한다.
-    auto detector_factory = DetectorFactory::for_model(config_.model);
-    detection_pipeline_ = detector_factory->create(
-        config_.model, config_.detection);
+    model_manager_thread_ = std::make_unique<ModelManagerThread>(
+        config_.model_catalog.at(config_.initial_model_id),
+        config_.detection,
+        model_change_requests_,
+        active_pipeline_,
+        runtime_control_);
 
     // AppConfig가 검증한 runtime 설정으로 고정 ByteTrack 구현체를 생성한다.
     tracker_ = std::make_unique<ByteTrackTracker>(config_.tracking);
@@ -272,9 +300,12 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 
     detection_thread_ =
         std::make_unique<DetectionThread>(
-            *detection_pipeline_,
+            runtime_control_,
+            active_pipeline_,
             frame_queue_,
             detection_queue_,
+            gui_track_queue_,
+            config_.gui.enabled,
             measurement_enabled_
         );
     
@@ -282,6 +313,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
     tracking_thread_ =
         std::make_unique<TrackingThread>(
             *tracker_,
+            runtime_control_,
             detection_queue_,
             control_track_queue_,
             gui_track_queue_,
@@ -309,46 +341,53 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             config_.model.camera_input.clip_min,
             config_.model.camera_input.clip_max);
         gui_sender_thread_ = std::make_unique<GuiSenderThread>(
-            *gui_sender_, gui_track_queue_);
+            *gui_sender_, runtime_control_, gui_track_queue_);
 
         if (config_.gui.command.enabled)
         {
             gui_receiver_ = std::make_unique<GuiReceiver>(config_.gui.command);
             gui_receiver_thread_ = std::make_unique<GuiReceiverThread>(
-                *gui_receiver_, target_selector_);
+                *gui_receiver_, target_selector_,
+                [this](int model_id) { request_model_change(model_id); });
         }
     }
 }
 
 // Pipeline Worker를 실행한다.
-bool RuntimeApplication::request_model_change(
-    const std::string& model_config_path)
+bool RuntimeApplication::request_model_change(int model_id)
 {
-    if (model_config_path.empty())
-        throw std::invalid_argument("model config path must not be empty");
-
-    ModelConfig model = load_model_config(model_config_path);
-    auto factory = DetectorFactory::for_model(model);
-    if (!factory)
-        throw std::runtime_error("Unsupported model configuration");
-
-    std::lock_guard<std::mutex> lock(model_change_mutex_);
-    if (runtime_state_.load() != RuntimeState::Running)
-        return false;
-
-    ModelChangeRequest request;
-    request.request_id = next_model_request_id_++;
-    request.config_path = model_config_path;
-    request.model = std::move(model);
-
-    runtime_state_.store(RuntimeState::Switching);
-    if (!model_change_requests_.push(std::move(request)))
+    const auto model = config_.model_catalog.find(model_id);
+    if (model == config_.model_catalog.end())
     {
-        runtime_state_.store(RuntimeState::Running);
+        Logger::error("[Runtime] rejected unknown model id=" +
+            std::to_string(model_id));
         return false;
     }
 
-    Logger::info("[Runtime] 모델 변경 요청 수락됨");
+    std::lock_guard<std::mutex> lock(model_change_mutex_);
+    const RuntimeState state = runtime_control_.state.load();
+    if (state != RuntimeState::Running &&
+        state != RuntimeState::SwitchFailed)
+        return false;
+    if (state == RuntimeState::Running &&
+        model_manager_thread_ &&
+        model_manager_thread_->active_model_id() == model_id)
+        return true;
+
+    ModelChangeRequest request;
+    request.request_id = next_model_request_id_++;
+    request.entry = model->second;
+
+    runtime_control_.set_detection_quiesced(false);
+    runtime_control_.state.store(RuntimeState::Switching);
+    if (!model_change_requests_.push(std::move(request)))
+    {
+        runtime_control_.state.store(state);
+        return false;
+    }
+
+    Logger::info("[Runtime] model change requested id=" +
+        std::to_string(model_id));
     return true;
 }
 
@@ -360,11 +399,9 @@ void RuntimeApplication::run()
         throw std::runtime_error("SIGINT handler 등록에 실패했습니다");
 
     auto stop_pipeline = [this]() {
+        runtime_control_.request_stop();
         camera_thread_->request_stop();
         frame_queue_.close();
-        detection_queue_.close();
-        control_track_queue_.close();
-        gui_track_queue_.close();
         model_change_requests_.close();
         if (gui_receiver_thread_)
             gui_receiver_thread_->stop();
@@ -373,6 +410,7 @@ void RuntimeApplication::run()
     auto join_workers = [this]() {
         camera_thread_->join();
         detection_thread_->join();
+        if (model_manager_thread_) model_manager_thread_->join();
         tracking_thread_->join();
         if (gui_sender_thread_) gui_sender_thread_->join();
         control_thread_->join();
@@ -400,6 +438,9 @@ void RuntimeApplication::run()
                 result_dir / fs::path(config_.model_config_path).filename());
         }
 
+        model_manager_thread_->start();
+        model_manager_thread_->wait_until_initialized();
+
         // 수신·소비 worker를 먼저 대기시키고 Camera producer를 마지막에 시작한다.
         if (gui_receiver_thread_) gui_receiver_thread_->start();
         if (gui_sender_thread_) gui_sender_thread_->start();
@@ -412,6 +453,7 @@ void RuntimeApplication::run()
         while (!camera_thread_->finished())
         {
             const bool worker_failed = detection_thread_->failed() ||
+                (model_manager_thread_ && model_manager_thread_->failed()) ||
                 tracking_thread_->failed() || control_thread_->failed() ||
                 (gui_sender_thread_ && gui_sender_thread_->failed()) ||
                 (gui_receiver_thread_ && gui_receiver_thread_->failed());

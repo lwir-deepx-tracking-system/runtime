@@ -4,18 +4,22 @@
 #include <pthread.h>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 #include "common/detection.hpp"
 #include "common/track.hpp"
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
 #include "tracking/tracker.hpp"
+#include "pipeline/runtime_control.hpp"
 
 // Detection을 Tracking하고 같은 결과를 GUI와 제어 경로에 분기한다.
 class TrackingThread
 {
 private:
     Tracker& tracker_;
+    RuntimeControl& runtime_control_;
+    std::uint64_t tracker_generation_ = ~std::uint64_t{0};
     ThreadSafeQueue<DetectionResult>& input_queue_;
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue_;
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue_;
@@ -32,6 +36,7 @@ private:
 public:
     TrackingThread(
         Tracker& tracker,
+        RuntimeControl& runtime_control,
         ThreadSafeQueue<DetectionResult>& input_queue,
         ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
         ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,

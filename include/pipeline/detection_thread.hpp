@@ -9,18 +9,23 @@
 #include <vector>
 
 #include "common/detection.hpp"
+#include "common/track.hpp"
 #include "common/detection_timing.hpp"
 #include "common/frame.hpp"
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
-#include "detection/i_detection_pipeline.hpp"
+#include "pipeline/model_manager_thread.hpp"
+#include "pipeline/runtime_control.hpp"
 
 class DetectionThread
 {
 private:
-    IDetectionPipeline& pipeline_;
+    RuntimeControl& runtime_control_;
+    ActivePipelineSlot& active_pipeline_;
     ThreadSafeQueue<FrameMessage>& input_queue_;
     ThreadSafeQueue<DetectionResult>& output_queue_;
+    ThreadSafeQueue<TrackingResultPtr>& gui_output_queue_;
+    bool gui_enabled_;
     pthread_t thread_{};
     bool started_ = false;
     bool measurement_enabled_;
@@ -41,9 +46,12 @@ private:
 
 public:
     DetectionThread(
-        IDetectionPipeline& pipeline,
+        RuntimeControl& runtime_control,
+        ActivePipelineSlot& active_pipeline,
         ThreadSafeQueue<FrameMessage>& input_queue,
         ThreadSafeQueue<DetectionResult>& output_queue,
+        ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
+        bool gui_enabled,
         bool measurement_enabled);
 
     void start();

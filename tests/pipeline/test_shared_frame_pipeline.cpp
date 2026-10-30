@@ -63,12 +63,27 @@ int main()
     ThreadSafeQueue<TrackingResultPtr> control_queue;
     ThreadSafeQueue<TrackingResultPtr> gui_queue;
 
-    FakeDetectionPipeline detector;
+    RuntimeControl runtime_control;
+    runtime_control.state.store(RuntimeState::Running);
+    ActivePipelineSlot active_pipeline;
+    active_pipeline.set(std::make_shared<FakeDetectionPipeline>());
+
     FakeTracker tracker;
     DetectionThread detection_thread(
-        detector, frame_queue, detection_queue, false);
+        runtime_control,
+        active_pipeline,
+        frame_queue,
+        detection_queue,
+        gui_queue,
+        false,
+        false);
     TrackingThread tracking_thread(
-        tracker, detection_queue, control_queue, gui_queue, false);
+        tracker,
+        runtime_control,
+        detection_queue,
+        control_queue,
+        gui_queue,
+        false);
 
     tracking_thread.start();
     detection_thread.start();

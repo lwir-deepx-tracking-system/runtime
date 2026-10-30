@@ -23,6 +23,13 @@ measurement:
 model:
   config: config/model/yolov8n.yaml
 
+# Models that the GUI may select by numeric ID.
+model_catalog:
+  - id: 1
+    config: config/model/yolov8n.yaml
+  - id: 2
+    config: config/model/yolo26s.yaml
+
 
 # ============================================================
 # 3. Detection

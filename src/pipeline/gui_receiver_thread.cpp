@@ -2,13 +2,17 @@
 
 #include <exception>
 #include <stdexcept>
+#include <utility>
 
 #include "common/logger.hpp"
 
 GuiReceiverThread::GuiReceiverThread(
     GuiReceiver& receiver,
-    TargetSelector& target_selector)
-    : receiver_(receiver), target_selector_(target_selector)
+    TargetSelector& target_selector,
+    std::function<void(int)> model_change_handler)
+    : receiver_(receiver),
+      target_selector_(target_selector),
+      model_change_handler_(std::move(model_change_handler))
 {
 }
 
@@ -57,6 +61,9 @@ void GuiReceiverThread::run()
         {
             if (command.type == GuiCommandType::SelectTrack)
                 target_selector_.set_selected_id(command.track_id);
+            else if (command.type == GuiCommandType::ChangeModel &&
+                     model_change_handler_)
+                model_change_handler_(command.model_id);
         }
 
         if (!receiver_.stop_requested())

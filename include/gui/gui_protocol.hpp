@@ -34,7 +34,8 @@ constexpr std::size_t kGuiTrackMetadataSize = 28U;
 
 enum class GuiCommandType : std::uint16_t
 {
-    SelectTrack = 1
+    SelectTrack = 1,
+    ChangeModel = 2
 };
 
 enum class GuiMetadataType : std::uint16_t
@@ -48,6 +49,7 @@ struct GuiCommand
 
     // -1은 선택 해제, 0 이상은 Tracker가 부여한 ID이다.
     int track_id = -1;
+    int model_id = 0;
 };
 
 // 영상과 별도 UDP 채널로 전송되는 한 frame의 추적 정보이다. GUI는

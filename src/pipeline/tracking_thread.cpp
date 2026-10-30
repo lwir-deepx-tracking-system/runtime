@@ -10,11 +10,13 @@
 // Tracker와 입출력 queue를 Tracking worker에 연결한다.
 TrackingThread::TrackingThread(
     Tracker& tracker,
+    RuntimeControl& runtime_control,
     ThreadSafeQueue<DetectionResult>& input_queue,
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
     bool measurement_enabled)
     : tracker_(tracker),
+      runtime_control_(runtime_control),
       input_queue_(input_queue),
       control_output_queue_(control_output_queue),
       gui_output_queue_(gui_output_queue),
@@ -58,11 +60,19 @@ void TrackingThread::run()
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};
 
-            if (!detections.frame)
+            if (!detections.frame ||
+                detections.model_generation != runtime_control_.generation.load())
                 continue;
+
+            if (tracker_generation_ != detections.model_generation)
+            {
+                tracker_.reset();
+                tracker_generation_ = detections.model_generation;
+            }
 
             auto tracks = std::make_shared<TrackingResult>();
             tracks->frame = detections.frame;
+            tracks->model_generation = detections.model_generation;
 
             const auto started_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :

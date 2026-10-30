@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <pthread.h>
 #include <string>
 
@@ -20,6 +21,7 @@ class GuiReceiverThread
 private:
     GuiReceiver& receiver_;
     TargetSelector& target_selector_;
+    std::function<void(int)> model_change_handler_;
     pthread_t thread_{};
     bool started_ = false;
     std::atomic<bool> failed_{false};
@@ -31,7 +33,8 @@ private:
 public:
     GuiReceiverThread(
         GuiReceiver& receiver,
-        TargetSelector& target_selector);
+        TargetSelector& target_selector,
+        std::function<void(int)> model_change_handler = {});
 
     // command 수신 worker를 한 번만 시작한다.
     void start();

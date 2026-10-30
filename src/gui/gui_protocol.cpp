@@ -119,10 +119,15 @@ std::array<std::uint8_t, kGuiCommandPacketSize> encode_gui_command(
 
     // int의 메모리 표현을 직접 전송하지 않고 명시적인 32-bit 값으로 바꾼다.
     // -1의 bit pattern도 그대로 보존하기 위해 memcpy로 signed/unsigned를 옮긴다.
-    const std::int32_t track_id = static_cast<std::int32_t>(command.track_id);
-    std::uint32_t raw_track_id = 0;
-    std::memcpy(&raw_track_id, &track_id, sizeof(raw_track_id));
-    write_u32(cursor, raw_track_id);
+    std::uint32_t raw_value = 0;
+    if (command.type == GuiCommandType::ChangeModel)
+        raw_value = static_cast<std::uint32_t>(command.model_id);
+    else
+    {
+        const std::int32_t track_id = static_cast<std::int32_t>(command.track_id);
+        std::memcpy(&raw_value, &track_id, sizeof(raw_value));
+    }
+    write_u32(cursor, raw_value);
     return packet;
 }
 
@@ -148,16 +153,27 @@ bool decode_gui_command(
         return false;
 
     // 다른 protocol, 지원하지 않는 version/type을 애플리케이션 상태에 반영하지 않는다.
-    if (magic != kGuiCommandMagic || version != kGuiProtocolVersion ||
-        raw_type != static_cast<std::uint16_t>(GuiCommandType::SelectTrack))
+    if (magic != kGuiCommandMagic || version != kGuiProtocolVersion)
         return false;
 
-    std::int32_t track_id = 0;
-    std::memcpy(&track_id, &raw_track_id, sizeof(track_id));
-    if (track_id < -1) return false;
-
-    command.type = GuiCommandType::SelectTrack;
-    command.track_id = track_id;
+    if (raw_type == static_cast<std::uint16_t>(GuiCommandType::SelectTrack))
+    {
+        std::int32_t track_id = 0;
+        std::memcpy(&track_id, &raw_track_id, sizeof(track_id));
+        if (track_id < -1) return false;
+        command.type = GuiCommandType::SelectTrack;
+        command.track_id = track_id;
+    }
+    else if (raw_type == static_cast<std::uint16_t>(GuiCommandType::ChangeModel))
+    {
+        if (raw_track_id == 0 ||
+            raw_track_id > static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
+            return false;
+        command.type = GuiCommandType::ChangeModel;
+        command.model_id = static_cast<int>(raw_track_id);
+    }
+    else
+        return false;
     return cursor == end;
 }
 

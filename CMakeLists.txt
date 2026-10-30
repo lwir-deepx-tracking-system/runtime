@@ -204,6 +204,7 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         src/gui/gui_sender.cpp
         src/gui/gui_receiver.cpp
         src/pipeline/camera_thread.cpp
+        src/pipeline/model_manager_thread.cpp
         src/pipeline/detection_thread.cpp
         src/pipeline/tracking_thread.cpp
         src/pipeline/control_thread.cpp

@@ -7,6 +7,7 @@
 #include "common/threadsafequeue.hpp"
 #include "common/track.hpp"
 #include "gui/gui_sender.hpp"
+#include "pipeline/runtime_control.hpp"
 
 // gui_track_queue의 TrackingResult를 소비해 GuiSender::send()로 넘기는 연결 worker.
 //
@@ -18,6 +19,7 @@ class GuiSenderThread
 {
 private:
     GuiSender& sender_;
+    RuntimeControl& runtime_control_;
     ThreadSafeQueue<TrackingResultPtr>& input_queue_;
     pthread_t thread_{};
     bool started_ = false;
@@ -30,6 +32,7 @@ private:
 public:
     GuiSenderThread(
         GuiSender& sender,
+        RuntimeControl& runtime_control,
         ThreadSafeQueue<TrackingResultPtr>& input_queue);
 
     // queue 소비 worker를 한 번만 시작한다.

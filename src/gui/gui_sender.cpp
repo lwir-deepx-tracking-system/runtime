@@ -342,7 +342,8 @@ bool GuiSender::send_tracking_metadata(
 // 원본 LWIR frame을 표시 영상으로 변환하고 영상/metadata 두 채널에 전달한다.
 bool GuiSender::send(
     const TrackingResult& result,
-    std::uint64_t gui_started_us)
+    std::uint64_t gui_started_us,
+    bool include_metadata)
 {
     // 잘못된 frame이나 네트워크 설정은 pipeline 일부를 시작하기 전에 거부한다.
     if (!result.frame || result.frame->image.empty() ||
@@ -371,7 +372,9 @@ bool GuiSender::send(
     // 영상과 Tracking metadata는 서로 다른 UDP 채널로 전송한다.
     // Video: BGR -> JPEG/H.264 -> RTP -> UDP
     // Metadata: frame_id / RTP timestamp / bbox / track_id -> custom UDP packet
-    if (!send_tracking_metadata(result, gui_started_us)) return false;
+    if (include_metadata &&
+        !send_tracking_metadata(result, gui_started_us))
+        return false;
     if (!push_frame_to_gstreamer(display)) return false;
     const auto now = steady_ns();
     if (now - last_report_ns_ >= 1000000000ULL)
@@ -385,6 +388,15 @@ bool GuiSender::send(
         last_report_ns_ = now;
     }
     return true;
+}
+
+bool GuiSender::send_bypass(
+    const FrameContextPtr& frame,
+    std::uint64_t gui_started_us)
+{
+    TrackingResult result;
+    result.frame = frame;
+    return send(result, gui_started_us, false);
 }
 
 // 재호출해도 안전하게 GStreamer와 metadata socket 소유권을 정리한다.

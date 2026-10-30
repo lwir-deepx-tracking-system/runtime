@@ -98,6 +98,10 @@ public:
     // UDP 포트로 보낸 뒤 영상 frame을 GStreamer appsrc에 전달한다.
     bool send(
         const TrackingResult& result,
+        std::uint64_t gui_started_us = 0,
+        bool include_metadata = true);
+    bool send_bypass(
+        const FrameContextPtr& frame,
         std::uint64_t gui_started_us = 0);
 
     // 영상 pipeline과 metadata socket을 함께 닫아 송신 자원을 정리한다.

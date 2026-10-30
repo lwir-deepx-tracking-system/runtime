@@ -53,10 +53,22 @@ public:
 // Detection 결과가 Camera의 동일 FrameContext를 유지하고 queue를 닫는지 확인한다.
 int main()
 {
+    RuntimeControl runtime_control;
+    runtime_control.state.store(RuntimeState::Running);
+    ActivePipelineSlot active_pipeline;
+    active_pipeline.set(std::make_shared<FakePipeline>());
+
     ThreadSafeQueue<FrameMessage> input;
     ThreadSafeQueue<DetectionResult> output;
-    FakePipeline pipeline;
-    DetectionThread thread(pipeline, input, output, true);
+    ThreadSafeQueue<TrackingResultPtr> gui_output;
+    DetectionThread thread(
+        runtime_control,
+        active_pipeline,
+        input,
+        output,
+        gui_output,
+        false,
+        true);
     thread.start();
 
     // 서로 다른 두 요청을 제출해 callback 완료 순서가 뒤집혀도 귀속이
