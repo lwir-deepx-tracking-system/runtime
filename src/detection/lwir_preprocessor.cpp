@@ -6,7 +6,7 @@
 #include <opencv2/imgproc.hpp>
 
 // 실행 중 YAML을 다시 읽지 않고 AppConfig가 검증한 값을 복사해 사용한다.
-LwirPreprocessor::LwirPreprocessor(const ModelConfig& config) : config_(config) {}
+LwirPreprocessor::LwirPreprocessor(const ModelConfig& config) : IPreprocessor(config) {}
 
 // 원본 영상 좌표를 보존할 수 있도록 영상과 letterbox 변환 정보를 함께 생성한다.
 void LwirPreprocessor::process(
@@ -26,32 +26,63 @@ void LwirPreprocessor::process(
     input.convertTo(gray8, CV_8UC1, 255.0 / range,
                     -static_cast<double>(config_.camera_input.clip_min) * 255.0 / range);
 
-    // YOLO 입력 채널 수에 맞춰 단일 LWIR 채널을 RGB 세 채널로 복제한다.
-    cv::Mat rgb;
-    cv::cvtColor(gray8, rgb, cv::COLOR_GRAY2RGB);
+    // // YOLO 입력 채널 수에 맞춰 단일 LWIR 채널을 RGB 세 채널로 복제한다.
+    // cv::Mat rgb;
+    // cv::cvtColor(gray8, rgb, cv::COLOR_GRAY2RGB);
 
     // 종횡비를 유지하는 최대 배율과 양쪽 padding 크기를 계산한다.
     const float scale = std::min(
         static_cast<float>(config_.input.width) / static_cast<float>(input.cols),
         static_cast<float>(config_.input.height) / static_cast<float>(input.rows));
-    const int resized_width = static_cast<int>(std::round(input.cols * scale));
+    const int resized_width  = static_cast<int>(std::round(input.cols * scale));
     const int resized_height = static_cast<int>(std::round(input.rows * scale));
-    const int total_x = config_.input.width - resized_width;
-    const int total_y = config_.input.height - resized_height;
-    const int left = total_x / 2;
-    const int top = total_y / 2;
+    const int total_x        = config_.input.width - resized_width;
+    const int total_y        = config_.input.height - resized_height;
+    const int left           = total_x / 2;
+    const int top            = total_y / 2;
 
-    cv::Mat resized;
-    cv::resize(rgb, resized, cv::Size(resized_width, resized_height), 0.0, 0.0, cv::INTER_LINEAR);
-    cv::copyMakeBorder(resized, output, top, total_y - top, left, total_x - left,
-                       cv::BORDER_CONSTANT, cv::Scalar::all(config_.preprocess.pad_value));
+    // test here
+    cv::Mat resized_gray;
+    cv::resize(
+        gray8, resized_gray,
+        cv::Size(resized_width, resized_height),
+        0.0, 0.0, cv::INTER_LINEAR);
+
+    output.create(config_.input.height, config_.input.width, CV_8UC3);
+    const cv::Scalar pad_color = cv::Scalar::all(config_.preprocess.pad_value);
+    if (top > 0)
+        output.rowRange(0, top).setTo(pad_color);
+    const int bottom = top + resized_height;
+    if (bottom < output.rows)
+        output.rowRange(bottom, output.rows).setTo(pad_color);
+
+    for (int y = 0; y < resized_height; ++y)
+    {
+        cv::Mat output_row = output.row(y + top);
+        if (left > 0)
+            output_row.colRange(0, left).setTo(pad_color);
+        const int right = left + resized_width;
+        if (right < output.cols)
+            output_row.colRange(right, output.cols).setTo(pad_color);
+
+        const auto* src = resized_gray.ptr<std::uint8_t>(y);
+        auto* dst = output.ptr<cv::Vec3b>(y + top) + left;
+        for (int x = 0; x < resized_width; ++x)
+            dst[x] = cv::Vec3b(src[x], src[x], src[x]);
+    }
+    // test end
+
+    // cv::Mat resized;
+    // cv::resize(rgb, resized, cv::Size(resized_width, resized_height), 0.0, 0.0, cv::INTER_LINEAR);
+    // cv::copyMakeBorder(resized, output, top, total_y - top, left, total_x - left,
+    // cv::BORDER_CONSTANT, cv::Scalar::all(config_.preprocess.pad_value));
 
     // 후처리가 detection box를 원본 640x480 좌표로 복원할 때 사용한다.
-    context.original_width = input.cols;
+    context.original_width  = input.cols;
     context.original_height = input.rows;
-    context.input_width = output.cols;
-    context.input_height = output.rows;
-    context.pad_x = left;
-    context.pad_y = top;
-    context.scale = scale;
+    context.input_width     = output.cols;
+    context.input_height    = output.rows;
+    context.pad_x           = left;
+    context.pad_y           = top;
+    context.scale           = scale;
 }

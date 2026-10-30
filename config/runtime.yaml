@@ -1,21 +1,155 @@
+# ============================================================
+# 1. Runtime / Logging
+# ============================================================
+
 logging:
   level: debug
 
-detector:
-  type: yolov8
+measurement:
+  enabled: true
+  output_root: /mnt/lwir_data/results/runtime
+
+
+# ============================================================
+# 2. Model
+# ============================================================
+
+# 모델에 종속적인 설정은 별도 YAML에서 관리한다.
+# - model path
+# - camera input format
+# - model input size
+# - preprocess
+# - postprocess
+model:
   config: config/model/yolov8n.yaml
 
+
+# ============================================================
+# 3. Detection
+# ============================================================
+
 detection:
-  backend: dx_app_async
+  # 동시에 처리할 수 있는 최대 inference 요청 수
   max_inflight: 4
 
+  # DXRT 내부 입력·출력 buffer 수. 0이면 DXRT가 자동으로 결정한다.
+  buffer_count: 6
+
+  # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
+  use_ort: false
+
+
+# ============================================================
+# 4. Tracking - ByteTrack
+# ============================================================
+
 tracking:
-  type: bytetrack
-  config: config/tracking/bytetrack.yaml
+  # Detection confidence 기준
+  track_threshold: 0.5
+
+  # 1차 매칭 허용 거리 (1 - IoU)
+  # 0.8이면 IoU 0.2 이상이어야 같은 객체로 매칭 가능
+  match_threshold: 0.8
+
+  # Detection이 일시적으로 사라져도 Track을 유지하는 프레임 수
+  # 30 FPS 기준 30이면 약 1초
+  track_buffer: 30
+
+  # ByteTrack 세부 임계값 (생략하면 공식 ByteTrack 값)
+  low_threshold: 0.1                # 이 점수 이하 검출은 버림. 초과 ~ track_threshold 미만은 2차 매칭에만 사용
+  #                                 #  (detection 후처리 confidence_threshold가 이 값 이하여야 2차 매칭이 동작함)
+  new_track_threshold: 0            # 새 ID를 만드는 최소 점수 (0: track_threshold + 0.1)
+  low_match_threshold: 0.5          # 2차 매칭 허용 거리 (1 - IoU). 0.5면 IoU 0.5 이상
+  unconfirmed_match_threshold: 0.7  # 미확정 Track 매칭 허용 거리 (1 - IoU). 0.7이면 IoU 0.3 이상
+
+  # ----------------------------------------------------------
+  # 선택 설정
+  # 아래 키는 생략할 수 있으며, 생략하면 기능이 꺼진다 (괄호 안이 기본값).
+  # ----------------------------------------------------------
+
+  # 1차 매칭과 미확정 Track 매칭 비용에 검출 점수를 곱한다 (비용 = 1 - IoU × 점수)
+  fuse_score: false
+  
+  # NSA Kalman: Kalman 보정 때 측정 노이즈를 (1 - 검출 점수)배 한다 (StrongSORT)
+  # 점수가 높은 검출은 더 믿고, 낮은 검출(가려짐 등)은 Track 위치를 덜 흔든다
+  nsa_kalman: false
+
+  # Kalman 상태 형식: xyah (공식 ByteTrack, 가로세로비 거의 고정) / xywh (BoT-SORT, 폭·높이 따로 추정)
+  kalman_format: xyah
+
+  # 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함)
+  # 출력된 박스는 검출이 아니라 예측이다
+  lost_output_frames: 0
+
+  # Buffered IoU: 1차 매칭 뒤 남은 Track과 검출을 박스를 넓혀 한 번 더 매칭한다
+  # 빠르거나 작은 표적용이다. 넓힌 박스는 매칭 판단에만 쓰고 출력 박스에는 쓰지 않는다
+  buffer_scale: 0.0       # 각 변을 폭·높이의 이 비율만큼 넓힘 (0: 끔, 0 이상 2 이하)
+  buffer_max_px: 0        # 한 변을 넓히는 최대 px (0: 제한 없음)
+  buffer_small_size: 0    # Track 박스의 짧은 변이 이 px 이하일 때만 적용 (0: 크기 무관)
+  buffer_snap: false      # 넓힌 박스로 맞은 Track의 위치를 검출 박스로 맞춤
+
+
+# ============================================================
+# 5. Target / Control
+# ============================================================
 
 control:
   enabled: false
-  config: config/control.yaml
 
-measurement:
+
+# ============================================================
+# 6. GUI Communication
+# ============================================================
+
+gui:
+  # GUI 프로그램이 준비되기 전에는 관련 worker를 시작하지 않는다.
   enabled: false
+
+  # ----------------------------------------------------------
+  # 6-1. Video
+  # Orange Pi -> GUI
+  # JPEG or H.264 / RTP / UDP
+  # ----------------------------------------------------------
+
+  video:
+    host: 127.0.0.1
+    port: 5000
+
+    # Compare with codec: h264 / encoder: mpph264enc on Orange Pi.
+    # Software encoders (jpegenc/x264enc) are explicit development-only choices.
+    codec: jpeg
+    encoder: mppjpegenc
+
+    bitrate_kbps: 3000
+    jpeg_quality: 80
+    keyframe_interval: 30
+    fps: 30
+    rtp_mtu: 1200
+
+  # ----------------------------------------------------------
+  # 6-2. Tracking Metadata
+  # Orange Pi -> GUI
+  # frame_id / track_id / bbox 등을 UDP로 전송
+  # ----------------------------------------------------------
+
+  metadata:
+    enabled: true
+
+    host: 127.0.0.1
+    port: 5001
+
+    max_packet_bytes: 1200
+
+  # ----------------------------------------------------------
+  # 6-3. GUI Command
+  # GUI -> Orange Pi
+  # 선택한 track_id를 TCP로 전달
+  # ----------------------------------------------------------
+
+  command:
+    enabled: true
+
+    bind_address: 0.0.0.0
+    port: 5002
+
+    receive_timeout_ms: 1000
