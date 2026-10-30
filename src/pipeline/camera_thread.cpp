@@ -94,7 +94,8 @@ void CameraThread::run()
                 message.enqueued_at = std::chrono::steady_clock::now();
             }
 
-            if (!output_queue_.push(std::move(message)))
+            // Keep only the latest two frames while detection is behind.
+            if (!output_queue_.push_latest(std::move(message), 2))
                 break;
         }
     }
