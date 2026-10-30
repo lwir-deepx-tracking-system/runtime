@@ -57,6 +57,21 @@ struct TrackingConfig {
     float buffer_small_size = 0.0F;
     // Buffered IoU로만 맞은 Track의 위치를 검출 박스로 맞춘다 (프레임 누락에 유리, 흔들리는 작은 표적에 불리)
     bool buffer_snap = false;
+
+    // ---- OC-SORT (Observation-Centric SORT, Cao et al., CVPR 2023) ----
+    // 세 기능은 서로 독립이며 모두 기본 꺼짐이다. 과거 관측 박스는 CMC를 적용해 현재 화면 좌표로 유지한다.
+    // ORU: Lost였던 Track을 다시 찾으면 놓치기 직전 Kalman 상태로 되돌리고, 마지막 관측 → 새 관측을
+    //      직선 보간한 가상 관측으로 놓친 구간을 다시 predict/update 한다 (Lost 동안 틀어진 속도를 바로잡음).
+    //      다시 찾은 Track에는 buffer_snap을 적용하지 않는다.
+    bool oru = false;
+    // OCM: 1차 매칭 비용에서 이동 방향 일치도 × 검출 점수 × 이 가중치를 뺀다 (0: 끔, OC-SORT 기본 0.2).
+    //      매칭 허용 여부는 지금처럼 IoU 비용(match_threshold)으로만 판단하고, 방향 항은 후보 사이 순위에만 쓴다.
+    float ocm_weight = 0.0F;
+    // OCM 방향을 계산할 관측 간격(프레임). OC-SORT 기본 3
+    int ocm_delta_t = 3;
+    // OCR: 2차 매칭 뒤 남은 Track을 Kalman 예측 대신 마지막 관측 박스로 남은 high 검출과 한 번 더 매칭한다
+    //      (match_threshold 사용). 멈춘 물체·짧은 가림 뒤 예측이 빗나간 Track을 복구한다.
+    bool ocr = false;
 };
 
 struct ControlConfig {

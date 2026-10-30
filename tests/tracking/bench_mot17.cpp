@@ -239,7 +239,8 @@ TrackingConfig load_config(const std::string& path)
     static const std::set<std::string> known = {
         "track_threshold", "match_threshold", "track_buffer", "fuse_score", "nsa_kalman", "kalman_format", "lost_output_frames",
         "buffer_scale", "buffer_max_px", "buffer_small_size", "buffer_snap",
-        "low_threshold", "new_track_threshold", "low_match_threshold", "unconfirmed_match_threshold"};
+        "low_threshold", "new_track_threshold", "low_match_threshold", "unconfirmed_match_threshold",
+        "oru", "ocm_weight", "ocm_delta_t", "ocr"};
     static const std::set<std::string> removed = {"frame_rate"};
     for (const auto& kv : node)
     {
@@ -377,6 +378,8 @@ int main(int argc, char** argv)
     std::printf("  kalman %s / fuse_score %s / nsa_kalman %s / lost_output_frames %d / buffer_scale %.2f (max_px %.0f, small %.0f, snap %s)\n",
                 base.kalman_format.c_str(), base.fuse_score ? "켬" : "끔", base.nsa_kalman ? "켬" : "끔", base.lost_output_frames, base.buffer_scale, base.buffer_max_px,
                 base.buffer_small_size, base.buffer_snap ? "켬" : "끔");
+    std::printf("  OC-SORT: oru %s / ocm_weight %.2f (delta_t %d) / ocr %s\n", base.oru ? "켬" : "끔",
+                base.ocm_weight, base.ocm_delta_t, base.ocr ? "켬" : "끔");
     if (!gmc_dir.empty())
         std::printf("  CMC 켬: %s/GMC-<시퀀스>.txt\n", gmc_dir.c_str());
 

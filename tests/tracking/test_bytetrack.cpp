@@ -70,7 +70,8 @@ int check_tracking_config()
             off.fuse_score != defaults.fuse_score || off.lost_output_frames != 0 || off.buffer_scale != 0.0F ||
             off.buffer_max_px != 0.0F || off.buffer_small_size != 0.0F || off.buffer_snap ||
             off.low_threshold != 0.1F || off.new_track_threshold != 0.0F || off.low_match_threshold != 0.5F ||
-            off.unconfirmed_match_threshold != 0.7F || off.nsa_kalman || off.kalman_format != "xyah")
+            off.unconfirmed_match_threshold != 0.7F || off.nsa_kalman || off.kalman_format != "xyah" ||
+            off.oru || off.ocm_weight != 0.0F || off.ocm_delta_t != 3 || off.ocr)
         {
             std::cerr << "FAIL: 선택 키를 생략했는데 기능이 꺼진 기본값이 아님\n";
             ++failures;
@@ -84,6 +85,12 @@ int check_tracking_config()
             on.buffer_small_size != 40.0F || !on.buffer_snap)
         {
             std::cerr << "FAIL: 선택 키를 지정했는데 값이 그대로 읽히지 않음\n";
+            ++failures;
+        }
+        const TrackingConfig oc = parse_tracking(base + "oru: true\nocm_weight: 0.2\nocm_delta_t: 5\nocr: true\n");
+        if (!oc.oru || oc.ocm_weight != 0.2F || oc.ocm_delta_t != 5 || !oc.ocr)
+        {
+            std::cerr << "FAIL: OC-SORT 키를 지정했는데 값이 그대로 읽히지 않음\n";
             ++failures;
         }
         const TrackingConfig th = parse_tracking(
@@ -121,6 +128,11 @@ int check_tracking_config()
     failures += !rejects("huge_unconfirmed_match", base + "unconfirmed_match_threshold: 1.5\n");
     failures += !rejects("nsa_not_bool", base + "nsa_kalman: maybe\n");
     failures += !rejects("bad_kalman_format", base + "kalman_format: xyz\n");
+    failures += !rejects("negative_ocm_weight", base + "ocm_weight: -0.1\n");
+    failures += !rejects("huge_ocm_weight", base + "ocm_weight: 1.5\n");
+    failures += !rejects("zero_ocm_delta_t", base + "ocm_delta_t: 0\n");
+    failures += !rejects("huge_ocm_delta_t", base + "ocm_delta_t: 31\n");
+    failures += !rejects("oru_not_bool", base + "oru: maybe\n");
     return failures;
 }
 
@@ -434,6 +446,189 @@ int check_kalman_format()
     return failures;
 }
 
+// ORU: 100x200 물체가 4px/프레임으로 움직이다 21~30프레임에 가려지고, 가려진 동안 멈춘다(또는 같은 속도로 계속 간다).
+// 31프레임에 다시 보일 때 출력 x의 오차를 본다.
+//   멈춘 경우   : ORU가 놓친 구간을 가상 관측으로 다시 계산하므로 끈 경우보다 오차가 작아야 한다
+//   계속 간 경우 : 예측이 이미 맞으므로 ORU가 해를 끼치지 않아야 한다 (오차 0.1px 이하)
+//   가려진 동안 카메라가 6px/프레임씩 돌고(CMC 지정) : 저장 상태·관측도 같이 옮기므로 결과가 카메라가 가만히 있을 때와 같아야 한다
+// 모든 경우 처음 ID가 끝까지 유지되어야 한다. 반환: 실패 수
+int check_oru()
+{
+    // 반환: 31프레임 출력 x 오차, 처음 ID가 출력된 프레임 수
+    auto run = [](bool oru, float speed_after, float pan) {
+        TrackingConfig c;
+        c.oru = oru;
+        ByteTrackTracker tracker(c);
+        float x = 100.0f, cam = 0.0f, err = -1.0f;
+        int first_id = -1, kept = 0;
+        for (int f = 1; f <= 40; ++f)
+        {
+            x += (f <= 20) ? 4.0f : speed_after;
+            if (f > 20 && f <= 30 && pan != 0.0f)
+            {
+                cam += pan;
+                tracker.set_camera_motion(CameraMotion::translation(pan, 0.0));
+            }
+            std::vector<Detection> dets;
+            if (f <= 20 || f > 30)
+                dets.push_back(make_detection(x + cam, 200.0f, 100.0f, 200.0f, 0.9f));
+            for (const auto& t : tracker.track(dets))
+            {
+                if (first_id < 0)
+                    first_id = t.track_id;
+                kept += (t.track_id == first_id);
+                if (f == 31)
+                    err = std::abs(t.x - (x + cam));
+            }
+        }
+        return std::make_pair(err, kept);
+    };
+    int failures = 0;
+    const auto stop_off = run(false, 0.0f, 0.0f), stop_on = run(true, 0.0f, 0.0f);
+    const auto move_on = run(true, 4.0f, 0.0f);
+    const auto stop_pan = run(true, 0.0f, -6.0f), move_pan = run(true, 4.0f, -6.0f);
+    std::cout << "ORU 검사 (가려진 동안 멈춤): 다시 보인 프레임 오차 끔 " << stop_off.first << "px, 켬 " << stop_on.first
+              << "px / 계속 이동 켬 " << move_on.first << "px / 카메라 회전 중 켬 " << stop_pan.first << "px, "
+              << move_pan.first << "px\n";
+    if (stop_off.second != 30 || stop_on.second != 30 || move_on.second != 30 || stop_pan.second != 30 ||
+        move_pan.second != 30)
+    {
+        std::cerr << "FAIL: ORU 검사에서 처음 ID가 끝까지 유지되지 않음 (검사 조건 확인)\n";
+        ++failures;
+    }
+    if (!(stop_on.first < stop_off.first))
+    {
+        std::cerr << "FAIL: ORU를 켰는데 가려진 동안 멈춘 물체의 재포착 오차가 줄지 않음\n";
+        ++failures;
+    }
+    if (move_on.first > 0.1f)
+    {
+        std::cerr << "FAIL: 등속 물체에서 ORU가 재포착 위치를 틀어지게 함\n";
+        ++failures;
+    }
+    if (std::abs(stop_pan.first - stop_on.first) > 0.05f || std::abs(move_pan.first - move_on.first) > 0.05f)
+    {
+        std::cerr << "FAIL: 가려진 동안 카메라가 움직이면 ORU 결과가 달라짐 (저장 상태·관측에 CMC 미적용)\n";
+        ++failures;
+    }
+    return failures;
+}
+
+// OCM: 40x80 물체가 1px/프레임으로 오른쪽으로 가다가, 12프레임에 high 검출이 둘 나온다.
+//   A: 진행 방향으로 4px 앞 (IoU 약 0.82, 방향 일치)
+//   B: 제자리에서 6px 아래 (IoU 약 0.86, 방향이 아래로 꺾임)
+// 끄면 IoU가 높은 B에, 켜면(가중치 1) 방향이 맞는 A에 붙어야 한다 (ID 1의 y로 판단).
+// 또한 방향이 맞아도 IoU 비용이 match_threshold를 넘는 검출은 매칭하면 안 된다. 반환: 실패 수
+int check_ocm()
+{
+    auto run = [](float weight) {
+        TrackingConfig c;
+        c.ocm_weight = weight;
+        ByteTrackTracker tracker(c);
+        Track last{};
+        for (int f = 1; f <= 12; ++f)
+        {
+            const float x = 100.0f + 1.0f * f;
+            std::vector<Detection> dets;
+            if (f < 12)
+                dets.push_back(make_detection(x, 200.0f, 40.0f, 80.0f, 0.9f));
+            else
+            {
+                dets.push_back(make_detection(x + 4.0f, 200.0f, 40.0f, 80.0f, 0.9f));
+                dets.push_back(make_detection(x, 206.0f, 40.0f, 80.0f, 0.9f));
+            }
+            for (const auto& t : tracker.track(dets))
+                if (t.track_id == 1)
+                    last = t;
+        }
+        return last;
+    };
+    const Track off = run(0.0f), on = run(1.0f);
+    std::cout << "OCM 검사 (앞쪽 A vs 아래쪽 B): ID 1의 (x, y) 끔 (" << off.x << ", " << off.y << "), 켬 (" << on.x
+              << ", " << on.y << ")\n";
+    int failures = 0;
+    if (!(off.y > 202.0f))
+    {
+        std::cerr << "FAIL: 검사 조건이 너무 쉬움 (OCM 없이도 방향이 맞는 검출을 고름)\n";
+        ++failures;
+    }
+    if (!(std::abs(on.y - 200.0f) < 0.5f && on.x > off.x))
+    {
+        std::cerr << "FAIL: OCM을 켰는데 진행 방향의 검출에 붙지 않음\n";
+        ++failures;
+    }
+
+    // 허용 판단은 IoU로만: 진행 방향 15px 앞(40px 폭, IoU 약 0.45 → 비용 0.55)은 match_threshold 0.5에서 매칭되면 안 된다
+    TrackingConfig c;
+    c.ocm_weight = 1.0f;
+    c.match_threshold = 0.5f;
+    ByteTrackTracker tracker(c);
+    bool matched = false;
+    for (int f = 1; f <= 12; ++f)
+    {
+        const float x = 100.0f + 1.0f * f + (f == 12 ? 15.0f : 0.0f);
+        for (const auto& t : tracker.track({make_detection(x, 200.0f, 40.0f, 80.0f, 0.9f)}))
+            matched = matched || (f == 12 && t.track_id == 1);
+    }
+    if (matched)
+    {
+        std::cerr << "FAIL: OCM 방향 항 때문에 IoU 기준을 넘는 검출이 매칭됨\n";
+        ++failures;
+    }
+    return failures;
+}
+
+// OCR: 40x80 물체가 4px/프레임으로 가다가 21~30프레임에 가려지고 그동안 멈춘다. 예측은 속도대로 44px 앞서
+// 가 있어 IoU가 0이므로, 끄면 새 ID가 생기고 켜면 마지막 관측 박스로 같은 ID를 되찾아야 한다.
+// 가려진 동안 카메라가 6px/프레임씩 돌아(CMC 지정) 화면 속 위치가 60px 옮겨진 경우에도, 관측 기록을 같이
+// 옮기므로 같은 ID를 되찾아야 한다. 반환: 실패 수
+int check_ocr()
+{
+    auto run = [](bool ocr, float pan) {
+        TrackingConfig c;
+        c.ocr = ocr;
+        ByteTrackTracker tracker(c);
+        std::set<int> ids;
+        float x = 100.0f, cam = 0.0f;
+        for (int f = 1; f <= 40; ++f)
+        {
+            if (f <= 20)
+                x += 4.0f;
+            if (f > 20 && f <= 30 && pan != 0.0f)
+            {
+                cam += pan;
+                tracker.set_camera_motion(CameraMotion::translation(pan, 0.0));
+            }
+            std::vector<Detection> dets;
+            if (f <= 20 || f > 30)
+                dets.push_back(make_detection(x + cam, 200.0f, 40.0f, 80.0f, 0.9f));
+            for (const auto& t : tracker.track(dets))
+                ids.insert(t.track_id);
+        }
+        return ids.size();
+    };
+    const size_t off = run(false, 0.0f), on = run(true, 0.0f), on_pan = run(true, -6.0f);
+    std::cout << "OCR 검사 (가려진 동안 멈춤): 사용한 ID 수 끔 " << off << "개, 켬 " << on << "개, 카메라 회전 중 켬 "
+              << on_pan << "개\n";
+    int failures = 0;
+    if (off < 2)
+    {
+        std::cerr << "FAIL: 검사 조건이 너무 쉬움 (OCR 없이도 같은 ID 유지)\n";
+        ++failures;
+    }
+    if (on != 1)
+    {
+        std::cerr << "FAIL: OCR을 켰는데 멈춘 물체를 같은 ID로 되찾지 못함\n";
+        ++failures;
+    }
+    if (on_pan != 1)
+    {
+        std::cerr << "FAIL: 가려진 동안 카메라가 움직이면 OCR이 실패함 (관측 기록에 CMC 미적용)\n";
+        ++failures;
+    }
+    return failures;
+}
+
 }  // namespace
 
 
@@ -509,7 +704,7 @@ int main(int argc, char** argv)
         ++failures;
     }
 
-    // 검사 4: 추가 기능(설정 읽기, fuse_score, lost_output, CMC, Buffered IoU)
+    // 검사 4: 추가 기능(설정 읽기, fuse_score, lost_output, CMC, Buffered IoU, NSA, Kalman 형식, OC-SORT)
     failures += check_tracking_config();
     failures += check_fuse_score();
     failures += check_lost_output();
@@ -517,6 +712,9 @@ int main(int argc, char** argv)
     failures += check_buffered_iou();
     failures += check_nsa_kalman();
     failures += check_kalman_format();
+    failures += check_oru();
+    failures += check_ocm();
+    failures += check_ocr();
 
     if (failures > 0)
     {
