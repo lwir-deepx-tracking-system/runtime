@@ -127,12 +127,16 @@ void CaptureApplication::run()
     if (std::filesystem::exists(sequence_dir))
         throw std::runtime_error("이미 존재하는 Sequence입니다: " + sequence_dir.string());
 
+
+    capture_running = 1;
+    std::signal(SIGINT, handle_sigint);
+    if (!camera_.open([] { return capture_running == 0; }))
+    {
+        if (capture_running == 0) return;
+        throw std::runtime_error("TE-EV1 카메라를 열지 못했습니다");
+    }
     std::filesystem::create_directories(image_dir);
 
-    if (!camera_.open())
-        throw std::runtime_error("TE-EV1 카메라를 열지 못했습니다");
-
-    std::signal(SIGINT, handle_sigint);
 
     Logger::info("[Capture] 촬영 시작: " + config_.sequence.id);
     Logger::info("[Capture] 종료하려면 Ctrl+C를 입력하세요");

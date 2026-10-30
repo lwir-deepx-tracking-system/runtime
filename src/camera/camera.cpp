@@ -19,7 +19,7 @@ Camera::~Camera()
 }
 
 // Camera를 초기화한다.
-bool Camera::open()
+bool Camera::open(const std::function<bool()>& should_stop)
 {
 
   // STEP 1: Scan for connected devices until one is available.
@@ -29,7 +29,7 @@ bool Camera::open()
   unsigned int targetCoreID   = 0;
   std::string  modelName      = "Unknown";
 
-  while(targetDevIndex < 0)
+  while(targetDevIndex < 0 && !(should_stop && should_stop()))
   {
     Logger::info("[Camera] 연결된 카메라 스캔");
 
@@ -77,6 +77,9 @@ bool Camera::open()
       std::this_thread::sleep_for(std::chrono::seconds(1));
     }
   }
+
+  if(targetDevIndex < 0 || (should_stop && should_stop()))
+    return false;
 
   // STEP 2: Connect to the Camera
   // -----------------------------------------------------------------

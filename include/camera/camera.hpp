@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "common/frame.hpp"
 
 namespace i3
@@ -21,7 +23,7 @@ public:
     Camera& operator=(const Camera&) = delete;
 
     // 카메라 사용 시작
-    bool open();
+    bool open(const std::function<bool()>& should_stop = {});
     // 프레임 읽기
     bool capture(FrameContext& frame);
     // 카메라 사용 종료
