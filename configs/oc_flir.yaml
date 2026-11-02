@@ -1,0 +1,4 @@
+ocsort:
+  det_threshold: 0.3
+  use_byte: true
+  min_hits: 1

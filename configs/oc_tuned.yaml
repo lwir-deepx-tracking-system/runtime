@@ -1,0 +1,3 @@
+ocsort:
+  use_byte: true
+  min_hits: 1

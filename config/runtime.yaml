@@ -88,6 +88,11 @@ tracking:
   buffer_small_size: 0    # Track 박스의 짧은 변이 이 px 이하일 때만 적용 (0: 크기 무관)
   buffer_snap: false      # 넓힌 박스로 맞은 Track의 위치를 검출 박스로 맞춤
 
+  oru: true          # 다시 찾은 Lost Track의 놓친 구간을 가상 관측으로 재계산
+  ocm_weight: 0.2    # 1차 매칭에 이동 방향 일치도 반영 (0이면 끔, OC-SORT 기본 0.2)
+  ocm_delta_t: 3     # 방향 계산 간격 (프레임)
+  ocr: true          # 2차 매칭 뒤 마지막 관측 박스로 한 번 더 매칭
+
 
 # ============================================================
 # 5. Target / Control

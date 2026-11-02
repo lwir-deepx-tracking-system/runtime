@@ -80,10 +80,10 @@ tracking:
   buffer_snap: false      # 넓힌 박스로 맞은 Track의 위치를 검출 박스로 맞춤
   
   # OC-SORT
-  oru: false          # 다시 찾은 Lost Track의 놓친 구간을 가상 관측으로 재계산
-  ocm_weight: 0.0     # 이동 방향 일치도 가중치 (0: 끔, OC-SORT 기본 0.2)
+  oru: true          # 다시 찾은 Lost Track의 놓친 구간을 가상 관측으로 재계산
+  ocm_weight: 0.2     # 이동 방향 일치도 가중치 (0: 끔, OC-SORT 기본 0.2)
   ocm_delta_t: 3      # 방향 계산 간격(프레임)
-  ocr: false          # 2차 매칭 뒤 마지막 관측 박스로 한 번 더 매칭
+  ocr: true          # 2차 매칭 뒤 마지막 관측 박스로 한 번 더 매칭
 
 # ============================================================
 # 5. Benchmark Sequence 범위
