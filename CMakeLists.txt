@@ -210,6 +210,8 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         src/pipeline/control_thread.cpp
         src/pipeline/gui_sender_thread.cpp
         src/pipeline/gui_receiver_thread.cpp
+        src/pipeline/runtime_control.cpp
+        src/pipeline/active_pipeline_slot.cpp
     )
 
     target_include_directories(lwir_runtime_core
