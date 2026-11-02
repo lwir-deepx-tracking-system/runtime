@@ -2,7 +2,7 @@
 
 void RuntimeControl::set_detection_quiesced(bool value)
 {
-    {
+    {   // mutex lock_guard용 스코프
         std::lock_guard<std::mutex> lock(mutex_);
         detection_quiesced_ = value;
     }

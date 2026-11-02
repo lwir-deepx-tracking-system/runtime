@@ -86,7 +86,7 @@ void DetectionThread::run()
                 {
                     auto bypass = std::make_shared<TrackingResult>();
                     bypass->frame = input.frame;
-                    bypass->model_generation = runtime_control_.generation.load();
+                    bypass->model_generation = runtime_control_.generation.load();  // 어떤 추론 모델인지 모델 인덱스 전달
                     bypass->bypass = true;
                     gui_output_queue_.push_latest(std::move(bypass), 2);
                     last_bypass_sent = now;
@@ -185,7 +185,7 @@ void DetectionThread::run()
                         ++next_output_sequence_;
                     }
                 });
-        }
+        }   // end of while(!failed_.load() && input_queue_.pop(input))
     }
     catch (const std::exception& e)
     {

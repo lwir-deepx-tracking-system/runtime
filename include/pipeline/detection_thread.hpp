@@ -14,8 +14,8 @@
 #include "common/frame.hpp"
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
-#include "pipeline/model_manager_thread.hpp"
 #include "pipeline/runtime_control.hpp"
+#include "pipeline/active_pipeline_slot.hpp"
 
 class DetectionThread
 {

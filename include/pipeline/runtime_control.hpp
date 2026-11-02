@@ -16,7 +16,7 @@ enum class RuntimeState
 class RuntimeControl
 {
 private:
-    mutable std::mutex mutex_;
+    mutable std::mutex mutex_;  // mutable은 const 함수 내부에서 mutex를 lock, unlock하기 위한 선언이다.
     std::condition_variable condition_;
     bool detection_quiesced_ = false;
 
