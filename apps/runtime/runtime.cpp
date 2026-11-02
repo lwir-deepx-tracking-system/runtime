@@ -475,6 +475,7 @@ void RuntimeApplication::run()
                 }
                 camera_thread_->request_stop();
                 stop_pipeline();
+                measurement_enabled_ = false;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
