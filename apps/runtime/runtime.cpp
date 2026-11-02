@@ -407,7 +407,8 @@ void RuntimeApplication::run()
             gui_receiver_thread_->stop();
     };
 
-    auto join_workers = [this]() {
+    auto join_workers = [this]() 
+    {
         camera_thread_->join();
         detection_thread_->join();
         if (model_manager_thread_) model_manager_thread_->join();
@@ -473,6 +474,7 @@ void RuntimeApplication::run()
                     stop_logged = true;
                 }
                 camera_thread_->request_stop();
+                stop_pipeline();
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }

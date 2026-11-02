@@ -60,7 +60,7 @@ void DetectionThread::set_error(const std::string& message)
 
 void DetectionThread::run()
 {
-    Logger::info("[DetectionThread] started");
+    Logger::info("[DetectionThread] 시작");
     auto last_bypass_sent = std::chrono::steady_clock::time_point{};
     bool has_sent_bypass = false;
 
@@ -216,5 +216,5 @@ void DetectionThread::run()
 
     runtime_control_.set_detection_quiesced(true);
     output_queue_.close();
-    Logger::info("[DetectionThread] stopped");
+    Logger::info("[DetectionThread] 종료");
 }

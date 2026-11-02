@@ -1,5 +1,6 @@
 #include "gui/gui_receiver.hpp"
 
+#include <mutex>
 #include <array>
 #include <cerrno>
 #include <cstring>
@@ -16,28 +17,6 @@
 #include "common/logger.hpp"
 
 namespace {
-// pthread_mutex_t를 빠뜨리지 않고 unlock하기 위한 작은 RAII 보조 객체이다.
-// 실제 동기화 primitive와 lock/unlock 호출은 모두 POSIX pthread API를 쓴다.
-class PthreadLockGuard
-{
-private:
-    pthread_mutex_t* mutex_;
-
-public:
-    explicit PthreadLockGuard(pthread_mutex_t& mutex) : mutex_(&mutex)
-    {
-        pthread_mutex_lock(mutex_);
-    }
-
-    ~PthreadLockGuard()
-    {
-        pthread_mutex_unlock(mutex_);
-    }
-
-    PthreadLockGuard(const PthreadLockGuard&) = delete;
-    PthreadLockGuard& operator=(const PthreadLockGuard&) = delete;
-};
-
 void close_socket(int fd)
 {
     if (fd < 0) return;
@@ -64,7 +43,7 @@ GuiReceiver::~GuiReceiver()
 bool GuiReceiver::stopped()
 {
     // stop()은 다른 thread에서 호출되므로 socket 상태와 같은 mutex로 보호한다.
-    PthreadLockGuard lock(socket_mutex_);
+    std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
     return stopped_;
 }
 
@@ -73,7 +52,7 @@ bool GuiReceiver::open_listener()
 {
     // 이미 열렸거나 종료된 상태를 먼저 확인해 중복 listener 생성을 막는다.
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
         if (listen_fd_ >= 0) return true;
         if (stopped_) return false;
     }
@@ -128,7 +107,7 @@ bool GuiReceiver::open_listener()
     }
 
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
         if (stopped_)
         {
             close_socket(listener);
@@ -149,7 +128,7 @@ bool GuiReceiver::accept_client()
     {
         int listener = -1;
         {
-            PthreadLockGuard lock(socket_mutex_);
+            std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
             if (client_fd_ >= 0) return true;
             listener = listen_fd_;
         }
@@ -183,7 +162,7 @@ bool GuiReceiver::accept_client()
         }
 
         {
-            PthreadLockGuard lock(socket_mutex_);
+            std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
             if (stopped_)
             {
                 close_socket(client);
@@ -246,7 +225,7 @@ void GuiReceiver::release_client(int fd)
     // receive thread와 stop thread 중 한쪽만 같은 FD를 닫도록 소유권을 회수한다.
     bool owns_fd = false;
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
         if (client_fd_ == fd)
         {
             client_fd_ = -1;
@@ -272,7 +251,7 @@ bool GuiReceiver::receive(GuiCommand& command)
 
         int client = -1;
         {
-            PthreadLockGuard lock(socket_mutex_);
+            std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
             client = client_fd_;
         }
         if (client < 0) continue;
@@ -307,7 +286,7 @@ void GuiReceiver::stop()
     int listener = -1;
     int client = -1;
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<pthread_mutex_t> lock(socket_mutex_);
         if (stopped_) return;
         stopped_ = true;
         listener = listen_fd_;
