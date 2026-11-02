@@ -1,0 +1,9 @@
+track_threshold: 0.3
+low_threshold: 0.1
+new_track_threshold: 0.3
+match_threshold: 0.8
+track_buffer: 50
+fuse_score: false
+kalman_format: xywh
+lost_output_frames: 1
+ocm_weight: 0.2
