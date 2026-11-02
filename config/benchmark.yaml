@@ -79,12 +79,21 @@ tracking:
   buffer_small_size: 0    # Track 박스의 짧은 변이 이 px 이하일 때만 적용 (0: 크기 무관)
   buffer_snap: false      # 넓힌 박스로 맞은 Track의 위치를 검출 박스로 맞춤
   
-  # OC-SORT
+  # OC-SORT 옵션
   oru: false          # 다시 찾은 Lost Track의 놓친 구간을 가상 관측으로 재계산
   ocm_weight: 0.0     # 이동 방향 일치도 가중치 (0: 끔, OC-SORT 기본 0.2)
   ocm_delta_t: 3      # 방향 계산 간격(프레임)
   ocr: false          # 2차 매칭 뒤 마지막 관측 박스로 한 번 더 매칭
 
+  # OC-SORT 단독 작동
+  ocsort:
+    det_threshold: 0.6   # 이 점수 초과만 사용
+    iou_threshold: 0.3   # ByteTrack match_threshold와 반대로 "IoU 이상"
+    max_age: 30
+    min_hits: 3
+    delta_t: 3
+    inertia: 0.2         # OCM 가중치
+    use_byte: false      # 0.1~det_threshold 검출로 2차 매칭
 # ============================================================
 # 5. Benchmark Sequence 범위
 # ============================================================

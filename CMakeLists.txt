@@ -156,6 +156,7 @@ if(LWIR_NEEDS_VISION)
         src/detection/dxrt_detection_pipeline.cpp
         src/tracking/bytetrack_tracker.cpp
         src/tracking/kalman_filter.cpp
+        src/tracking/ocsort_tracker.cpp
     )
 
     target_include_directories(lwir_vision
