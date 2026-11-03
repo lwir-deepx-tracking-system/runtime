@@ -245,6 +245,10 @@ GuiConfig load_gui_config(const YAML::Node& node)
 
     // Track metadata는 영상과 다른 UDP 포트로 보내 GUI가 원본 좌표 bbox를 그린다.
     const YAML::Node metadata = node["metadata"];
+    const auto metadata_protocol = metadata["protocol"].as<std::string>("pc_v1");
+    if (metadata_protocol != "pc_v1")
+        throw std::runtime_error("gui.metadata.protocol must be pc_v1");
+    c.metadata.protocol = GuiProtocolType::PcV1;
     c.metadata.enabled = required<bool>(metadata, "enabled", "gui.metadata");
     c.metadata.host = required<std::string>(metadata, "host", "gui.metadata");
     c.metadata.port = parse_port(metadata, "port", "gui.metadata");
@@ -257,8 +261,16 @@ GuiConfig load_gui_config(const YAML::Node& node)
             "gui.metadata.max_packet_bytes must be in [64, 65507]");
     c.metadata.max_packet_bytes = static_cast<std::size_t>(max_packet_bytes);
 
-    // 명령 설정: GUI -> Orange Pi 방향의 선택 track_id TCP 채널이다.
+    // 명령 설정: PC 명령과 보드 응답을 위한 양방향 TCP 채널이다.
     const YAML::Node command = node["command"];
+    const auto command_protocol = command["protocol"].as<std::string>("pc_v1");
+    if (command_protocol != "pc_v1")
+        throw std::runtime_error("gui.command.protocol must be pc_v1");
+    c.command.protocol = GuiProtocolType::PcV1;
+    const auto handler = command["handler"].as<std::string>("deferred");
+    if (handler != "deferred")
+        throw std::runtime_error("gui.command.handler must be deferred (target following is not implemented)");
+    c.command.handler = GuiCommandHandlerType::Deferred;
     c.command.enabled = required<bool>(command, "enabled", "gui.command");
     c.command.bind_address = required<std::string>(
         command, "bind_address", "gui.command");

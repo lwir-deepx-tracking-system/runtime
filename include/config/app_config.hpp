@@ -71,7 +71,7 @@ struct MeasurementConfig {
 // runtime.yaml의 gui 설정은 세 개의 독립적인 통신 경로를 정의한다.
 // Video    : Orange Pi -> PC GUI, JPEG or H.264/RTP/UDP
 // Metadata : Orange Pi -> PC GUI, frame/Track 정보 UDP
-// Command  : PC GUI -> Orange Pi, 선택 track_id TCP
+// Command  : PC 명령 및 보드 ACK/상태 응답 TCP
 enum class GuiVideoCodec
 {
     H264,
@@ -92,8 +92,12 @@ struct GuiVideoConfig
     int rtp_mtu = 0;
 };
 
+enum class GuiProtocolType { PcV1 };
+enum class GuiCommandHandlerType { Deferred };
+
 struct GuiMetadataConfig
 {
+    GuiProtocolType protocol = GuiProtocolType::PcV1;
     // 영상과 별도 포트로 보내는 Tracking metadata UDP 조건이다.
     bool enabled = false;
     std::string host;
@@ -103,7 +107,9 @@ struct GuiMetadataConfig
 
 struct GuiCommandConfig
 {
-    // GUI 선택 명령을 기다릴 TCP listener 조건이다.
+    GuiProtocolType protocol = GuiProtocolType::PcV1;
+    GuiCommandHandlerType handler = GuiCommandHandlerType::Deferred;
+    // PC 명령 및 상태 응답을 전달하는 TCP listener 조건이다.
     bool enabled = false;
     std::string bind_address;
     std::uint16_t port = 0;

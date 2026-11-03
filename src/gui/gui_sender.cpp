@@ -73,6 +73,7 @@ GuiSender::GuiSender(
     std::uint16_t clip_max)
     : video_config_(std::move(video_config)),
       metadata_config_(std::move(metadata_config)),
+      protocol_(GuiProtocolFactory::create(metadata_config_.protocol)),
       clip_min_(clip_min),
       clip_max_(clip_max)
 {
@@ -312,15 +313,27 @@ bool GuiSender::send_tracking_metadata(
     metadata.gui_started_us = gui_started_us;
     metadata.width = static_cast<std::uint32_t>(result.frame->image.cols);
     metadata.height = static_cast<std::uint32_t>(result.frame->image.rows);
-    metadata.tracks = result.tracks;
+    metadata.tracks.reserve(result.tracks.size());
+    for (const auto& source : result.tracks) {
+        // Adapt internal int/-1 IDs and class sentinel at the communication
+        // boundary. Do not cast invalid signed IDs into valid uint32 IDs.
+        if (source.track_id <= 0 || source.class_id < -1 || source.class_id > 255) continue;
+        GuiTrackMetadata track;
+        track.track_id = static_cast<std::uint32_t>(source.track_id);
+        track.x = source.x; track.y = source.y;
+        track.width = source.width; track.height = source.height;
+        track.confidence = source.confidence;
+        track.class_id = source.class_id < 0 ? 255 : static_cast<std::uint8_t>(source.class_id);
+        metadata.tracks.push_back(track);
+    }
 
     // C++ Track 구조체를 직접 보내지 않고 protocol의 고정 byte layout으로 만든다.
     std::vector<std::uint8_t> packet;
-    if (!encode_tracking_metadata(
+    if (!protocol_->encode_metadata(
             metadata, metadata_config_.max_packet_bytes, packet))
     {
         Logger::error(
-            "[GuiSender] Track metadata가 설정한 UDP packet 크기를 초과했습니다");
+            "[GuiSender] Metadata is not representable in the configured protocol/packet limit");
         return false;
     }
 
@@ -344,6 +357,10 @@ bool GuiSender::send(
         return false;
 
     const cv::Mat& source = result.frame->image;
+    if (!protocol_->accepts_frame(source.cols, source.rows)) {
+        Logger::error("[GuiSender] Original frame dimensions do not match GUI protocol");
+        return false;
+    }
     if (!start_gstreamer_pipeline(source.cols, source.rows)) return false;
 
     // 16-bit LWIR 원본을 GUI 표시용 8-bit 영상으로 변환한다. 설정한

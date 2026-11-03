@@ -1,271 +1,197 @@
 #include "gui/gui_protocol.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
-
-#include <arpa/inet.h>
+#include <stdexcept>
 
 namespace {
-// packet cursor를 이동시키며 숫자를 network byte order로 기록하고 읽는다.
-// memcpy를 사용해 alignment와 strict-aliasing에 의존하지 않는다.
-void write_u16(std::uint8_t*& cursor, std::uint16_t value)
+void put(std::vector<std::uint8_t>& out, std::uint64_t value, unsigned bytes)
 {
-    value = htons(value);
-    std::memcpy(cursor, &value, sizeof(value));
-    cursor += sizeof(value);
+    for (unsigned i = bytes; i > 0; --i)
+        out.push_back(static_cast<std::uint8_t>(value >> ((i - 1) * 8)));
+}
+std::uint64_t get(const std::uint8_t* data, unsigned bytes)
+{
+    std::uint64_t value = 0;
+    for (unsigned i = 0; i < bytes; ++i) value = (value << 8) | data[i];
+    return value;
+}
+void put_float(std::vector<std::uint8_t>& out, float value)
+{
+    static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
+    std::uint32_t bits;
+    std::memcpy(&bits, &value, 4);
+    put(out, bits, 4);
+}
+float get_float(const std::uint8_t* data)
+{
+    const auto bits = static_cast<std::uint32_t>(get(data, 4));
+    float value;
+    std::memcpy(&value, &bits, 4);
+    return value;
+}
+int payload_size(GuiCategory category, std::uint8_t command)
+{
+    switch (category) {
+    case GuiCategory::System:
+        switch (static_cast<GuiSystem>(command)) {
+        case GuiSystem::Ack: return 3;
+        case GuiSystem::Init: case GuiSystem::Status: return 8;
+        case GuiSystem::Ping: return 0;
+        }
+        break;
+    case GuiCategory::Mode:
+        if (command == static_cast<std::uint8_t>(GuiModeCommand::Auto)) return 4;
+        if (command == static_cast<std::uint8_t>(GuiModeCommand::Manual)) return 0;
+        break;
+    case GuiCategory::Gimbal:
+        if (command == static_cast<std::uint8_t>(GuiGimbalCommand::Move)) return 2;
+        if (command == static_cast<std::uint8_t>(GuiGimbalCommand::Home)) return 0;
+        break;
+    }
+    return -1;
+}
+std::size_t packet_size(const std::uint8_t* data, std::size_t size)
+{
+    if (!data || size < kGuiCommandHeaderSize || get(data, 4) != kGuiCommandMagic)
+        return 0;
+    const int payload = payload_size(static_cast<GuiCategory>(data[4]), data[5]);
+    if (payload < 0 || get(data + 6, 2) != static_cast<unsigned>(payload)) return 0;
+    return kGuiCommandHeaderSize + payload;
+}
+class PcGuiProtocol final : public IGuiProtocol {
+public:
+    std::size_t command_header_size() const override { return kGuiCommandHeaderSize; }
+    std::size_t command_packet_size(const std::uint8_t* p, std::size_t n) const override
+    { return packet_size(p, n); }
+    bool decode_command(const std::uint8_t* p, std::size_t n, GuiCommand& out) const override
+    { return decode_gui_command(p, n, out); }
+    std::vector<std::uint8_t> encode_command(const GuiCommand& command) const override
+    { return encode_gui_command(command); }
+    bool accepts_frame(std::uint32_t width, std::uint32_t height) const override
+    { return width == 640 && height == 480; }
+    bool encode_metadata(const GuiTrackingMetadata& metadata, std::size_t limit,
+                         std::vector<std::uint8_t>& out) const override
+    { return encode_tracking_metadata(metadata, limit, out); }
+};
 }
 
-void write_u32(std::uint8_t*& cursor, std::uint32_t value)
+std::unique_ptr<IGuiProtocol> GuiProtocolFactory::create(GuiProtocolType type)
 {
-    value = htonl(value);
-    std::memcpy(cursor, &value, sizeof(value));
-    cursor += sizeof(value);
+    if (type == GuiProtocolType::PcV1) return std::make_unique<PcGuiProtocol>();
+    throw std::runtime_error("Unsupported GUI protocol");
 }
-
-void write_u64(std::uint8_t*& cursor, std::uint64_t value)
+std::vector<std::uint8_t> encode_gui_command(const GuiCommand& command)
 {
-    write_u32(cursor, static_cast<std::uint32_t>(value >> 32U));
-    write_u32(cursor, static_cast<std::uint32_t>(value & 0xffffffffU));
-}
-
-void write_i32(std::uint8_t*& cursor, std::int32_t value)
-{
-    std::uint32_t raw = 0;
-    std::memcpy(&raw, &value, sizeof(raw));
-    write_u32(cursor, raw);
-}
-
-void write_float(std::uint8_t*& cursor, float value)
-{
-    static_assert(sizeof(float) == sizeof(std::uint32_t));
-    std::uint32_t raw = 0;
-    std::memcpy(&raw, &value, sizeof(raw));
-    write_u32(cursor, raw);
-}
-
-bool read_u16(
-    const std::uint8_t*& cursor,
-    const std::uint8_t* end,
-    std::uint16_t& value)
-{
-    if (static_cast<std::size_t>(end - cursor) < sizeof(value)) return false;
-    std::memcpy(&value, cursor, sizeof(value));
-    cursor += sizeof(value);
-    value = ntohs(value);
-    return true;
-}
-
-bool read_u32(
-    const std::uint8_t*& cursor,
-    const std::uint8_t* end,
-    std::uint32_t& value)
-{
-    if (static_cast<std::size_t>(end - cursor) < sizeof(value)) return false;
-    std::memcpy(&value, cursor, sizeof(value));
-    cursor += sizeof(value);
-    value = ntohl(value);
-    return true;
-}
-
-bool read_u64(
-    const std::uint8_t*& cursor,
-    const std::uint8_t* end,
-    std::uint64_t& value)
-{
-    std::uint32_t high = 0;
-    std::uint32_t low = 0;
-    if (!read_u32(cursor, end, high) || !read_u32(cursor, end, low))
-        return false;
-    value = (static_cast<std::uint64_t>(high) << 32U) | low;
-    return true;
-}
-
-bool read_i32(
-    const std::uint8_t*& cursor,
-    const std::uint8_t* end,
-    std::int32_t& value)
-{
-    std::uint32_t raw = 0;
-    if (!read_u32(cursor, end, raw)) return false;
-    std::memcpy(&value, &raw, sizeof(value));
-    return true;
-}
-
-bool read_float(
-    const std::uint8_t*& cursor,
-    const std::uint8_t* end,
-    float& value)
-{
-    std::uint32_t raw = 0;
-    if (!read_u32(cursor, end, raw)) return false;
-    std::memcpy(&value, &raw, sizeof(value));
-    return true;
-}
-}
-
-// 선택 ID command를 ABI 독립적인 고정 크기 network packet으로 변환한다.
-std::array<std::uint8_t, kGuiCommandPacketSize> encode_gui_command(
-    const GuiCommand& command)
-{
-    std::array<std::uint8_t, kGuiCommandPacketSize> packet{};
-    std::uint8_t* cursor = packet.data();
-
-    // command header:
-    // magic은 LWIR command 여부, version은 wire format 호환성,
-    // type은 SelectTrack 명령 종류를 나타낸다.
-    write_u32(cursor, kGuiCommandMagic);
-    write_u16(cursor, kGuiProtocolVersion);
-    write_u16(cursor, static_cast<std::uint16_t>(command.type));
-
-    // int의 메모리 표현을 직접 전송하지 않고 명시적인 32-bit 값으로 바꾼다.
-    // -1의 bit pattern도 그대로 보존하기 위해 memcpy로 signed/unsigned를 옮긴다.
-    const std::int32_t track_id = static_cast<std::int32_t>(command.track_id);
-    std::uint32_t raw_track_id = 0;
-    std::memcpy(&raw_track_id, &track_id, sizeof(raw_track_id));
-    write_u32(cursor, raw_track_id);
+    const int size = payload_size(command.category, command.command);
+    if (size < 0 || command.payload.size() != static_cast<std::size_t>(size)) return {};
+    std::vector<std::uint8_t> packet;
+    put(packet, kGuiCommandMagic, 4);
+    put(packet, static_cast<std::uint8_t>(command.category), 1);
+    put(packet, command.command, 1);
+    put(packet, size, 2);
+    packet.insert(packet.end(), command.payload.begin(), command.payload.end());
     return packet;
 }
-
-// TCP에서 모은 command packet을 검증하고 애플리케이션용 GuiCommand로 복원한다.
-bool decode_gui_command(
-    const std::uint8_t* data,
-    std::size_t size,
-    GuiCommand& command)
+bool decode_gui_command(const std::uint8_t* data, std::size_t size, GuiCommand& command)
 {
-    // 고정 크기보다 짧거나 긴 TCP command는 stream 경계가 어긋난 것으로 본다.
-    if (!data || size != kGuiCommandPacketSize) return false;
-
-    const std::uint8_t* cursor = data;
-    const std::uint8_t* end = data + size;
-    std::uint32_t magic = 0;
-    std::uint16_t version = 0;
-    std::uint16_t raw_type = 0;
-    std::uint32_t raw_track_id = 0;
-    if (!read_u32(cursor, end, magic) ||
-        !read_u16(cursor, end, version) ||
-        !read_u16(cursor, end, raw_type) ||
-        !read_u32(cursor, end, raw_track_id))
-        return false;
-
-    // 다른 protocol, 지원하지 않는 version/type을 애플리케이션 상태에 반영하지 않는다.
-    if (magic != kGuiCommandMagic || version != kGuiProtocolVersion ||
-        raw_type != static_cast<std::uint16_t>(GuiCommandType::SelectTrack))
-        return false;
-
-    std::int32_t track_id = 0;
-    std::memcpy(&track_id, &raw_track_id, sizeof(track_id));
-    if (track_id < -1) return false;
-
-    command.type = GuiCommandType::SelectTrack;
-    command.track_id = track_id;
-    return cursor == end;
+    const auto expected = packet_size(data, size);
+    if (!expected || size != expected) return false;
+    command = {static_cast<GuiCategory>(data[4]), data[5],
+               std::vector<std::uint8_t>(data + kGuiCommandHeaderSize, data + size)};
+    return true;
+}
+namespace {
+bool display_track(const GuiTrackMetadata& source, GuiTrackMetadata& track)
+{
+    if (!source.track_id || !std::isfinite(source.confidence) ||
+        source.confidence < 0 || source.confidence > 1 ||
+        !std::isfinite(source.x) || !std::isfinite(source.y) ||
+        !std::isfinite(source.width) || !std::isfinite(source.height) ||
+        source.width <= 0 || source.height <= 0) return false;
+    // Use double for addition so finite float inputs cannot overflow while clipping.
+    const double left = std::max(0.0, static_cast<double>(source.x));
+    const double top = std::max(0.0, static_cast<double>(source.y));
+    const double right = std::min(640.0, static_cast<double>(source.x) + source.width);
+    const double bottom = std::min(480.0, static_cast<double>(source.y) + source.height);
+    if (right <= left || bottom <= top) return false;
+    track = source;
+    track.x = static_cast<float>(left); track.y = static_cast<float>(top);
+    track.width = static_cast<float>(right - left);
+    track.height = static_cast<float>(bottom - top);
+    return true;
+}
 }
 
-// 한 frame의 Track 목록을 하나의 bounded UDP metadata packet으로 직렬화한다.
-bool encode_tracking_metadata(
-    const GuiTrackingMetadata& metadata,
-    std::size_t max_packet_bytes,
-    std::vector<std::uint8_t>& packet)
+bool encode_tracking_metadata(const GuiTrackingMetadata& metadata,
+                              std::size_t limit, std::vector<std::uint8_t>& packet)
 {
-    // 곱셈 overflow나 표현할 수 없는 track count를 packet 할당 전에 차단한다.
-    if (metadata.tracks.size() > std::numeric_limits<std::uint32_t>::max())
-        return false;
-    if (metadata.tracks.size() >
-        (std::numeric_limits<std::size_t>::max() - kGuiMetadataHeaderSize) /
-            kGuiTrackMetadataSize)
-        return false;
-
-    const std::size_t packet_size = kGuiMetadataHeaderSize +
-        metadata.tracks.size() * kGuiTrackMetadataSize;
-    if (packet_size > max_packet_bytes) return false;
-
-    packet.resize(packet_size);
-    std::uint8_t* cursor = packet.data();
-
-    // frame header에는 영상과 metadata를 대응시키는 ID/timestamp, bbox 좌표계의
-    // 기준 크기, 이어지는 Track record 개수를 기록한다.
-    write_u32(cursor, kGuiMetadataMagic);
-    write_u16(cursor, kGuiProtocolVersion);
-    write_u16(cursor, static_cast<std::uint16_t>(GuiMetadataType::Tracking));
-    write_u64(cursor, metadata.frame_id);
-    write_u32(cursor, metadata.rtp_timestamp);
-    write_u64(cursor, metadata.gui_started_us);
-    write_u32(cursor, metadata.width);
-    write_u32(cursor, metadata.height);
-    write_u32(cursor, static_cast<std::uint32_t>(metadata.tracks.size()));
-
-    // 각 Track record는 식별 정보와 원본 frame pixel 좌표 bbox를 고정 순서로 담는다.
-    for (const Track& track : metadata.tracks)
-    {
-        write_i32(cursor, track.track_id);
-        write_i32(cursor, track.class_id);
-        write_float(cursor, track.confidence);
-        write_float(cursor, track.x);
-        write_float(cursor, track.y);
-        write_float(cursor, track.width);
-        write_float(cursor, track.height);
+    if (!metadata.frame_id || metadata.width != 640 || metadata.height != 480 ||
+        limit < kGuiMetadataHeaderSize) return false;
+    const auto capacity = (std::min(limit, std::size_t{65507}) - kGuiMetadataHeaderSize)
+                          / kGuiTrackMetadataSize;
+    std::vector<GuiTrackMetadata> selected;
+    selected.reserve(std::min(capacity, metadata.tracks.size()));
+    // Approved overflow policy: valid selected target first, then stable input
+    // order. Exclusion here affects display only, never target/tracker state.
+    if (capacity && metadata.selected_track_id) {
+        for (const auto& source : metadata.tracks) {
+            GuiTrackMetadata track;
+            if (source.track_id == metadata.selected_track_id && display_track(source, track)) {
+                selected.push_back(track);
+                break;
+            }
+        }
     }
-    return cursor == packet.data() + packet.size();
+    const bool prioritized = !selected.empty();
+    for (const auto& source : metadata.tracks) {
+        if (selected.size() == capacity) break;
+        if (prioritized && source.track_id == metadata.selected_track_id) continue;
+        GuiTrackMetadata track;
+        if (display_track(source, track)) selected.push_back(track);
+    }
+    std::vector<std::uint8_t> encoded;
+    encoded.reserve(kGuiMetadataHeaderSize + selected.size() * kGuiTrackMetadataSize);
+    put(encoded, kGuiMetadataMagic, 4);
+    put(encoded, metadata.frame_id, 8);
+    put(encoded, metadata.rtp_timestamp, 4);
+    put(encoded, metadata.gui_started_us, 8);
+    put(encoded, selected.size(), 4);
+    for (const auto& track : selected) {
+        put(encoded, track.track_id, 4);
+        put_float(encoded, track.x);
+        put_float(encoded, track.y);
+        put_float(encoded, track.width);
+        put_float(encoded, track.height);
+        put(encoded, track.class_id, 1);
+        put_float(encoded, track.confidence);
+    }
+    packet = std::move(encoded);
+    return true;
 }
-
-// metadata datagram 전체를 검증한 뒤 frame 정보와 Track 목록으로 복원한다.
-bool decode_tracking_metadata(
-    const std::uint8_t* data,
-    std::size_t size,
-    GuiTrackingMetadata& metadata)
+bool decode_tracking_metadata(const std::uint8_t* data, std::size_t size,
+                              GuiTrackingMetadata& metadata)
 {
-    // 최소 header보다 작은 datagram은 필드 읽기를 시도하지 않는다.
-    if (!data || size < kGuiMetadataHeaderSize) return false;
-
-    const std::uint8_t* cursor = data;
-    const std::uint8_t* end = data + size;
-    std::uint32_t magic = 0;
-    std::uint16_t version = 0;
-    std::uint16_t raw_type = 0;
-    std::uint32_t track_count = 0;
-    if (!read_u32(cursor, end, magic) ||
-        !read_u16(cursor, end, version) ||
-        !read_u16(cursor, end, raw_type) ||
-        !read_u64(cursor, end, metadata.frame_id) ||
-        !read_u32(cursor, end, metadata.rtp_timestamp) ||
-        !read_u64(cursor, end, metadata.gui_started_us) ||
-        !read_u32(cursor, end, metadata.width) ||
-        !read_u32(cursor, end, metadata.height) ||
-        !read_u32(cursor, end, track_count))
-        return false;
-
-    // header 식별자와 선언된 track count가 실제 datagram 전체 크기와 정확히
-    // 일치해야 이후 record 경계를 신뢰할 수 있다.
-    if (magic != kGuiMetadataMagic || version != kGuiProtocolVersion ||
-        raw_type != static_cast<std::uint16_t>(GuiMetadataType::Tracking))
-        return false;
-    if (static_cast<std::size_t>(track_count) >
-        (std::numeric_limits<std::size_t>::max() - kGuiMetadataHeaderSize) /
-            kGuiTrackMetadataSize)
-        return false;
-    if (size != kGuiMetadataHeaderSize +
-            static_cast<std::size_t>(track_count) * kGuiTrackMetadataSize)
-        return false;
-
-    // header 검증이 끝난 뒤에만 출력 목록을 교체하고 Track record를 복원한다.
-    metadata.tracks.clear();
-    metadata.tracks.reserve(track_count);
-    for (std::uint32_t i = 0; i < track_count; ++i)
-    {
-        Track track;
-        std::int32_t track_id = -1;
-        std::int32_t class_id = -1;
-        if (!read_i32(cursor, end, track_id) ||
-            !read_i32(cursor, end, class_id) ||
-            !read_float(cursor, end, track.confidence) ||
-            !read_float(cursor, end, track.x) ||
-            !read_float(cursor, end, track.y) ||
-            !read_float(cursor, end, track.width) ||
-            !read_float(cursor, end, track.height))
-            return false;
-        track.track_id = track_id;
-        track.class_id = class_id;
-        metadata.tracks.push_back(track);
+    if (!data || size < kGuiMetadataHeaderSize || size > 65507 ||
+        get(data, 4) != kGuiMetadataMagic || !get(data + 4, 8)) return false;
+    const auto count = get(data + 24, 4);
+    if (count > (size - kGuiMetadataHeaderSize) / kGuiTrackMetadataSize ||
+        size != kGuiMetadataHeaderSize + count * kGuiTrackMetadataSize) return false;
+    GuiTrackingMetadata decoded;
+    decoded.frame_id = get(data + 4, 8);
+    decoded.rtp_timestamp = get(data + 12, 4);
+    decoded.gui_started_us = get(data + 16, 8);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto* p = data + kGuiMetadataHeaderSize + i * kGuiTrackMetadataSize;
+        GuiTrackMetadata source, track;
+        source.track_id = static_cast<std::uint32_t>(get(p, 4));
+        source.x = get_float(p + 4); source.y = get_float(p + 8);
+        source.width = get_float(p + 12); source.height = get_float(p + 16);
+        source.class_id = p[20]; source.confidence = get_float(p + 21);
+        if (display_track(source, track)) decoded.tracks.push_back(track);
     }
-    return cursor == end;
+    metadata = std::move(decoded);
+    return true;
 }

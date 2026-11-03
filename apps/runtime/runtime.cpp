@@ -101,6 +101,13 @@ RuntimeConfig load_runtime_config(const std::string& path)
     c.measurement = config_parser::load_measurement_config(root["measurement"]);
     c.gui = config_parser::load_gui_config(root["gui"]);
 
+    if (c.gui.enabled)
+    {
+        const auto protocol = GuiProtocolFactory::create(c.gui.metadata.protocol);
+        if (!protocol->accepts_frame(c.model.camera_input.width, c.model.camera_input.height))
+            throw std::runtime_error("Camera dimensions do not match the configured GUI protocol");
+    }
+
     if (!c.gui.enabled && c.control.enabled)
         throw std::runtime_error(
             "유효하지 않은 Runtime 설정입니다: control.enabled=true에는 "
@@ -290,7 +297,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
         {
             gui_receiver_ = std::make_unique<GuiReceiver>(config_.gui.command);
             gui_receiver_thread_ = std::make_unique<GuiReceiverThread>(
-                *gui_receiver_, target_selector_);
+                *gui_receiver_);
         }
     }
 }

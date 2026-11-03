@@ -56,8 +56,8 @@ int main()
     if (config.gui.enabled ||
         config.gui.video.host != "127.0.0.1" ||
         config.gui.video.port != 5000 ||
-        config.gui.video.codec != GuiVideoCodec::JPEG ||
-        config.gui.video.encoder != "mppjpegenc" ||
+        config.gui.video.codec != GuiVideoCodec::H264 ||
+        config.gui.video.encoder != "mpph264enc" ||
         config.gui.video.bitrate_kbps != 3000 ||
         config.gui.video.fps != 30 ||
         config.gui.video.rtp_mtu != 1200 ||
@@ -88,5 +88,24 @@ int main()
     gui["video"]["jpeg_quality"] = 80;
     gui["video"]["keyframe_interval"] = 0;
     if (!rejects()) return 13;
+    gui["video"]["keyframe_interval"] = 30;
+    gui["metadata"]["protocol"] = "lwim_v2";
+    if (!rejects()) return 14;
+    gui["metadata"]["protocol"] = "pc_v1";
+    gui["command"]["protocol"] = "unknown";
+    if (!rejects()) return 15;
+    gui["command"]["protocol"] = "pc_v1";
+    gui["command"]["handler"] = "auto_tracking";
+    if (!rejects()) return 16;
+    gui["command"]["handler"] = "deferred";
+    auto typed = config_parser::load_gui_config(gui);
+    if (typed.metadata.protocol != GuiProtocolType::PcV1 ||
+        typed.command.protocol != GuiProtocolType::PcV1 ||
+        typed.command.handler != GuiCommandHandlerType::Deferred) return 17;
+    // New strategy keys are optional for existing YAML configurations.
+    gui["metadata"].remove("protocol");
+    gui["command"].remove("protocol");
+    gui["command"].remove("handler");
+    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Deferred) return 18;
     return 0;
 }

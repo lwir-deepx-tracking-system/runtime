@@ -115,10 +115,15 @@ gui:
     host: 127.0.0.1
     port: 5000
 
-    # Compare with codec: h264 / encoder: mpph264enc on Orange Pi.
-    # Software encoders (jpegenc/x264enc) are explicit development-only choices.
-    codec: jpeg
-    encoder: mppjpegenc
+    # 영상 코덱과 인코더를 아래 조합 중 하나로 설정한다.
+    # JPEG 소프트웨어(CPU): codec: jpeg / encoder: jpegenc
+    # JPEG 하드웨어(MPP):   codec: jpeg / encoder: mppjpegenc
+    # H.264 소프트웨어(CPU): codec: h264 / encoder: x264enc
+    # H.264 하드웨어(MPP):   codec: h264 / encoder: mpph264enc
+    # PC 수신 설정의 video.codec도 송신 codec과 동일하게 맞춰야 한다.
+    # 소프트웨어 인코더는 개발·CPU 시험용이며, 하드웨어 인코더 실패 시 자동 전환하지 않는다.
+    codec: h264
+    encoder: mpph264enc
 
     bitrate_kbps: 3000
     jpeg_quality: 80
@@ -133,6 +138,7 @@ gui:
   # ----------------------------------------------------------
 
   metadata:
+    protocol: pc_v1  # PC LWIR: 28-byte header + 25-byte tracks, original 640x480
     enabled: true
 
     host: 127.0.0.1
@@ -143,10 +149,12 @@ gui:
   # ----------------------------------------------------------
   # 6-3. GUI Command
   # GUI -> Orange Pi
-  # 선택한 track_id를 TCP로 전달
+  # PC 명령 수신 및 ACK/STATUS 응답 (ID 기반 추적은 추후 구현)
   # ----------------------------------------------------------
 
   command:
+    protocol: pc_v1  # PC category/command/length TCP framing
+    handler: deferred  # PING/STATUS supported; AUTO/HOME return NOT_READY, MOVE ignored
     enabled: true
 
     bind_address: 0.0.0.0

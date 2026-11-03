@@ -36,8 +36,9 @@ Detection은 `DxAppDetectionPipeline` 한 객체가 전처리, 추론, 후처리
 | `gui` | 활성 | 비활성 |
 | `full` | 활성 | 활성 |
 
-Control은 GUI에서 선택한 Track을 사용하므로 GUI 없이 Control만 활성화하는 설정은 허용하지
-않습니다. 실행 중 `Ctrl+C`를 입력하면 프레임 생산을 멈추고 queue를 순서대로 닫은 뒤 worker를
+GUI 없이 Control만 활성화하는 설정은 허용하지 않습니다. 현재 `deferred` 명령 처리기는
+TCP 입력 ID를 TargetSelector에 적용하지 않으며, ID 기반 추적·짐벌 동작은 추후 구현합니다.
+실행 중 `Ctrl+C`를 입력하면 프레임 생산을 멈추고 queue를 순서대로 닫은 뒤 worker를
 join하고 측정 결과를 저장합니다.
 
 ### Capture
@@ -160,6 +161,11 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 - Benchmark sequence 범위: `sequence.range_enabled`, `sequence.start`, `sequence.end`
 - Benchmark dataset/result root: `path.dataset_root`, `path.output_root`
 - Runtime/Benchmark model 설정: `model.config`
+
+Runtime–PC 통신은 [PC 통신 계약](docs/pc_communication.md)을 따릅니다.
+`gui.metadata.protocol`, `gui.command.protocol`, `gui.command.handler`를 AppConfig가
+검증하고 팩토리가 직렬화/명령 처리 전략을 생성합니다. 기본 `deferred` 처리기는
+PING/상태 응답만 제공하며 입력 Track ID 기반 추적과 짐벌 동작은 추후 구현합니다.
 
 ## 현재 구현 상태
 
