@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <stdexcept>
 
 namespace {
 void put(std::vector<std::uint8_t>& out, std::uint64_t value, unsigned bytes)
@@ -61,28 +60,21 @@ std::size_t packet_size(const std::uint8_t* data, std::size_t size)
     if (payload < 0 || get(data + 6, 2) != static_cast<unsigned>(payload)) return 0;
     return kGuiCommandHeaderSize + payload;
 }
-class PcGuiProtocol final : public IGuiProtocol {
-public:
-    std::size_t command_header_size() const override { return kGuiCommandHeaderSize; }
-    std::size_t command_packet_size(const std::uint8_t* p, std::size_t n) const override
-    { return packet_size(p, n); }
-    bool decode_command(const std::uint8_t* p, std::size_t n, GuiCommand& out) const override
-    { return decode_gui_command(p, n, out); }
-    std::vector<std::uint8_t> encode_command(const GuiCommand& command) const override
-    { return encode_gui_command(command); }
-    bool accepts_frame(std::uint32_t width, std::uint32_t height) const override
-    { return width == 640 && height == 480; }
-    bool encode_metadata(const GuiTrackingMetadata& metadata, std::size_t limit,
-                         std::vector<std::uint8_t>& out) const override
-    { return encode_tracking_metadata(metadata, limit, out); }
-};
 }
 
-std::unique_ptr<IGuiProtocol> GuiProtocolFactory::create(GuiProtocolType type)
-{
-    if (type == GuiProtocolType::PcV1) return std::make_unique<PcGuiProtocol>();
-    throw std::runtime_error("Unsupported GUI protocol");
-}
+std::size_t PcGuiProtocol::command_header_size() const { return kGuiCommandHeaderSize; }
+std::size_t PcGuiProtocol::command_packet_size(const std::uint8_t* p, std::size_t n) const
+{ return packet_size(p, n); }
+bool PcGuiProtocol::decode_command(const std::uint8_t* p, std::size_t n, GuiCommand& out) const
+{ return decode_gui_command(p, n, out); }
+std::vector<std::uint8_t> PcGuiProtocol::encode_command(const GuiCommand& command) const
+{ return encode_gui_command(command); }
+bool PcGuiProtocol::accepts_frame(std::uint32_t width, std::uint32_t height) const
+{ return width == 640 && height == 480; }
+bool PcGuiProtocol::encode_metadata(const GuiTrackingMetadata& metadata, std::size_t limit,
+                                    std::vector<std::uint8_t>& out) const
+{ return encode_tracking_metadata(metadata, limit, out); }
+
 std::vector<std::uint8_t> encode_gui_command(const GuiCommand& command)
 {
     const int size = payload_size(command.category, command.command);

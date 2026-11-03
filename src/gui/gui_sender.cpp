@@ -73,7 +73,7 @@ GuiSender::GuiSender(
     std::uint16_t clip_max)
     : video_config_(std::move(video_config)),
       metadata_config_(std::move(metadata_config)),
-      protocol_(GuiProtocolFactory::create(metadata_config_.protocol)),
+      protocol_(std::make_unique<PcGuiProtocol>()),
       clip_min_(clip_min),
       clip_max_(clip_max)
 {

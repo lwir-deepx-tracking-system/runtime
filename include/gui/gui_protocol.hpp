@@ -5,8 +5,6 @@
 #include <memory>
 #include <vector>
 
-#include "config/app_config.hpp"
-
 // PC application contract. Multibyte values (including float bits) are big endian.
 constexpr std::uint32_t kGuiCommandMagic = 0x4c574952U; // LWIR
 constexpr std::size_t kGuiCommandHeaderSize = 8;
@@ -41,7 +39,7 @@ struct GuiTrackingMetadata {
     std::uint64_t frame_id = 0;
     std::uint32_t rtp_timestamp = 0;
     std::uint64_t gui_started_us = 0; // system_clock epoch microseconds
-    // PC v1 has no dimensions on the wire; original pixels must be 640x480.
+    // PC protocol has no dimensions on the wire; original pixels must be 640x480.
     std::uint32_t width = 640;
     std::uint32_t height = 480;
     std::vector<GuiTrackMetadata> tracks;
@@ -64,9 +62,16 @@ public:
                                  std::vector<std::uint8_t>&) const = 0;
 };
 
-class GuiProtocolFactory {
+// Single supported wire implementation; no configuration selector is needed.
+class PcGuiProtocol final : public IGuiProtocol {
 public:
-    static std::unique_ptr<IGuiProtocol> create(GuiProtocolType type);
+    std::size_t command_header_size() const override;
+    std::size_t command_packet_size(const std::uint8_t*, std::size_t) const override;
+    bool decode_command(const std::uint8_t*, std::size_t, GuiCommand&) const override;
+    std::vector<std::uint8_t> encode_command(const GuiCommand&) const override;
+    bool accepts_frame(std::uint32_t width, std::uint32_t height) const override;
+    bool encode_metadata(const GuiTrackingMetadata&, std::size_t,
+                         std::vector<std::uint8_t>&) const override;
 };
 
 // PC codecs also exposed for independent wire fixtures and receiver tests.

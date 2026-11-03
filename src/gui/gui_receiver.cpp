@@ -49,7 +49,7 @@ void close_socket(int fd)
 
 GuiReceiver::GuiReceiver(GuiCommandConfig config, std::unique_ptr<IGuiCommandHandler> handler)
     : config_(std::move(config)),
-      protocol_(GuiProtocolFactory::create(config_.protocol)),
+      protocol_(std::make_unique<PcGuiProtocol>()),
       handler_(handler ? std::move(handler) : GuiCommandHandlerFactory::create(config_.handler))
 {
     if (pthread_mutex_init(&socket_mutex_, nullptr) != 0)

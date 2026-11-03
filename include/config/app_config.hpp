@@ -92,12 +92,10 @@ struct GuiVideoConfig
     int rtp_mtu = 0;
 };
 
-enum class GuiProtocolType { PcV1 };
 enum class GuiCommandHandlerType { Deferred };
 
 struct GuiMetadataConfig
 {
-    GuiProtocolType protocol = GuiProtocolType::PcV1;
     // 영상과 별도 포트로 보내는 Tracking metadata UDP 조건이다.
     bool enabled = false;
     std::string host;
@@ -107,7 +105,6 @@ struct GuiMetadataConfig
 
 struct GuiCommandConfig
 {
-    GuiProtocolType protocol = GuiProtocolType::PcV1;
     GuiCommandHandlerType handler = GuiCommandHandlerType::Deferred;
     // PC 명령 및 상태 응답을 전달하는 TCP listener 조건이다.
     bool enabled = false;

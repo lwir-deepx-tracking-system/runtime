@@ -18,7 +18,7 @@ std::vector<std::uint8_t> hex(const std::string& text)
 
 int main()
 {
-    auto protocol = GuiProtocolFactory::create(GuiProtocolType::PcV1);
+    auto protocol = std::make_unique<PcGuiProtocol>();
     // Independent fixtures taken from PC ControlTest, including the full uint32 ID range.
     const std::vector<std::vector<std::uint8_t>> commands = {
         hex("4c57495202010004ffffffff"), hex("4c57495202020000"),
@@ -120,9 +120,7 @@ int main()
         protocol->encode_command(replies[0]) != hex("4c57495201010003020105")) return 17;
     // A PC must not publish board state to the runtime.
     if (handler->handle(handler->initial_state(), replies)) return 18;
-    // Factories must fail rather than fall back to another wire/policy strategy.
-    try { GuiProtocolFactory::create(static_cast<GuiProtocolType>(99)); return 19; }
-    catch (const std::runtime_error&) {}
+    // Unknown command policies must fail instead of falling back.
     try { GuiCommandHandlerFactory::create(static_cast<GuiCommandHandlerType>(99)); return 20; }
     catch (const std::runtime_error&) {}
     return 0;

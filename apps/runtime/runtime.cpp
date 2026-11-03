@@ -103,7 +103,7 @@ RuntimeConfig load_runtime_config(const std::string& path)
 
     if (c.gui.enabled)
     {
-        const auto protocol = GuiProtocolFactory::create(c.gui.metadata.protocol);
+        const auto protocol = std::make_unique<PcGuiProtocol>();
         if (!protocol->accepts_frame(c.model.camera_input.width, c.model.camera_input.height))
             throw std::runtime_error("Camera dimensions do not match the configured GUI protocol");
     }

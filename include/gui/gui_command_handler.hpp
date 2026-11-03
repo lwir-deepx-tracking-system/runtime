@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/app_config.hpp"
 #include "gui/gui_protocol.hpp"
 
 // Application policy strategy. It has no socket, YAML or tracking dependencies.

@@ -6,7 +6,7 @@ The [1103 roadmap](https://app.notion.com/p/40c9de3f14a28074905bd2239d6e9fdb)
 describes wider state/control/gimbal work; this change implements communication
 with deferred actuation, not that whole roadmap. Its older branch/commit baseline
 is superseded for this task by the user's `main` / `185df16` baseline.
-`pc_v1` is the local configuration name; no version field is transmitted.
+The wire contract has no version field or YAML protocol selector.
 The PC repository is not modified by this change.
 
 ## Configuration and responsibilities
@@ -25,13 +25,11 @@ gui:
     # Keep bitrate_kbps, jpeg_quality, keyframe_interval, fps and rtp_mtu.
   metadata:
     enabled: true
-    protocol: pc_v1
     host: <PC IPv4>
     port: 5001
     max_packet_bytes: 1200
   command:
     enabled: true
-    protocol: pc_v1
     handler: deferred
     bind_address: 0.0.0.0
     port: 5002
@@ -40,18 +38,19 @@ gui:
 
 This is an excerpt; retain the other required keys in `config/runtime.yaml`.
 On the PC, set `control.host` to the board IP and select the same video codec.
-The checked-in runtime keeps GUI/control disabled and destinations on localhost.
+Set GUI enablement and destination/listener addresses in `config/runtime.yaml`
+for the deployment.
 JPEG remains selectable with `codec: jpeg` / `encoder: mppjpegenc`; Docker CPU
 transport tests explicitly select `x264enc` or `jpegenc`. No automatic encoder
 fallback is performed.
 
-`GuiProtocolFactory` creates the `IGuiProtocol` wire strategy selected by
-`metadata.protocol` / `command.protocol`. `GuiCommandHandlerFactory` creates the
+`IGuiProtocol` separates wire encoding from transport. The single supported
+implementation, `PcGuiProtocol`, is constructed directly; no protocol enum,
+factory or YAML selector is needed. `GuiCommandHandlerFactory` creates the
 `IGuiCommandHandler` application strategy selected by `command.handler`.
-Unknown settings fail during configuration; omitted new keys default to
-`pc_v1` / `deferred`. A new protocol/handler is added through the interface,
-factory and typed configuration parser, without changing socket framing loops
-or reconnecting the worker directly to target selection.
+Unknown handler settings fail during configuration; an omitted handler defaults
+to `deferred`. Future target-following behavior can replace that strategy without
+reconnecting the worker directly to target selection.
 
 `GuiSender` owns video/metadata transport. `GuiReceiver` owns the TCP session,
 validates framing before allocating/reading the body, and delegates replies to
