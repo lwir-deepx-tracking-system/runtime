@@ -10,6 +10,7 @@
 
 #include "config/app_config.hpp"
 #include "common/track.hpp"
+#include "gui/gui_protocol.hpp"
 
 struct _GstAppSrc;
 struct _GstElement;
@@ -44,6 +45,7 @@ class GuiSender
 private:
     GuiVideoConfig video_config_;
     GuiMetadataConfig metadata_config_;
+    std::unique_ptr<IGuiProtocol> protocol_;
     std::uint16_t clip_min_;
     std::uint16_t clip_max_;
 

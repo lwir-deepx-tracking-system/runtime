@@ -6,13 +6,8 @@
 
 #include "common/logger.hpp"
 
-GuiReceiverThread::GuiReceiverThread(
-    GuiReceiver& receiver,
-    TargetSelector& target_selector,
-    std::function<void(int)> model_change_handler)
-    : receiver_(receiver),
-      target_selector_(target_selector),
-      model_change_handler_(std::move(model_change_handler))
+GuiReceiverThread::GuiReceiverThread(GuiReceiver& receiver)
+    : receiver_(receiver)
 {
 }
 
@@ -44,7 +39,7 @@ void* GuiReceiverThread::thread_func(void* arg)
     return nullptr;
 }
 
-// 검증된 SelectTrack command를 TargetSelector의 공유 선택 ID에 반영한다.
+// PC 통신 session을 처리한다. 입력 ID 기반 추적은 여기서 수행하지 않는다.
 void GuiReceiverThread::run()
 {
     Logger::info("[GuiReceiverThread] 시작");
@@ -52,16 +47,8 @@ void GuiReceiverThread::run()
 
     try
     {
-        // GuiReceiver가 network와 protocol 검증을 끝낸 command만 반환하므로,
-        // 여기서는 SelectTrack의 ID를 thread-safe 상태에 반영하는 일만 한다.
-        while (receiver_.receive(command))
-        {
-            if (command.type == GuiCommandType::SelectTrack)
-                target_selector_.set_selected_id(command.track_id);
-            else if (command.type == GuiCommandType::ChangeModel &&
-                     model_change_handler_)
-                model_change_handler_(command.model_id);
-        }
+        // The receiver delegates commands to its configured handler strategy.
+        while (receiver_.receive(command)) {}
 
         if (!receiver_.stop_requested())
         {
@@ -82,5 +69,6 @@ void GuiReceiverThread::run()
         failed_.store(true);
         Logger::error("[GuiReceiverThread] " + error_message_);
     }
+    receiver_.finish_session();
     Logger::info("[GuiReceiverThread] 종료");
 }

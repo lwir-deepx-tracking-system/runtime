@@ -23,7 +23,7 @@ measurement:
 model:
   config: config/model/yolov8n.yaml
 
-# Models that the GUI may select by numeric ID.
+# Internal model catalog. The PC wire protocol does not define model selection.
 model_catalog:
   - id: 1
     config: config/model/yolov8n.yaml
@@ -101,7 +101,20 @@ tracking:
 # ============================================================
 
 control:
+  # 실제 수동 제어 시 enabled: true와 gui.command.handler: manual을 함께 설정한다.
   enabled: false
+  heartbeat_timeout_ms: 1500  # 마지막 유효 PING 이후 수동 이동을 정지할 시간
+  poll_interval_ms: 25       # 프레임과 독립적인 명령·heartbeat 확인 주기
+  gimbal:
+    device: /dev/ttyUSB0     # 실기에서는 /dev/serial/by-id/... 고정 경로 권장
+    baud_rate: 115200
+    write_timeout_ms: 100
+    speed: 30
+    acceleration: 50
+    home_x_deg: 0            # HOME 실행·완료 피드백은 이번 범위에서 제외
+    home_y_deg: 0
+    x_sign: 1               # 축 방향 반전이 필요하면 -1
+    y_sign: 1
 
 
 # ============================================================
@@ -109,8 +122,7 @@ control:
 # ============================================================
 
 gui:
-  # GUI 프로그램이 준비되기 전에는 관련 worker를 시작하지 않는다.
-  enabled: false
+  enabled: true
 
   # ----------------------------------------------------------
   # 6-1. Video
@@ -119,13 +131,14 @@ gui:
   # ----------------------------------------------------------
 
   video:
-    host: 127.0.0.1
+    host: 192.168.50.1
     port: 5000
 
-    # Compare with codec: h264 / encoder: mpph264enc on Orange Pi.
-    # Software encoders (jpegenc/x264enc) are explicit development-only choices.
-    codec: jpeg
-    encoder: mppjpegenc
+    # JPEG : jpegenc / mppjpegenc
+    # H.264 : x264enc / mpph264enc
+
+    codec: h264
+    encoder: mpph264enc
 
     bitrate_kbps: 3000
     jpeg_quality: 80
@@ -142,7 +155,7 @@ gui:
   metadata:
     enabled: true
 
-    host: 127.0.0.1
+    host: 192.168.50.1
     port: 5001
 
     max_packet_bytes: 1200
@@ -150,13 +163,14 @@ gui:
   # ----------------------------------------------------------
   # 6-3. GUI Command
   # GUI -> Orange Pi
-  # 선택한 track_id를 TCP로 전달
+  # PC 명령 수신 및 ACK/STATUS 응답 (ID 기반 추적은 추후 구현)
   # ----------------------------------------------------------
 
   command:
+    handler: deferred  # manual: 실제 수동 방향 제어 / deferred: 통신 시험만
     enabled: true
 
-    bind_address: 0.0.0.0
+    bind_address: 192.168.50.2
     port: 5002
 
     receive_timeout_ms: 1000

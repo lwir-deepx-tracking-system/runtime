@@ -1,10 +1,13 @@
 #include "runtime/runtime.hpp"
 #include <yaml-cpp/yaml.h>
 #include <stdexcept>
+#include <fstream>
+#include <unistd.h>
 
 // 공용 YAML이 runtime에서 지원하는 Detection 및 LWIR 계약으로 파싱되는지 확인한다.
 int main()
 {
+    const auto yaml = YAML::LoadFile("config/runtime.yaml");
     const RuntimeConfig config = load_runtime_config("config/runtime.yaml");
 
     // runtime.yaml의 모델 경로와 고정 Detection 실행 설정 검증.
@@ -57,24 +60,23 @@ int main()
         return 7;
 
     // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
-    if (config.gui.enabled ||
-        config.gui.video.host != "127.0.0.1" ||
+    if (config.gui.enabled != yaml["gui"]["enabled"].as<bool>() ||
+        config.gui.video.host != yaml["gui"]["video"]["host"].as<std::string>() ||
         config.gui.video.port != 5000 ||
-        config.gui.video.codec != GuiVideoCodec::JPEG ||
-        config.gui.video.encoder != "mppjpegenc" ||
+        config.gui.video.codec != GuiVideoCodec::H264 ||
+        config.gui.video.encoder != "mpph264enc" ||
         config.gui.video.bitrate_kbps != 3000 ||
         config.gui.video.fps != 30 ||
         config.gui.video.rtp_mtu != 1200 ||
         !config.gui.metadata.enabled ||
-        config.gui.metadata.host != "127.0.0.1" ||
+        config.gui.metadata.host != yaml["gui"]["metadata"]["host"].as<std::string>() ||
         config.gui.metadata.port != 5001 ||
         config.gui.metadata.max_packet_bytes != 1200 ||
         !config.gui.command.enabled ||
-        config.gui.command.bind_address != "0.0.0.0" ||
+        config.gui.command.bind_address != yaml["gui"]["command"]["bind_address"].as<std::string>() ||
         config.gui.command.port != 5002 ||
         config.gui.command.receive_timeout_ms != 1000)
         return 8;
-    auto yaml = YAML::LoadFile("config/runtime.yaml");
     auto gui = yaml["gui"];
     if (config.gui.video.jpeg_quality != 80 || config.gui.video.keyframe_interval != 30) return 9;
     gui["video"]["codec"] = "h264";
@@ -92,5 +94,64 @@ int main()
     gui["video"]["jpeg_quality"] = 80;
     gui["video"]["keyframe_interval"] = 0;
     if (!rejects()) return 13;
+    gui["video"]["keyframe_interval"] = 30;
+    gui["command"]["handler"] = "auto_tracking";
+    if (!rejects()) return 16;
+    gui["command"]["handler"] = "deferred";
+    auto typed = config_parser::load_gui_config(gui);
+    if (typed.command.handler != GuiCommandHandlerType::Deferred) return 17;
+    // The command handler selection is optional for existing YAML configurations.
+    gui["command"].remove("handler");
+    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Deferred) return 18;
+    gui["command"]["handler"] = "manual";
+    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Manual) return 19;
+    auto control = YAML::Load("enabled: true\nheartbeat_timeout_ms: 800\npoll_interval_ms: 20\ngimbal: {device: /dev/test, baud_rate: 57600, speed: 37, acceleration: 61, home_x_deg: 12, home_y_deg: -5, x_sign: -1, y_sign: 1, write_timeout_ms: 50}\n");
+    auto manual = config_parser::load_control_config(control);
+    if (manual.gimbal.device != "/dev/test" || manual.gimbal.speed != 37 ||
+        manual.gimbal.acceleration != 61 || manual.gimbal.home_x_deg != 12 ||
+        manual.gimbal.home_y_deg != -5 || manual.gimbal.x_sign != -1 ||
+        manual.gimbal.baud_rate != 57600 || manual.heartbeat_timeout_ms != 800) return 20;
+    const auto invalid_control = [&] {
+        try { config_parser::load_control_config(control); } catch (const std::runtime_error&) { return true; }
+        return false;
+    };
+    control["gimbal"]["x_sign"] = 0;
+    if (!invalid_control()) return 21;
+    control["gimbal"]["x_sign"] = 1;
+    control["gimbal"]["home_y_deg"] = 91;
+    if (!invalid_control()) return 22;
+    control["gimbal"]["home_y_deg"] = 0;
+    control["gimbal"]["baud_rate"] = 12345;
+    if (!invalid_control()) return 23;
+    control["gimbal"]["baud_rate"] = 115200;
+    control["poll_interval_ms"] = 900;
+    if (!invalid_control()) return 24;
+    // Enabling actual I/O must require the matching handler and TCP channel.
+    char filename[] = "/tmp/lwir-manual-config-XXXXXX";
+    const int fd = ::mkstemp(filename);
+    if (fd < 0) return 25;
+    ::close(fd);
+    struct RemoveConfig { const char* path; ~RemoveConfig() { ::unlink(path); } } cleanup{filename};
+    auto runtime = YAML::Clone(yaml);
+    runtime["control"]["enabled"] = true;
+    runtime["gui"]["enabled"] = true;
+    runtime["gui"]["command"]["enabled"] = true;
+    runtime["gui"]["command"]["handler"] = "manual";
+    const auto write_config = [&] { std::ofstream out(filename); out << runtime; };
+    write_config();
+    if (!load_runtime_config(filename).control.enabled) return 26;
+    const auto invalid_combination = [&] {
+        write_config();
+        try { load_runtime_config(filename); } catch (const std::runtime_error&) { return true; }
+        return false;
+    };
+    runtime["gui"]["command"]["handler"] = "deferred";
+    if (!invalid_combination()) return 27;
+    runtime["gui"]["command"]["handler"] = "manual";
+    runtime["gui"]["command"]["enabled"] = false;
+    if (!invalid_combination()) return 28;
+    runtime["gui"]["command"]["enabled"] = true;
+    runtime["control"]["enabled"] = false;
+    if (!invalid_combination()) return 29;
     return 0;
 }

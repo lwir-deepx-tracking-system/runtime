@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -31,6 +32,7 @@ class ModelManagerThread
 {
 private:
     ModelCatalogEntry initial_model_;
+    ModelCatalogEntry active_model_;
     DetectionConfig detection_config_;
     ThreadSafeQueue<ModelChangeRequest>& requests_;
     ActivePipelineSlot& active_pipeline_;
@@ -43,6 +45,8 @@ private:
     bool initialized_ = false;
     std::string error_message_;
     std::atomic<int> active_model_id_{0};
+    std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
+        pipeline_creator_;
 
     static void* thread_func(void* arg);
     void run();
@@ -56,7 +60,9 @@ public:
         DetectionConfig detection_config,
         ThreadSafeQueue<ModelChangeRequest>& requests,
         ActivePipelineSlot& active_pipeline,
-        RuntimeControl& runtime_control);
+        RuntimeControl& runtime_control,
+        std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
+            pipeline_creator = {});
 
     void start();
     void wait_until_initialized();

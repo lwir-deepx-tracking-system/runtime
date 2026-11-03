@@ -1,27 +1,16 @@
 #pragma once
 
 #include <atomic>
-#include <functional>
 #include <thread>
 #include <string>
 
 #include "gui/gui_receiver.hpp"
-#include "target/target_selector.hpp"
 
-// GuiReceiver가 수신한 GuiCommand를 TargetSelector 상태에 반영하는 연결 worker.
-//
-// PC GUI -> GuiReceiver::receive() -> GuiCommand
-//   -> GuiReceiverThread -> TargetSelector::set_selected_id()
-//   -> ControlThread의 get_selected_id()
-//
-// socket 처리와 packet decode는 GuiReceiver가 담당한다. 이 클래스는 검증된
-// SelectTrack 명령을 제어 경로가 공유하는 선택 ID 상태에 연결하기만 한다.
+// Owns the TCP session worker; target-following belongs to a future handler strategy.
 class GuiReceiverThread
 {
 private:
     GuiReceiver& receiver_;
-    TargetSelector& target_selector_;
-    std::function<void(int)> model_change_handler_;
     std::thread thread_;
     bool started_ = false;
     std::atomic<bool> failed_{false};
@@ -31,10 +20,7 @@ private:
     void run();
 
 public:
-    GuiReceiverThread(
-        GuiReceiver& receiver,
-        TargetSelector& target_selector,
-        std::function<void(int)> model_change_handler = {});
+    explicit GuiReceiverThread(GuiReceiver& receiver);
 
     // command 수신 worker를 한 번만 시작한다.
     void start();

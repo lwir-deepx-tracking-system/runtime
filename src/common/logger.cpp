@@ -5,6 +5,7 @@
 
 // 기본 로그 레벨은 INFO
 LogLevel Logger::current_level_ = LogLevel::INFO;
+std::mutex Logger::mutex_;
 
 // 현재 로그 레벨을 설정한다.
 void Logger::set_level(LogLevel level)
@@ -74,7 +75,7 @@ void Logger::log(
             break;
     }
 
-    std::lock_guard(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     std::cout << prefix << message << '\n';
 }
 

@@ -59,8 +59,23 @@ struct TrackingConfig {
     bool buffer_snap = false;
 };
 
+struct GimbalConfig {
+    std::string device = "/dev/ttyUSB0";
+    int baud_rate = 115200;
+    int write_timeout_ms = 100;
+    int speed = 30;
+    int acceleration = 50;
+    int home_x_deg = 0;
+    int home_y_deg = 0;
+    int x_sign = 1;
+    int y_sign = 1;
+};
+
 struct ControlConfig {
     bool enabled = false;
+    int heartbeat_timeout_ms = 1500;
+    int poll_interval_ms = 25;
+    GimbalConfig gimbal;
 };
 
 struct MeasurementConfig {
@@ -71,7 +86,7 @@ struct MeasurementConfig {
 // runtime.yaml의 gui 설정은 세 개의 독립적인 통신 경로를 정의한다.
 // Video    : Orange Pi -> PC GUI, JPEG or H.264/RTP/UDP
 // Metadata : Orange Pi -> PC GUI, frame/Track 정보 UDP
-// Command  : PC GUI -> Orange Pi, 선택 track_id TCP
+// Command  : PC 명령 및 보드 ACK/상태 응답 TCP
 enum class GuiVideoCodec
 {
     H264,
@@ -92,6 +107,8 @@ struct GuiVideoConfig
     int rtp_mtu = 0;
 };
 
+enum class GuiCommandHandlerType { Deferred, Manual };
+
 struct GuiMetadataConfig
 {
     // 영상과 별도 포트로 보내는 Tracking metadata UDP 조건이다.
@@ -103,7 +120,8 @@ struct GuiMetadataConfig
 
 struct GuiCommandConfig
 {
-    // GUI 선택 명령을 기다릴 TCP listener 조건이다.
+    GuiCommandHandlerType handler = GuiCommandHandlerType::Deferred;
+    // PC 명령 및 상태 응답을 전달하는 TCP listener 조건이다.
     bool enabled = false;
     std::string bind_address;
     std::uint16_t port = 0;

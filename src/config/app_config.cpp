@@ -195,6 +195,34 @@ ControlConfig load_control_config(const YAML::Node& node)
 {
     ControlConfig c;
     c.enabled = required<bool>(node, "enabled", "control");
+    c.heartbeat_timeout_ms = node["heartbeat_timeout_ms"].as<int>(1500);
+    c.poll_interval_ms = node["poll_interval_ms"].as<int>(25);
+    const auto gimbal = node["gimbal"];
+    if (gimbal) {
+        c.gimbal.device = gimbal["device"].as<std::string>("/dev/ttyUSB0");
+        c.gimbal.baud_rate = gimbal["baud_rate"].as<int>(115200);
+        c.gimbal.write_timeout_ms = gimbal["write_timeout_ms"].as<int>(100);
+        c.gimbal.speed = gimbal["speed"].as<int>(30);
+        c.gimbal.acceleration = gimbal["acceleration"].as<int>(50);
+        c.gimbal.home_x_deg = gimbal["home_x_deg"].as<int>(0);
+        c.gimbal.home_y_deg = gimbal["home_y_deg"].as<int>(0);
+        c.gimbal.x_sign = gimbal["x_sign"].as<int>(1);
+        c.gimbal.y_sign = gimbal["y_sign"].as<int>(1);
+    }
+    if (c.heartbeat_timeout_ms < 100 || c.heartbeat_timeout_ms > 60000 ||
+        c.poll_interval_ms < 1 || c.poll_interval_ms > c.heartbeat_timeout_ms / 2)
+        throw std::runtime_error("control heartbeat/poll interval is invalid");
+    if (c.gimbal.device.empty() || c.gimbal.write_timeout_ms < 1 ||
+        c.gimbal.write_timeout_ms > c.heartbeat_timeout_ms / 2)
+        throw std::runtime_error("control.gimbal device/write timeout is invalid");
+    if (c.gimbal.baud_rate != 9600 && c.gimbal.baud_rate != 57600 && c.gimbal.baud_rate != 115200)
+        throw std::runtime_error("control.gimbal.baud_rate must be 9600, 57600 or 115200");
+    if (c.gimbal.speed < 1 || c.gimbal.acceleration < 1 ||
+        c.gimbal.home_x_deg < -180 || c.gimbal.home_x_deg > 180 ||
+        c.gimbal.home_y_deg < -30 || c.gimbal.home_y_deg > 90 ||
+        (c.gimbal.x_sign != 1 && c.gimbal.x_sign != -1) ||
+        (c.gimbal.y_sign != 1 && c.gimbal.y_sign != -1))
+        throw std::runtime_error("control.gimbal speed/acceleration/home/axis setting is invalid");
     return c;
 }
 
@@ -257,8 +285,12 @@ GuiConfig load_gui_config(const YAML::Node& node)
             "gui.metadata.max_packet_bytes must be in [64, 65507]");
     c.metadata.max_packet_bytes = static_cast<std::size_t>(max_packet_bytes);
 
-    // 명령 설정: GUI -> Orange Pi 방향의 선택 track_id TCP 채널이다.
+    // 명령 설정: PC 명령과 보드 응답을 위한 양방향 TCP 채널이다.
     const YAML::Node command = node["command"];
+    const auto handler = command["handler"].as<std::string>("deferred");
+    if (handler == "deferred") c.command.handler = GuiCommandHandlerType::Deferred;
+    else if (handler == "manual") c.command.handler = GuiCommandHandlerType::Manual;
+    else throw std::runtime_error("gui.command.handler must be deferred or manual");
     c.command.enabled = required<bool>(command, "enabled", "gui.command");
     c.command.bind_address = required<std::string>(
         command, "bind_address", "gui.command");

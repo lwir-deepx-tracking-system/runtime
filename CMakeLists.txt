@@ -199,7 +199,10 @@ endif()
 if(LWIR_NEEDS_RUNTIME_CORE)
     add_library(lwir_runtime_core
         src/target/target_selector.cpp
+        src/control/gimbal_device.cpp
+        src/control/manual_command_handler.cpp
         src/control/gimbal_controller.cpp
+        src/gui/gui_command_handler.cpp
         src/gui/gui_protocol.cpp
         src/gui/gui_sender.cpp
         src/gui/gui_receiver.cpp
@@ -363,6 +366,11 @@ if(BUILD_TESTING)
     )
     add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
 
+    add_executable(test_manual_control tests/control/test_manual_control.cpp)
+    target_link_libraries(test_manual_control PRIVATE lwir_runtime_core)
+    add_test(NAME manual_control COMMAND test_manual_control)
+    set_tests_properties(manual_control PROPERTIES TIMEOUT 15)
+
     add_executable(
         test_gui_protocol
         tests/gui/test_gui_protocol.cpp
@@ -384,6 +392,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_gui_sender PRIVATE lwir_runtime_core)
     add_test(NAME gui_sender COMMAND test_gui_sender x264enc)
     add_test(NAME gui_sender_jpeg COMMAND test_gui_sender jpegenc)
+    add_test(NAME gui_sender_bypass COMMAND test_gui_sender x264enc bypass)
+    add_test(NAME gui_sender_bypass_jpeg COMMAND test_gui_sender jpegenc bypass)
     option(LWIR_TEST_MPP "Run Orange Pi MPP hardware encoder tests" OFF)
     if(LWIR_TEST_MPP)
         add_test(NAME gui_sender_mpp_jpeg COMMAND test_gui_sender mppjpegenc)
@@ -448,6 +458,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_shared_frame_pipeline PRIVATE lwir_runtime_core)
     add_test(NAME shared_frame_pipeline COMMAND test_shared_frame_pipeline)
+
+    add_executable(test_model_manager_recovery
+        tests/pipeline/test_model_manager_recovery.cpp)
+    target_link_libraries(test_model_manager_recovery PRIVATE lwir_runtime_core)
+    add_test(NAME model_manager_recovery COMMAND test_model_manager_recovery)
 
 
     # --------------------------------------------------------------------------
