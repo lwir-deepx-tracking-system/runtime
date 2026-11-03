@@ -200,8 +200,9 @@ if(LWIR_NEEDS_RUNTIME_CORE)
     add_library(lwir_runtime_core
         src/target/target_selector.cpp
         src/control/gimbal_device.cpp
-        src/control/manual_command_handler.cpp
-        src/control/gimbal_controller.cpp
+        src/control/auto_tracking_controller.cpp
+        src/control/gimbal_command_executor.cpp
+        src/control/tracking_command_handler.cpp
         src/gui/gui_command_handler.cpp
         src/gui/gui_protocol.cpp
         src/gui/gui_sender.cpp
@@ -366,10 +367,20 @@ if(BUILD_TESTING)
     )
     add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
 
-    add_executable(test_manual_control tests/control/test_manual_control.cpp)
-    target_link_libraries(test_manual_control PRIVATE lwir_runtime_core)
-    add_test(NAME manual_control COMMAND test_manual_control)
-    set_tests_properties(manual_control PROPERTIES TIMEOUT 15)
+    add_executable(test_auto_control_e2e tests/control/test_auto_control_e2e.cpp)
+    target_link_libraries(test_auto_control_e2e PRIVATE lwir_runtime_core)
+    add_test(NAME auto_control_e2e COMMAND test_auto_control_e2e)
+    set_tests_properties(auto_control_e2e PROPERTIES TIMEOUT 15)
+
+    add_executable(test_auto_control tests/control/test_auto_control.cpp)
+    target_link_libraries(test_auto_control PRIVATE lwir_runtime_core)
+    add_test(NAME auto_control COMMAND test_auto_control)
+    set_tests_properties(auto_control PROPERTIES TIMEOUT 15)
+
+    add_executable(test_gimbal_device tests/control/test_gimbal_device.cpp)
+    target_link_libraries(test_gimbal_device PRIVATE lwir_runtime_core)
+    add_test(NAME gimbal_device COMMAND test_gimbal_device)
+    set_tests_properties(gimbal_device PROPERTIES TIMEOUT 15)
 
     add_executable(
         test_gui_protocol

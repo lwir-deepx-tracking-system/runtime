@@ -11,7 +11,6 @@
 #include "camera/camera.hpp"
 #include "gui/gui_receiver.hpp"
 #include "gui/gui_sender.hpp"
-#include "target/target_selector.hpp"
 #include "tracking/tracker.hpp"
 
 #include "pipeline/camera_thread.hpp"
@@ -151,10 +150,10 @@ RuntimeConfig load_runtime_config(const std::string& path)
             throw std::runtime_error("Camera dimensions do not match the configured GUI protocol");
     }
 
-    const bool manual_handler = c.gui.command.handler == GuiCommandHandlerType::Manual;
-    if ((manual_handler && !c.control.enabled) ||
-        (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !manual_handler)))
-        throw std::runtime_error("Manual control requires control.enabled=true, GUI command enabled and handler=manual");
+    const bool tracking_handler = c.gui.command.handler == GuiCommandHandlerType::Tracking;
+    if ((tracking_handler && !c.control.enabled) ||
+        (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !tracking_handler)))
+        throw std::runtime_error("Gimbal control requires control.enabled=true, GUI command enabled and handler=tracking");
 
     Logger::info("[Config] runtime and model configuration loaded");
     return c;
@@ -222,9 +221,7 @@ private:
     // Tracking thread
     std::unique_ptr<TrackingThread> tracking_thread_;
 
-    TargetSelector target_selector_;
-
-    GimbalController gimbal_controller_;
+    std::unique_ptr<GimbalCommandExecutor> gimbal_executor_;
     std::unique_ptr<ControlThread> control_thread_;
 
     // Application이 GUI 통신 객체의 전체 수명을 소유한다. Sender 내부의
@@ -327,16 +324,11 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             measurement_enabled_
         );
 
-    // AUTO follow remains deferred. Consume tracking results without device I/O;
-    // manual motion is owned solely by the independent TCP handler.
-    control_thread_ =
-        std::make_unique<ControlThread>(
-            gimbal_controller_,
-            target_selector_,
-            control_track_queue_,
-            false, // AUTO follow remains deferred; manual control is independent of frames.
-            measurement_enabled_
-        );
+    if (config_.gui.command.handler == GuiCommandHandlerType::Tracking)
+        gimbal_executor_ = std::make_unique<GimbalCommandExecutor>(
+            config_.control, GimbalDeviceFactory::create(config_.control.gimbal), runtime_control_);
+    control_thread_ = std::make_unique<ControlThread>(
+        control_track_queue_, gimbal_executor_.get(), measurement_enabled_);
 
 
     if (config_.gui.enabled)
@@ -352,7 +344,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
         if (config_.gui.command.enabled)
         {
             gui_receiver_ = std::make_unique<GuiReceiver>(config_.gui.command,
-                GuiCommandHandlerFactory::create(config_.gui.command.handler, config_.control));
+                GuiCommandHandlerFactory::create(config_.gui.command.handler, config_.control, gimbal_executor_.get()));
             gui_receiver_thread_ = std::make_unique<GuiReceiverThread>(
                 *gui_receiver_);
         }
@@ -386,6 +378,7 @@ bool RuntimeApplication::request_model_change(int model_id)
 
     runtime_control_.set_detection_quiesced(false);
     runtime_control_.state.store(RuntimeState::Switching);
+    if (gimbal_executor_) gimbal_executor_->suspend();
     if (!model_change_requests_.push(std::move(request)))
     {
         runtime_control_.state.store(state);
@@ -407,6 +400,7 @@ void RuntimeApplication::run()
 
     auto stop_pipeline = [this]() {
         runtime_control_.request_stop();
+        if (gimbal_executor_) gimbal_executor_->shutdown();
         camera_thread_->request_stop();
         frame_queue_.close();
         model_change_requests_.close();
@@ -416,6 +410,7 @@ void RuntimeApplication::run()
 
     auto join_workers = [this]() 
     {
+        if (gimbal_executor_) gimbal_executor_->shutdown();
         if (camera_thread_) camera_thread_->join();
         if (detection_thread_) detection_thread_->join();
         if (model_manager_thread_) model_manager_thread_->join();
@@ -521,7 +516,7 @@ void RuntimeApplication::run()
         append_metrics(metrics_file, "detection", detection_thread_->metrics());
         append_metrics(metrics_file, "tracking", tracking_thread_->metrics());
         if (config_.control.enabled)
-            append_metrics(metrics_file, "control", control_thread_->metrics());
+            append_metrics(metrics_file, "control_submit", control_thread_->metrics());
 
         if (!metrics_file)
             throw std::runtime_error("metrics.csv 파일 쓰기에 실패했습니다");

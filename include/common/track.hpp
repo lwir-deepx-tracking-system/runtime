@@ -25,6 +25,9 @@ struct Track
 
     // Tracking 결과의 신뢰도
     float confidence = 0.0f;
+
+    // Lost-track extrapolations may be displayed but must not drive AUTO.
+    bool predicted = false;
 };
 
 // 한 프레임의 추적 목록과 GUI 표시에 필요한 원본 프레임을 함께 전달한다.

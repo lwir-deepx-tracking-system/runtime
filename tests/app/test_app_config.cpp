@@ -104,13 +104,15 @@ int main()
     gui["command"].remove("handler");
     if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Deferred) return 18;
     gui["command"]["handler"] = "manual";
-    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Manual) return 19;
+    if (!rejects()) return 19; // removed standalone manual handler must fail explicitly
+    gui["command"]["handler"] = "tracking";
+    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Tracking) return 40;
     auto control = YAML::Load("enabled: true\nheartbeat_timeout_ms: 800\npoll_interval_ms: 20\ngimbal: {device: /dev/test, baud_rate: 57600, speed: 37, acceleration: 61, home_x_deg: 12, home_y_deg: -5, x_sign: -1, y_sign: 1, write_timeout_ms: 50}\n");
-    auto manual = config_parser::load_control_config(control);
-    if (manual.gimbal.device != "/dev/test" || manual.gimbal.speed != 37 ||
-        manual.gimbal.acceleration != 61 || manual.gimbal.home_x_deg != 12 ||
-        manual.gimbal.home_y_deg != -5 || manual.gimbal.x_sign != -1 ||
-        manual.gimbal.baud_rate != 57600 || manual.heartbeat_timeout_ms != 800) return 20;
+    auto control_config = config_parser::load_control_config(control);
+    if (control_config.gimbal.device != "/dev/test" || control_config.gimbal.speed != 37 ||
+        control_config.gimbal.acceleration != 61 || control_config.gimbal.home_x_deg != 12 ||
+        control_config.gimbal.home_y_deg != -5 || control_config.gimbal.x_sign != -1 ||
+        control_config.gimbal.baud_rate != 57600 || control_config.heartbeat_timeout_ms != 800) return 20;
     const auto invalid_control = [&] {
         try { config_parser::load_control_config(control); } catch (const std::runtime_error&) { return true; }
         return false;
@@ -127,7 +129,7 @@ int main()
     control["poll_interval_ms"] = 900;
     if (!invalid_control()) return 24;
     // Enabling actual I/O must require the matching handler and TCP channel.
-    char filename[] = "/tmp/lwir-manual-config-XXXXXX";
+    char filename[] = "/tmp/lwir-control-config-XXXXXX";
     const int fd = ::mkstemp(filename);
     if (fd < 0) return 25;
     ::close(fd);
@@ -136,10 +138,11 @@ int main()
     runtime["control"]["enabled"] = true;
     runtime["gui"]["enabled"] = true;
     runtime["gui"]["command"]["enabled"] = true;
-    runtime["gui"]["command"]["handler"] = "manual";
+    runtime["gui"]["command"]["handler"] = "tracking";
     const auto write_config = [&] { std::ofstream out(filename); out << runtime; };
     write_config();
     if (!load_runtime_config(filename).control.enabled) return 26;
+    if (load_runtime_config(filename).gui.command.handler != GuiCommandHandlerType::Tracking) return 41;
     const auto invalid_combination = [&] {
         write_config();
         try { load_runtime_config(filename); } catch (const std::runtime_error&) { return true; }
@@ -147,7 +150,7 @@ int main()
     };
     runtime["gui"]["command"]["handler"] = "deferred";
     if (!invalid_combination()) return 27;
-    runtime["gui"]["command"]["handler"] = "manual";
+    runtime["gui"]["command"]["handler"] = "tracking";
     runtime["gui"]["command"]["enabled"] = false;
     if (!invalid_combination()) return 28;
     runtime["gui"]["command"]["enabled"] = true;

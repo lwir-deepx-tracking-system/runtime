@@ -20,8 +20,11 @@ public:
     virtual int poll_timeout_ms() const { return std::numeric_limits<int>::max(); }
 };
 
+class GimbalCommandExecutor;
+
 class GuiCommandHandlerFactory {
 public:
     static std::unique_ptr<IGuiCommandHandler> create(
-        GuiCommandHandlerType type, const ControlConfig& control = {});
+        GuiCommandHandlerType type, const ControlConfig& control = {},
+        GimbalCommandExecutor* executor = nullptr);
 };

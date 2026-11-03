@@ -3,11 +3,10 @@
 Runtime follows `pc-application`'s current `feat/gui-video` wire contract and the
 adopted decisions in [Application 설계](https://app.notion.com/p/3f29de3f14a280829f90dc2dfd666d04).
 The [1103 roadmap](https://app.notion.com/p/40c9de3f14a28074905bd2239d6e9fdb)
-describes wider state/control/gimbal work; this change implements communication
-with deferred AUTO/HOME actuation, not that whole roadmap. The optional
-[manual control handler](manual_control.md) connects keyboard MOVE to Waveshare
-Serial independently of tracking frames. Its older branch/commit baseline
-is superseded for this task by the user's `main` / `185df16` baseline.
+describes wider state/control/gimbal work. The [tracking handler](auto_control.md)
+connects AUTO(ID) and keyboard MOVE to one Waveshare Serial executor, independently
+of tracking frame arrival for manual motion and watchdog checks. The default
+`deferred` handler remains communication-only; HOME completion is unimplemented.
 The wire contract has no version field or YAML protocol selector.
 The PC repository is not modified by this change.
 
@@ -50,10 +49,10 @@ fallback is performed.
 implementation, `PcGuiProtocol`, is constructed directly; no protocol enum,
 factory or YAML selector is needed. `GuiCommandHandlerFactory` creates the
 `IGuiCommandHandler` application strategy selected by `command.handler`.
+The `tracking` handler adds AUTO(ID) following through a shared executor; see [AUTO control](auto_control.md).
 Unknown handler settings fail during configuration; an omitted handler defaults
-to `deferred`; `manual` enables the manual device strategy when control is enabled.
-Future target-following behavior can replace that strategy without
-reconnecting the worker directly to target selection.
+to `deferred`; `tracking` requires control to be enabled and handles both AUTO
+and manual commands. The removed `manual` setting is rejected during configuration.
 
 `GuiSender` owns video/metadata transport. `GuiReceiver` owns the TCP session,
 validates framing before allocating/reading the body, and delegates replies to
@@ -133,14 +132,15 @@ The codec also supports INIT (System command 2), with the same state payload.
 The deferred handler has no reinitialization event or state transition to report;
 it does not invent periodic STATUS, AUTO success or HOME completion.
 
-**Input-ID target following and HOME completion remain unimplemented.**
-For keyboard motion, select the [manual handler](manual_control.md); the behavior
-below describes the default deferred handler. Received
-AUTO IDs retain all 32 bits, but are not forwarded to `TargetSelector` or
-`ControlThread`. The existing ByteTrack detector-output tracking is unchanged.
-A future handler must own real state transitions/target validation and integrate
-actual control readiness, disconnect and heartbeat policies. The deferred
-handler has no moving state and therefore implements no motion watchdog.
+**The default deferred strategy does not follow targets or complete HOME.**
+Select the [tracking handler](auto_control.md) for AUTO(ID) following and manual override.
+It preserves the wire format and uses a single device executor; HOME remains NOT_READY.
+The behavior in the deferred table applies only to `handler: deferred`. Received
+AUTO IDs retain all 32 bits in both strategies. The tracking handler validates IDs
+against fresh tracker output and owns real transitions through the shared executor;
+see [AUTO control](auto_control.md) for readiness, STATUS, disconnect, and heartbeat
+rules. The deferred handler has no moving state and therefore implements no motion
+watchdog.
 
 ## Verification scope
 

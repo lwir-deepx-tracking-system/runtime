@@ -7,19 +7,17 @@
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
 #include "common/track.hpp"
-#include "control/gimbal_controller.hpp"
-#include "target/target_selector.hpp"
+#include "control/gimbal_command_executor.hpp"
 
-// Tracking 결과와 현재 선택 ID를 결합해 Orange Pi 짐벌 제어기에 전달한다.
+
+// Tracking 결과를 단일 제어 실행 경계의 최신 결과 mailbox로 전달한다.
 class ControlThread
 {
 private:
-    GimbalController& controller_;
-    TargetSelector& target_selector_;
+    GimbalCommandExecutor* executor_;
     ThreadSafeQueue<TrackingResultPtr>& input_queue_;
     std::thread thread_;
     bool started_ = false;
-    bool control_enabled_;
     bool measurement_enabled_;
     std::atomic<bool> failed_{false};
     std::string error_message_;
@@ -30,10 +28,8 @@ private:
 
 public:
     ControlThread(
-        GimbalController& controller,
-        TargetSelector& target_selector,
         ThreadSafeQueue<TrackingResultPtr>& input_queue,
-        bool control_enabled,
+        GimbalCommandExecutor* executor,
         bool measurement_enabled);
     void start();
     void join();

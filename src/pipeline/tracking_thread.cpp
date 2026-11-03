@@ -89,11 +89,10 @@ void TrackingThread::run()
 
             TrackingResultPtr shared_result = tracks;
 
-            // 제어 경로는 모든 결과를 받고, GUI는 오래된 화면이 쌓이지 않게
-            // 최신 두 결과만 유지한다.
+            // 제어는 최신 결과 하나, GUI는 최신 두 결과만 유지한다.
             if (measurement_enabled_)
                 tracks->enqueued_at = std::chrono::steady_clock::now();
-            if (!control_output_queue_.push(shared_result))
+            if (!control_output_queue_.push_latest(shared_result, 1))
                 break;
             gui_output_queue_.push_latest(std::move(shared_result), 2);
         }

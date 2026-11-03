@@ -1,5 +1,5 @@
 #include "gui/gui_command_handler.hpp"
-#include "control/manual_command_handler.hpp"
+#include "control/tracking_command_handler.hpp"
 
 #include <stdexcept>
 
@@ -50,12 +50,12 @@ public:
 };
 }
 
-std::unique_ptr<IGuiCommandHandler> GuiCommandHandlerFactory::create(GuiCommandHandlerType type, const ControlConfig& control)
+std::unique_ptr<IGuiCommandHandler> GuiCommandHandlerFactory::create(GuiCommandHandlerType type, const ControlConfig& control, GimbalCommandExecutor* executor)
 {
     if (type == GuiCommandHandlerType::Deferred) return std::make_unique<DeferredCommandHandler>();
-    if (type == GuiCommandHandlerType::Manual) {
-        if (!control.enabled) throw std::runtime_error("manual handler requires control.enabled=true");
-        return std::make_unique<ManualCommandHandler>(control, GimbalDeviceFactory::create(control.gimbal));
+    if (type == GuiCommandHandlerType::Tracking) {
+        if (!control.enabled || !executor) throw std::runtime_error("tracking handler requires an enabled executor");
+        return std::make_unique<TrackingCommandHandler>(*executor, control.poll_interval_ms);
     }
     throw std::runtime_error("Unsupported GUI command handler");
 }

@@ -73,16 +73,22 @@ class WaveshareGimbal final : public IGimbalDevice {
 public:
     explicit WaveshareGimbal(const GimbalConfig& config) : config_(config), serial_(config) {}
     void move(int x, int y) override { serial_.send(WaveshareCommands::move(config_, x, y)); }
+    void move_with_speed(int x, int y, int speed) override { serial_.send(WaveshareCommands::move(config_, x, y, speed)); }
     void stop() override { serial_.send(WaveshareCommands::stop()); }
     void home() override { serial_.send(WaveshareCommands::home(config_)); }
 };
 }
 std::string WaveshareCommands::move(const GimbalConfig& config, int x, int y)
 {
+    return move(config, x, y, config.speed);
+}
+std::string WaveshareCommands::move(const GimbalConfig& config, int x, int y, int speed)
+{
+    if (speed < 1 || speed > config.speed) throw std::invalid_argument("Gimbal speed exceeds configured range");
     if (x < -1 || x > 1 || y < -1 || y > 1) throw std::invalid_argument("Invalid gimbal direction");
     std::ostringstream command;
     command << "{\"T\":141,\"X\":" << x * config.x_sign << ",\"Y\":" << y * config.y_sign
-            << ",\"SPD\":" << config.speed << '}';
+            << ",\"SPD\":" << speed << '}';
     return command.str();
 }
 std::string WaveshareCommands::stop() { return "{\"T\":135}"; }

@@ -6,17 +6,13 @@
 #include <exception>
 #include <stdexcept>
 
-// Tracking 결과 queue와 선택 ID 상태를 실제 Orange Pi 제어 경계에 연결한다.
+// Tracking 결과를 장치 실행 스레드의 최신 결과 mailbox에 전달한다.
 ControlThread::ControlThread(
-    GimbalController& controller,
-    TargetSelector& target_selector,
     ThreadSafeQueue<TrackingResultPtr>& input_queue,
-    bool control_enabled,
+    GimbalCommandExecutor* executor,
     bool measurement_enabled)
-    : controller_(controller),
-      target_selector_(target_selector),
+    : executor_(executor),
       input_queue_(input_queue),
-      control_enabled_(control_enabled),
       measurement_enabled_(measurement_enabled)
 {
 }
@@ -49,7 +45,7 @@ void ControlThread::run()
     Logger::info("[ControlThread] 시작");
 
     // 제어가 꺼져 있어도 queue를 계속 비워 전체 pipeline의 정상 종료를 보장한다.
-    if (!control_enabled_)
+    if (!executor_)
         Logger::info("[ControlThread] AUTO 제어 비활성화: Tracking 결과만 소비합니다");
 
     try
@@ -63,35 +59,21 @@ void ControlThread::run()
 
             if (!result || !result->frame)
                 continue;
-            if (!control_enabled_)
+            if (!executor_)
                 continue;
 
             const auto started_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};
 
-            const int selected_id = target_selector_.get_selected_id();
-            const Track* selected_track = nullptr;
-            if (selected_id >= 0)
-            {
-                for (const Track& track : result->tracks)
-                {
-                    if (track.track_id == selected_id)
-                    {
-                        selected_track = &track;
-                        break;
-                    }
-                }
-            }
-
-            controller_.apply(selected_track, *result->frame);
+            executor_->publish(result);
             const auto finished_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};
 
             if (measurement_enabled_)
             {
-                // Control 완료 시점에서 Camera frame 수신 이후 지연을 기록한다.
+                // mailbox 제출까지의 지연이다. 실제 제어/장치 완료 시간이 아니다.
                 record_stage_metric(metrics_, result->frame->metadata,
                     result->enqueued_at, queue_started_at,
                     started_at, finished_at, true);
@@ -113,5 +95,6 @@ void ControlThread::run()
         input_queue_.close();
     }
 
+    if (executor_) executor_->shutdown();
     Logger::info("[ControlThread] 종료");
 }

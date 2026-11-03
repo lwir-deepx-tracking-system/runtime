@@ -71,11 +71,28 @@ struct GimbalConfig {
     int y_sign = 1;
 };
 
+// SPD values are vendor command units, not degrees/second.
+struct AutoControlConfig {
+    double kp = 30.0;
+    double deadband_x = 0.04; // normalized half-frame error, or radians with FOV
+    double deadband_y = 0.04;
+    double fov_x_deg = 0.0; // both zero selects normalized pixel errors
+    double fov_y_deg = 0.0;
+    double min_confidence = 0.5;
+    int speed_min = 1;
+    int speed_max = 30;
+    double speed_rate = 60.0; // SPD units/second; safety STOP bypasses this
+    int period_ms = 25;
+    int input_timeout_ms = 250;
+    int reacquire_timeout_ms = 1000;
+};
+
 struct ControlConfig {
     bool enabled = false;
     int heartbeat_timeout_ms = 1500;
     int poll_interval_ms = 25;
     GimbalConfig gimbal;
+    AutoControlConfig automatic;
 };
 
 struct MeasurementConfig {
@@ -107,7 +124,7 @@ struct GuiVideoConfig
     int rtp_mtu = 0;
 };
 
-enum class GuiCommandHandlerType { Deferred, Manual };
+enum class GuiCommandHandlerType { Deferred, Tracking };
 
 struct GuiMetadataConfig
 {

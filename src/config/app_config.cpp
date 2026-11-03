@@ -209,6 +209,30 @@ ControlConfig load_control_config(const YAML::Node& node)
         c.gimbal.x_sign = gimbal["x_sign"].as<int>(1);
         c.gimbal.y_sign = gimbal["y_sign"].as<int>(1);
     }
+    c.automatic.speed_max = std::min(c.automatic.speed_max, c.gimbal.speed);
+    const auto automatic = node["auto"];
+    if (automatic) {
+#define AUTO_VALUE(name) c.automatic.name = automatic[#name].as<decltype(c.automatic.name)>(c.automatic.name)
+        AUTO_VALUE(kp); AUTO_VALUE(deadband_x); AUTO_VALUE(deadband_y);
+        AUTO_VALUE(fov_x_deg); AUTO_VALUE(fov_y_deg); AUTO_VALUE(min_confidence);
+        AUTO_VALUE(speed_min); AUTO_VALUE(speed_max); AUTO_VALUE(speed_rate);
+        AUTO_VALUE(period_ms); AUTO_VALUE(input_timeout_ms); AUTO_VALUE(reacquire_timeout_ms);
+#undef AUTO_VALUE
+    }
+    const auto& a = c.automatic;
+    if (!std::isfinite(a.kp) || a.kp <= 0 ||
+        !std::isfinite(a.deadband_x) || a.deadband_x < 0 ||
+        !std::isfinite(a.deadband_y) || a.deadband_y < 0 ||
+        !std::isfinite(a.fov_x_deg) || !std::isfinite(a.fov_y_deg) ||
+        !((a.fov_x_deg == 0 && a.fov_y_deg == 0) ||
+          (a.fov_x_deg > 0 && a.fov_x_deg < 180 && a.fov_y_deg > 0 && a.fov_y_deg < 180)) ||
+        !std::isfinite(a.min_confidence) || a.min_confidence < 0 || a.min_confidence > 1 ||
+        a.speed_min < 1 || a.speed_max < a.speed_min || a.speed_max > c.gimbal.speed ||
+        !std::isfinite(a.speed_rate) || a.speed_rate <= 0 ||
+        a.period_ms < 1 || a.period_ms > 1000 ||
+        a.input_timeout_ms < a.period_ms || a.input_timeout_ms > 60000 ||
+        a.reacquire_timeout_ms < a.input_timeout_ms || a.reacquire_timeout_ms > 60000)
+        throw std::runtime_error("control.auto settings are invalid (speed_max must not exceed gimbal.speed)");
     if (c.heartbeat_timeout_ms < 100 || c.heartbeat_timeout_ms > 60000 ||
         c.poll_interval_ms < 1 || c.poll_interval_ms > c.heartbeat_timeout_ms / 2)
         throw std::runtime_error("control heartbeat/poll interval is invalid");
@@ -289,8 +313,8 @@ GuiConfig load_gui_config(const YAML::Node& node)
     const YAML::Node command = node["command"];
     const auto handler = command["handler"].as<std::string>("deferred");
     if (handler == "deferred") c.command.handler = GuiCommandHandlerType::Deferred;
-    else if (handler == "manual") c.command.handler = GuiCommandHandlerType::Manual;
-    else throw std::runtime_error("gui.command.handler must be deferred or manual");
+    else if (handler == "tracking") c.command.handler = GuiCommandHandlerType::Tracking;
+    else throw std::runtime_error("gui.command.handler must be deferred or tracking");
     c.command.enabled = required<bool>(command, "enabled", "gui.command");
     c.command.bind_address = required<std::string>(
         command, "bind_address", "gui.command");

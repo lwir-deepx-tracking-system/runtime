@@ -37,8 +37,8 @@ Detection은 `DxAppDetectionPipeline` 한 객체가 전처리, 추론, 후처리
 | `full` | 활성 | 활성 |
 
 GUI 없이 Control만 활성화하는 설정은 허용하지 않습니다. 현재 `deferred` 명령 처리기는
-TCP 입력 ID를 TargetSelector에 적용하지 않습니다. `manual` 처리기는 GUI 키보드의
-수동 방향 제어를 지원하며, ID 기반 추종과 HOME 완료 판정은 추후 구현합니다.
+TCP 입력 ID를 제어에 적용하지 않습니다. `tracking` 처리기는 [AUTO 표적 중심 정렬](docs/auto_control.md)과
+수동 override를 지원하며 HOME 완료 판정은 미구현입니다. 실제 짐벌/NPU 동작은 별도 검증 대상입니다.
 실행 중 `Ctrl+C`를 입력하면 프레임 생산을 멈추고 queue를 순서대로 닫은 뒤 worker를
 join하고 측정 결과를 저장합니다.
 
@@ -167,7 +167,7 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 - Runtime/Benchmark model 설정: `model.config`
 
 Runtime–PC 통신은 [PC 통신 계약](docs/pc_communication.md)을 따릅니다.
-GUI 키보드 수동 제어는 [수동 제어 설정·시험](docs/manual_control.md)을 참고합니다.
+GUI 키보드 수동 제어와 AUTO는 [통합 제어 설정·시험](docs/auto_control.md)을 참고합니다.
 고정 IP와 직결 LAN·Windows 수신 방화벽 설정은 [네트워크 설정](docs/network_setup.md)을 참고합니다.
 통신 형식은 PC 규격으로 고정합니다. `gui.command.handler`는 AppConfig가 검증하고
 팩토리가 명령 처리 전략을 생성합니다. 기본 `deferred` 처리기는
