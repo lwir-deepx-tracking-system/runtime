@@ -5,7 +5,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <pthread.h>
+#include <thread>
 #include <string>
 
 #include "common/threadsafequeue.hpp"
@@ -35,7 +35,7 @@ private:
     ThreadSafeQueue<ModelChangeRequest>& requests_;
     ActivePipelineSlot& active_pipeline_;
     RuntimeControl& runtime_control_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     std::atomic<bool> failed_{false};
     mutable std::mutex status_mutex_;

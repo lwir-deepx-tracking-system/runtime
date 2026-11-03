@@ -1,7 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <pthread.h>
+#include <thread>
 #include <string>
 
 #include "common/stage_metric.hpp"
@@ -17,7 +17,7 @@ private:
     GimbalController& controller_;
     TargetSelector& target_selector_;
     ThreadSafeQueue<TrackingResultPtr>& input_queue_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     bool control_enabled_;
     bool measurement_enabled_;

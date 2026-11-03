@@ -1,7 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <pthread.h>
+#include <thread>
 #include <string>
 
 #include "common/threadsafequeue.hpp"
@@ -14,14 +14,14 @@
 // TrackingThread -> gui_track_queue -> GuiSenderThread -> GuiSender
 //
 // 영상 변환, H.264/RTP 송신, metadata 직렬화는 수행하지 않는다. 실제 네트워크
-// 처리는 GuiSender가 담당하고 이 클래스는 queue 소비와 pthread 수명만 관리한다.
+// 처리는 GuiSender가 담당하고 이 클래스는 queue 소비와 thread 수명만 관리한다.
 class GuiSenderThread
 {
 private:
     GuiSender& sender_;
     RuntimeControl& runtime_control_;
     ThreadSafeQueue<TrackingResultPtr>& input_queue_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     std::atomic<bool> failed_{false};
     std::string error_message_;

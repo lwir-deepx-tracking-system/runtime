@@ -7,8 +7,8 @@ LWIR 카메라 영상에서 객체를 검출하고 추적한 뒤, 같은 프레�
 - 입력: `CV_16UC1` LWIR 영상
 - Detection: 모델 YAML 기반 YOLOv8/YOLO26 + DEEPX `dx_app` 구조
 - Tracking: ByteTrack
-- 실행 구조: POSIX pthread + `ThreadSafeQueue`
-- 동기화/통신: POSIX pthread mutex와 POSIX socket API
+- 실행 구조: std::thread + `ThreadSafeQueue`
+- 동기화/통신: std::mutex와 POSIX socket API
 
 worker thread와 queue 동기화, socket은 POSIX API를 사용합니다. 프레임과 처리 결과는
 `shared_ptr`로 전달하고, 종료 및 실패 상태는 atomic flag로 관리합니다. GStreamer는

@@ -16,14 +16,11 @@ GuiReceiverThread::GuiReceiverThread(
 {
 }
 
-// TCP command 수신 pthread를 만들고 중복 start를 막는다.
+// TCP command 수신 thread를 만들고 중복 start를 막는다.
 void GuiReceiverThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &GuiReceiverThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("GuiReceiverThread 생성 실패");
+    thread_ = std::thread(&GuiReceiverThread::thread_func, this);
     started_ = true;
 }
 
@@ -37,7 +34,7 @@ void GuiReceiverThread::stop()
 void GuiReceiverThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable())thread_.join();
     started_ = false;
 }
 

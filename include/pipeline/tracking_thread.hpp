@@ -1,7 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <pthread.h>
+#include <thread>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -23,7 +23,7 @@ private:
     ThreadSafeQueue<DetectionResult>& input_queue_;
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue_;
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     bool measurement_enabled_;
     std::atomic<bool> failed_{false};

@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <mutex>
 
-#include <pthread.h>
-
 #include "config/app_config.hpp"
 #include "gui/gui_protocol.hpp"
 

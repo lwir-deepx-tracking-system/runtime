@@ -202,7 +202,7 @@ private:
     // Camera 객체
     std::unique_ptr<Camera> camera_;
 
-    // Camera pthread
+    // Camera thread
     std::unique_ptr<CameraThread> camera_thread_;
 
     // ModelManager owns model lifecycle; DetectionThread only borrows a snapshot.
@@ -212,7 +212,7 @@ private:
     // 현재 사용하는 Tracker 객체를 Application이 소유한다.
     std::unique_ptr<Tracker> tracker_;
 
-    // Tracking pthread
+    // Tracking thread
     std::unique_ptr<TrackingThread> tracking_thread_;
 
     TargetSelector target_selector_;
@@ -409,12 +409,12 @@ void RuntimeApplication::run()
 
     auto join_workers = [this]() 
     {
-        camera_thread_->join();
-        detection_thread_->join();
+        if (camera_thread_) camera_thread_->join();
+        if (detection_thread_) detection_thread_->join();
         if (model_manager_thread_) model_manager_thread_->join();
-        tracking_thread_->join();
+        if (tracking_thread_) tracking_thread_->join();
         if (gui_sender_thread_) gui_sender_thread_->join();
-        control_thread_->join();
+        if (control_thread_)control_thread_->join();
         if (gui_receiver_thread_)
         {
             gui_receiver_thread_->stop();

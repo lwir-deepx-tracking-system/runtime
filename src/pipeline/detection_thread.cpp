@@ -28,17 +28,14 @@ DetectionThread::DetectionThread(
 void DetectionThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &DetectionThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("DetectionThread start failed");
+    thread_ = std::thread(&DetectionThread::thread_func, this);
     started_ = true;
 }
 
 void DetectionThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable())thread_.join();
     started_ = false;
 }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <pthread.h>
+#include <thread>
 #include <string>
 
 #include "camera/camera.hpp"
@@ -16,7 +16,7 @@ class CameraThread
 private:
     Camera& camera_;
     ThreadSafeQueue<FrameMessage>& output_queue_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     bool measurement_enabled_;
     std::atomic<bool> stop_requested_{false};

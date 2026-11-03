@@ -2,7 +2,7 @@
 
 #include <atomic>
 #include <functional>
-#include <pthread.h>
+#include <thread>
 #include <string>
 
 #include "gui/gui_receiver.hpp"
@@ -22,7 +22,7 @@ private:
     GuiReceiver& receiver_;
     TargetSelector& target_selector_;
     std::function<void(int)> model_change_handler_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     std::atomic<bool> failed_{false};
     std::string error_message_;

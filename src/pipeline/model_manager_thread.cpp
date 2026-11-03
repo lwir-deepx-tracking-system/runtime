@@ -24,10 +24,7 @@ ModelManagerThread::ModelManagerThread(
 void ModelManagerThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &ModelManagerThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("ModelManagerThread start failed");
+    thread_ = std::thread(&ModelManagerThread::thread_func, this);
     started_ = true;
 }
 
@@ -42,7 +39,7 @@ void ModelManagerThread::wait_until_initialized()
 void ModelManagerThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable()) thread_.join();
     started_ = false;
 }
 

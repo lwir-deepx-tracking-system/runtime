@@ -27,17 +27,14 @@ TrackingThread::TrackingThread(
 void TrackingThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &TrackingThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("TrackingThread 생성 실패");
+    thread_ = std::thread(&TrackingThread::thread_func, this);
     started_ = true;
 }
 
 void TrackingThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable())thread_.join();
     started_ = false;
 }
 

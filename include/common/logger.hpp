@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pthread.h>
+#include <mutex>
 
 #include <string>
 
@@ -13,7 +13,6 @@ enum class LogLevel
     DEBUG
 };
 
-
 // 프로젝트 전체에서 사용하는 공통 Logger
 class Logger
 {
@@ -22,7 +21,7 @@ private:
     static LogLevel current_level_;
 
     // 여러 Thread가 동시에 출력하는 것을 방지
-    static pthread_mutex_t mutex_;
+    static std::mutex mutex_;
 
     // 실제 로그 출력 함수
     static void log(

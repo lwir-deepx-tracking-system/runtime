@@ -21,14 +21,11 @@ ControlThread::ControlThread(
 {
 }
 
-// 제어 소비자를 producer보다 먼저 대기시킬 수 있도록 독립 pthread로 시작한다.
+// 제어 소비자를 producer보다 먼저 대기시킬 수 있도록 독립 thread로 시작한다.
 void ControlThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &ControlThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("ControlThread 생성 실패");
+    thread_ = std::thread(&ControlThread::thread_func, this);
     started_ = true;
 }
 
@@ -36,11 +33,11 @@ void ControlThread::start()
 void ControlThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable()) thread_.join();
     started_ = false;
 }
 
-// pthread 진입점을 객체의 run() 메서드로 전달한다.
+// thread 진입점을 객체의 run() 메서드로 전달한다.
 void* ControlThread::thread_func(void* arg)
 {
     static_cast<ControlThread*>(arg)->run();

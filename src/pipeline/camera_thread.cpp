@@ -19,23 +19,20 @@ CameraThread::CameraThread(
 }
 
 
-// Camera pthread를 시작한다.
+// Camera thread를 시작한다.
 void CameraThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &CameraThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("CameraThread 생성 실패");
+    thread_ = std::thread(&CameraThread::thread_func, this);
     started_ = true;
 }
 
 
-// Camera pthread가 끝날 때까지 기다린다.
+// Camera thread가 끝날 때까지 기다린다.
 void CameraThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable()) thread_.join();
     started_ = false;
 }
 
@@ -44,8 +41,7 @@ void CameraThread::request_stop()
     stop_requested_.store(true);
 }
 
-
-// pthread에서 CameraThread::run()을 실행한다.
+// thread에서 CameraThread::run()을 실행한다.
 void* CameraThread::thread_func(void* arg)
 {
     auto* thread =
@@ -55,7 +51,6 @@ void* CameraThread::thread_func(void* arg)
 
     return nullptr;
 }
-
 
 // Camera Frame을 읽어 다음 Stage Queue로 전달한다.
 void CameraThread::run()

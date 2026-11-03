@@ -19,17 +19,14 @@ GuiSenderThread::GuiSenderThread(
 void GuiSenderThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &GuiSenderThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("GuiSenderThread start failed");
+    thread_ = std::thread(&GuiSenderThread::thread_func, this);
     started_ = true;
 }
 
 void GuiSenderThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable())thread_.join();
     started_ = false;
 }
 

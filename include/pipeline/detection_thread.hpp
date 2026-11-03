@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
-#include <pthread.h>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -26,7 +26,7 @@ private:
     ThreadSafeQueue<DetectionResult>& output_queue_;
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue_;
     bool gui_enabled_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     bool measurement_enabled_;
     std::atomic<bool> failed_{false};

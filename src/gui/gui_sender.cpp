@@ -7,7 +7,8 @@
 #include <vector>
 
 #include <netdb.h>
-#include <pthread.h>
+// #include <pthread.h>
+#include <mutex>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -26,12 +27,13 @@ std::uint64_t steady_ns()
 }
 
 // 여러 GuiSender 인스턴스가 생겨도 process 전체의 GStreamer 초기화는 한 번만 한다.
-pthread_once_t g_gstreamer_once = PTHREAD_ONCE_INIT;
+// pthread_once_t g_gstreamer_once = PTHREAD_ONCE_INIT;
+std::once_flag g_gstreamer_once;
 
-void initialize_gstreamer_once()
-{
-    gst_init(nullptr, nullptr);
-}
+// void initialize_gstreamer_once()
+// {
+    // gst_init(nullptr, nullptr);
+// }
 
 GstClockTime frame_presentation_time(std::uint64_t frame_index, int fps)
 {
@@ -41,11 +43,21 @@ GstClockTime frame_presentation_time(std::uint64_t frame_index, int fps)
 
 bool initialize_gstreamer()
 {
-    const int result = pthread_once(
-        &g_gstreamer_once, &initialize_gstreamer_once);
-    if (result != 0)
-        Logger::error("[GuiSender] pthread_once GStreamer 초기화 실패");
-    return result == 0;
+    // const int result = pthread_once( &g_gstreamer_once, &initialize_gstreamer_once);
+    // if (result != 0) Logger::error("[GuiSender] pthread_once GStreamer 초기화 실패");
+    try
+    {
+        std::call_once(g_gstreamer_once, []()
+        {
+            gst_init(nullptr, nullptr);
+        });
+    }
+    catch(const std::exception& e)
+    {
+        Logger::error("[GuiSender]" + std::string(e.what()));
+    }
+    
+    return 1;
 }
 
 // 비동기 pipeline에서 발생한 오류를 bus에서 회수해 호출자에게 실패로 알린다.
