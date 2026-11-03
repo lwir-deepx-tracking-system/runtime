@@ -28,7 +28,9 @@ GimbalDemand AutoTrackingController::calculate(const Track& t, int width, int he
         d.error_y = std::atan(d.error_y * std::tan(config_.fov_y_deg * radians / 2));
     }
     d.x = std::abs(d.error_x) <= config_.deadband_x ? 0 : (d.error_x > 0 ? 1 : -1);
-    d.y = std::abs(d.error_y) <= config_.deadband_y ? 0 : (d.error_y > 0 ? 1 : -1);
+    // Image Y grows downward; the shared GUI/device command contract is +Y up.
+    // Convert here so AUTO and manual commands use the same direction space.
+    d.y = std::abs(d.error_y) <= config_.deadband_y ? 0 : (d.error_y > 0 ? -1 : 1);
     if (!d.stop())
         d.speed = std::clamp(config_.kp * std::max(d.x ? std::abs(d.error_x) : 0.0,
                                                  d.y ? std::abs(d.error_y) : 0.0),

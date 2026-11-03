@@ -94,12 +94,12 @@ struct Worker {
 };
 
 // Explicit tracking fixtures exercise the TCP-to-Serial path without inference.
-TrackingResultPtr target_frame(std::uint64_t id) {
+TrackingResultPtr target_frame(std::uint64_t id, float cy = 240) {
     auto f = std::make_shared<FrameContext>();
     f->metadata = {id, std::chrono::steady_clock::now()};
     f->image = cv::Mat::zeros(480,640,CV_16UC1);
     auto r = std::make_shared<TrackingResult>(); r->frame = f;
-    Track t; t.track_id = 7; t.x = 470; t.y = 230; t.width = t.height = 20; t.confidence = .9;
+    Track t; t.track_id = 7; t.x = 470; t.y = cy - 10; t.width = t.height = 20; t.confidence = .9;
     r->tracks.push_back(t);
     return r;
 }
@@ -139,7 +139,7 @@ void tcp_auto_serial() {
     check(message(client.value).payload == std::vector<std::uint8_t>(8,0), "initial tracking STATUS");
     send_command(client.value, {GuiCategory::Mode,1,{255,255,255,255}});
     ack_result(client.value,GuiResult::InvalidTarget);
-    queue.push(target_frame(1));
+    queue.push(target_frame(1,120)); // above-center target uses the same +Y as manual UP
     // Wait for ControlThread submission, without requesting AUTO repeatedly.
     for (int i = 0; i < 100; ++i) {
         executor.snapshot();
@@ -148,7 +148,7 @@ void tcp_auto_serial() {
     }
     send_command(client.value, {GuiCategory::Mode,1,{0,0,0,7}});
     ack_result(client.value,GuiResult::Ok);
-    serial_line(master.value,"{\"T\":141,\"X\":-1,\"Y\":0,\"SPD\":10}");
+    serial_line(master.value,"{\"T\":141,\"X\":-1,\"Y\":1,\"SPD\":10}");
     auto moving = response(client.value, [](const GuiCommand& m) {
         return m.command == 3 && m.payload[0] == 1 && m.payload[2] == 2;
     });
@@ -157,8 +157,8 @@ void tcp_auto_serial() {
     serial_line(master.value,"{\"T\":135}");
     response(client.value, [](const GuiCommand& m) { return m.command == 3 && m.payload[1] == 2 && m.payload[2] == 4; });
     // Fresh target reacquires within the grace period.
-    queue.push(target_frame(2));
-    serial_line(master.value,"{\"T\":141,\"X\":-1,\"Y\":0,\"SPD\":10}");
+    queue.push(target_frame(2,120));
+    serial_line(master.value,"{\"T\":141,\"X\":-1,\"Y\":1,\"SPD\":10}");
     send_command(client.value,{GuiCategory::Gimbal,1,{0,1}});
     serial_line(master.value,"{\"T\":135}");
     serial_line(master.value,"{\"T\":141,\"X\":0,\"Y\":1,\"SPD\":30}");

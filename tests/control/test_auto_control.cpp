@@ -75,10 +75,17 @@ void calculations() {
     AutoControlConfig c; c.kp = 100; c.deadband_x = .25; c.deadband_y = .05;
     AutoTrackingController controller(c);
     auto d = controller.calculate(track(384, 264), 640, 480); // .20 inside x, .10 outside y
-    check(d.x == 0 && d.y == 1 && std::abs(d.speed - 10) < .001, "Inactive axis inflated common SPD");
+    check(d.x == 0 && d.y == -1 && std::abs(d.speed - 10) < .001, "Inactive axis inflated common SPD");
     check(controller.calculate(track(320, 240), 640, 480).stop(), "center did not STOP");
     d = controller.calculate(track(160, 120), 640, 480);
-    check(d.x == -1 && d.y == -1 && d.speed == c.speed_max, "direction/saturation");
+    check(d.x == -1 && d.y == 1 && d.speed == c.speed_max, "direction/saturation");
+    // PC ManualInputHandler defines +X=Right and +Y=Up. AUTO must match that
+    // contract; checking sign(error_y) alone would reproduce the original bug.
+    AutoTrackingController directions(AutoControlConfig{});
+    check(directions.calculate(track(320,120),640,480).y == 1, "above-center target must command UP (+Y)");
+    check(directions.calculate(track(320,360),640,480).y == -1, "below-center target must command DOWN (-Y)");
+    check(directions.calculate(track(160,240),640,480).x == -1, "left target must command LEFT");
+    check(directions.calculate(track(480,240),640,480).x == 1, "right target must command RIGHT");
     auto bad = track(); bad.width = 0;
     check(!controller.valid(bad,640,480), "zero width");
     bad = track(); bad.x = std::numeric_limits<float>::quiet_NaN();
