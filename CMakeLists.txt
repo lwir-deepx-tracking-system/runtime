@@ -197,6 +197,8 @@ endif()
 if(LWIR_NEEDS_RUNTIME_CORE)
     add_library(lwir_runtime_core
         src/target/target_selector.cpp
+        src/control/gimbal_device.cpp
+        src/control/manual_command_handler.cpp
         src/control/gimbal_controller.cpp
         src/gui/gui_command_handler.cpp
         src/gui/gui_protocol.cpp
@@ -358,6 +360,11 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/apps/benchmark
     )
     add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
+
+    add_executable(test_manual_control tests/control/test_manual_control.cpp)
+    target_link_libraries(test_manual_control PRIVATE lwir_runtime_core)
+    add_test(NAME manual_control COMMAND test_manual_control)
+    set_tests_properties(manual_control PROPERTIES TIMEOUT 15)
 
     add_executable(
         test_gui_protocol

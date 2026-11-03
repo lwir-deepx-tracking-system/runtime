@@ -59,8 +59,23 @@ struct TrackingConfig {
     bool buffer_snap = false;
 };
 
+struct GimbalConfig {
+    std::string device = "/dev/ttyUSB0";
+    int baud_rate = 115200;
+    int write_timeout_ms = 100;
+    int speed = 30;
+    int acceleration = 50;
+    int home_x_deg = 0;
+    int home_y_deg = 0;
+    int x_sign = 1;
+    int y_sign = 1;
+};
+
 struct ControlConfig {
     bool enabled = false;
+    int heartbeat_timeout_ms = 1500;
+    int poll_interval_ms = 25;
+    GimbalConfig gimbal;
 };
 
 struct MeasurementConfig {
@@ -92,7 +107,7 @@ struct GuiVideoConfig
     int rtp_mtu = 0;
 };
 
-enum class GuiCommandHandlerType { Deferred };
+enum class GuiCommandHandlerType { Deferred, Manual };
 
 struct GuiMetadataConfig
 {

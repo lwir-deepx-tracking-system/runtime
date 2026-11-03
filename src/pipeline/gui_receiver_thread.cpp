@@ -71,5 +71,6 @@ void GuiReceiverThread::run()
         failed_.store(true);
         Logger::error("[GuiReceiverThread] " + error_message_);
     }
+    receiver_.finish_session();
     Logger::info("[GuiReceiverThread] 종료");
 }

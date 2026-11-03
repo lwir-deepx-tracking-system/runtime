@@ -53,7 +53,7 @@ void ControlThread::run()
 
     // 제어가 꺼져 있어도 queue를 계속 비워 전체 pipeline의 정상 종료를 보장한다.
     if (!control_enabled_)
-        Logger::info("[ControlThread] 제어 비활성화: Tracking 결과만 소비합니다");
+        Logger::info("[ControlThread] AUTO 제어 비활성화: Tracking 결과만 소비합니다");
 
     try
     {

@@ -94,7 +94,20 @@ tracking:
 # ============================================================
 
 control:
+  # 실제 수동 제어 시 enabled: true와 gui.command.handler: manual을 함께 설정한다.
   enabled: false
+  heartbeat_timeout_ms: 1500  # 마지막 유효 PING 이후 수동 이동을 정지할 시간
+  poll_interval_ms: 25       # 프레임과 독립적인 명령·heartbeat 확인 주기
+  gimbal:
+    device: /dev/ttyUSB0     # 실기에서는 /dev/serial/by-id/... 고정 경로 권장
+    baud_rate: 115200
+    write_timeout_ms: 100
+    speed: 30
+    acceleration: 50
+    home_x_deg: 0            # HOME 실행·완료 피드백은 이번 범위에서 제외
+    home_y_deg: 0
+    x_sign: 1               # 축 방향 반전이 필요하면 -1
+    y_sign: 1
 
 
 # ============================================================
@@ -147,7 +160,7 @@ gui:
   # ----------------------------------------------------------
 
   command:
-    handler: deferred  # PING/STATUS supported; AUTO/HOME return NOT_READY, MOVE ignored
+    handler: deferred  # manual: 실제 수동 방향 제어 / deferred: 통신 시험만
     enabled: true
 
     bind_address: 192.168.50.2

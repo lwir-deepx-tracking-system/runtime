@@ -1,5 +1,6 @@
 #include "gui/gui_receiver.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
@@ -160,7 +161,7 @@ bool GuiReceiver::accept_client()
         descriptor.fd = listener;
         descriptor.events = POLLIN;
         const int ready = ::poll(
-            &descriptor, 1, config_.receive_timeout_ms);
+            &descriptor, 1, poll_timeout_ms());
         if (ready == 0) continue;
         if (ready < 0)
         {
@@ -192,6 +193,7 @@ bool GuiReceiver::accept_client()
             }
             client_fd_ = client;
         }
+        handler_->connected();
         if (!send_message(client, handler_->initial_state()))
         {
             release_client(client);
@@ -214,12 +216,13 @@ bool GuiReceiver::receive_exact(
     std::size_t received = 0;
     while (received < size && !stopped())
     {
-        // timeout마다 stopped 상태를 다시 확인해 영구 blocking을 피한다.
+        if (!service_client(fd)) return false;
+        // Timer processing also continues while a partial command is pending.
         pollfd descriptor{};
         descriptor.fd = fd;
         descriptor.events = POLLIN;
         const int ready = ::poll(
-            &descriptor, 1, config_.receive_timeout_ms);
+            &descriptor, 1, poll_timeout_ms());
         if (ready == 0) continue;
         if (ready < 0)
         {
@@ -265,6 +268,20 @@ void GuiReceiver::release_client(int fd)
     }
     // stop()이 이미 FD를 가져가 닫았다면 여기서 다시 닫지 않는다.
     if (owns_fd) close_socket(fd);
+    handler_->disconnected();
+}
+
+int GuiReceiver::poll_timeout_ms() const
+{
+    return std::min(config_.receive_timeout_ms, handler_->poll_timeout_ms());
+}
+bool GuiReceiver::service_client(int fd)
+{
+    std::vector<GuiCommand> replies;
+    handler_->tick(replies);
+    for (const auto& reply : replies)
+        if (!send_message(fd, reply)) return false;
+    return true;
 }
 
 // Small replies use nonblocking sends and bounded poll waits; stop() can interrupt.
@@ -285,7 +302,7 @@ bool GuiReceiver::send_message(int fd, const GuiCommand& message)
         if (count < 0 && errno == EINTR) continue;
         if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             pollfd descriptor{fd, POLLOUT, 0};
-            const int ready = ::poll(&descriptor, 1, config_.receive_timeout_ms);
+            const int ready = ::poll(&descriptor, 1, poll_timeout_ms());
             if (ready < 0 && errno == EINTR) continue;
             if (ready > 0 && (descriptor.revents & POLLOUT)) continue;
         }
@@ -296,9 +313,9 @@ bool GuiReceiver::send_message(int fd, const GuiCommand& message)
 
 bool GuiReceiver::receive(GuiCommand& command)
 {
-    if (!config_.enabled || stopped() || !open_listener()) return false;
+    if (!config_.enabled || stopped() || !open_listener()) { finish_session(); return false; }
     while (!stopped()) {
-        if (!accept_client()) return false;
+        if (!accept_client()) { finish_session(); return false; }
         int client;
         {
             PthreadLockGuard lock(socket_mutex_);
@@ -335,6 +352,7 @@ bool GuiReceiver::receive(GuiCommand& command)
         if (!sent) { release_client(client); continue; }
         return true;
     }
+    finish_session();
     return false;
 }
 

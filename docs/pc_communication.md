@@ -4,7 +4,9 @@ Runtime follows `pc-application`'s current `feat/gui-video` wire contract and th
 adopted decisions in [Application 설계](https://app.notion.com/p/3f29de3f14a280829f90dc2dfd666d04).
 The [1103 roadmap](https://app.notion.com/p/40c9de3f14a28074905bd2239d6e9fdb)
 describes wider state/control/gimbal work; this change implements communication
-with deferred actuation, not that whole roadmap. Its older branch/commit baseline
+with deferred AUTO/HOME actuation, not that whole roadmap. The optional
+[manual control handler](manual_control.md) connects keyboard MOVE to Waveshare
+Serial independently of tracking frames. Its older branch/commit baseline
 is superseded for this task by the user's `main` / `185df16` baseline.
 The wire contract has no version field or YAML protocol selector.
 The PC repository is not modified by this change.
@@ -49,7 +51,8 @@ implementation, `PcGuiProtocol`, is constructed directly; no protocol enum,
 factory or YAML selector is needed. `GuiCommandHandlerFactory` creates the
 `IGuiCommandHandler` application strategy selected by `command.handler`.
 Unknown handler settings fail during configuration; an omitted handler defaults
-to `deferred`. Future target-following behavior can replace that strategy without
+to `deferred`; `manual` enables the manual device strategy when control is enabled.
+Future target-following behavior can replace that strategy without
 reconnecting the worker directly to target selection.
 
 `GuiSender` owns video/metadata transport. `GuiReceiver` owns the TCP session,
@@ -130,7 +133,9 @@ The codec also supports INIT (System command 2), with the same state payload.
 The deferred handler has no reinitialization event or state transition to report;
 it does not invent periodic STATUS, AUTO success or HOME completion.
 
-**Input-ID target following and gimbal control remain unimplemented.** Received
+**Input-ID target following and HOME completion remain unimplemented.**
+For keyboard motion, select the [manual handler](manual_control.md); the behavior
+below describes the default deferred handler. Received
 AUTO IDs retain all 32 bits, but are not forwarded to `TargetSelector` or
 `ControlThread`. The existing ByteTrack detector-output tracking is unchanged.
 A future handler must own real state transitions/target validation and integrate
@@ -146,4 +151,4 @@ fixtures, not inference results. These checks do not establish Windows GUI
 end-to-end behavior or board hardware performance.
 
 DXNN loading, inference, tensor validation, NPU benchmarks and board MPP/gimbal
-execution remain unverified without the actual hardware.
+execution require actual hardware verification.

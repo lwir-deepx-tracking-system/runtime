@@ -1,4 +1,5 @@
 #include "gui/gui_command_handler.hpp"
+#include "control/manual_command_handler.hpp"
 
 #include <stdexcept>
 
@@ -49,8 +50,12 @@ public:
 };
 }
 
-std::unique_ptr<IGuiCommandHandler> GuiCommandHandlerFactory::create(GuiCommandHandlerType type)
+std::unique_ptr<IGuiCommandHandler> GuiCommandHandlerFactory::create(GuiCommandHandlerType type, const ControlConfig& control)
 {
     if (type == GuiCommandHandlerType::Deferred) return std::make_unique<DeferredCommandHandler>();
+    if (type == GuiCommandHandlerType::Manual) {
+        if (!control.enabled) throw std::runtime_error("manual handler requires control.enabled=true");
+        return std::make_unique<ManualCommandHandler>(control, GimbalDeviceFactory::create(control.gimbal));
+    }
     throw std::runtime_error("Unsupported GUI command handler");
 }

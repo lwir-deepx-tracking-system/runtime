@@ -108,10 +108,10 @@ RuntimeConfig load_runtime_config(const std::string& path)
             throw std::runtime_error("Camera dimensions do not match the configured GUI protocol");
     }
 
-    if (!c.gui.enabled && c.control.enabled)
-        throw std::runtime_error(
-            "유효하지 않은 Runtime 설정입니다: control.enabled=true에는 "
-            "gui.enabled=true가 필요합니다");
+    const bool manual_handler = c.gui.command.handler == GuiCommandHandlerType::Manual;
+    if ((manual_handler && !c.control.enabled) ||
+        (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !manual_handler)))
+        throw std::runtime_error("Manual control requires control.enabled=true, GUI command enabled and handler=manual");
 
     Logger::info("[Config] runtime and model configuration loaded");
     return c;
@@ -270,15 +270,14 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             measurement_enabled_
         );
 
-    /// TODO: add control enabled
-
-    // Tracking 결과와 GUI 선택 ID를 Orange Pi 짐벌 제어 단계에 직접 연결한다.
+    // AUTO follow remains deferred. Consume tracking results without device I/O;
+    // manual motion is owned solely by the independent TCP handler.
     control_thread_ =
         std::make_unique<ControlThread>(
             gimbal_controller_,
             target_selector_,
             control_track_queue_,
-            config_.control.enabled,
+            false, // AUTO follow remains deferred; manual control is independent of frames.
             measurement_enabled_
         );
 
@@ -295,7 +294,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 
         if (config_.gui.command.enabled)
         {
-            gui_receiver_ = std::make_unique<GuiReceiver>(config_.gui.command);
+            gui_receiver_ = std::make_unique<GuiReceiver>(config_.gui.command,
+                GuiCommandHandlerFactory::create(config_.gui.command.handler, config_.control));
             gui_receiver_thread_ = std::make_unique<GuiReceiverThread>(
                 *gui_receiver_);
         }
@@ -307,8 +307,9 @@ void RuntimeApplication::run()
 {
     fs::path result_dir;
     g_stop_requested = 0;
-    if (std::signal(SIGINT, handle_sigint) == SIG_ERR)
-        throw std::runtime_error("SIGINT handler 등록에 실패했습니다");
+    if (std::signal(SIGINT, handle_sigint) == SIG_ERR ||
+        std::signal(SIGTERM, handle_sigint) == SIG_ERR)
+        throw std::runtime_error("Runtime signal handler 등록에 실패했습니다");
 
     auto stop_pipeline = [this]() {
         camera_thread_->request_stop();
@@ -381,6 +382,8 @@ void RuntimeApplication::run()
                     stop_logged = true;
                 }
                 camera_thread_->request_stop();
+                // Release manual movement before waiting for frame queues to drain.
+                if (gui_receiver_thread_) gui_receiver_thread_->stop();
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -489,7 +492,12 @@ void RuntimeApplication::run()
 
 int run_runtime(const std::string& config_path)
 {
-    RuntimeApplication app(config_path);
-    app.run();
-    return 0;
+    try {
+        RuntimeApplication app(config_path);
+        app.run();
+        return 0;
+    } catch (const std::exception& error) {
+        Logger::error(std::string("[Runtime] ") + error.what());
+        return 1;
+    }
 }

@@ -35,6 +35,8 @@ private:
     bool receive_exact(int fd, std::uint8_t* data, std::size_t size);
 
     bool send_message(int fd, const GuiCommand& message);
+    bool service_client(int fd);
+    int poll_timeout_ms() const;
 
     // 현재 receive 경로가 FD 소유권을 가진 경우에만 client socket을 닫는다.
     void release_client(int fd);
@@ -57,4 +59,6 @@ public:
     void stop();
 
     bool stop_requested() { return stopped(); }
+    // Call on the worker after errors/exit, before destroying the receiver.
+    void finish_session() { handler_->disconnected(); }
 };
