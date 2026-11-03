@@ -107,7 +107,7 @@ int main(int argc, char** argv)
     {
         auto frame = std::make_shared<FrameContext>();
         frame->image = cv::Mat(480, 640, CV_16UC1, cv::Scalar(16000 + i * 100));
-        frame->metadata.frame_id = i;
+        frame->metadata.frame_id = i + 1;
         TrackingResult result;
         result.frame = frame;
         if (!sender.send(result, 123456)) return 2;
@@ -127,7 +127,7 @@ int main(int argc, char** argv)
         const auto found = metadata.find(timestamp);
         if (found == metadata.end()) return 6;
         const auto& decoded = found->second;
-        if (decoded.rtp_timestamp != decoded.frame_id * 3000 || decoded.width != 640 ||
+        if (decoded.rtp_timestamp != (decoded.frame_id - 1) * 3000 || decoded.width != 640 ||
             decoded.height != 480 || decoded.gui_started_us != 123456 || !decoded.tracks.empty()) return 7;
     }
     return 0;

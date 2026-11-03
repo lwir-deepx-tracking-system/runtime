@@ -198,6 +198,7 @@ if(LWIR_NEEDS_RUNTIME_CORE)
     add_library(lwir_runtime_core
         src/target/target_selector.cpp
         src/control/gimbal_controller.cpp
+        src/gui/gui_command_handler.cpp
         src/gui/gui_protocol.cpp
         src/gui/gui_sender.cpp
         src/gui/gui_receiver.cpp

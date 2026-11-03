@@ -5,6 +5,7 @@
 // 공용 YAML이 runtime에서 지원하는 Detection 및 LWIR 계약으로 파싱되는지 확인한다.
 int main()
 {
+    const auto yaml = YAML::LoadFile("config/runtime.yaml");
     const RuntimeConfig config = load_runtime_config("config/runtime.yaml");
 
     // runtime.yaml의 모델 경로와 고정 Detection 실행 설정 검증.
@@ -53,24 +54,23 @@ int main()
         return 7;
 
     // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
-    if (config.gui.enabled ||
-        config.gui.video.host != "127.0.0.1" ||
+    if (config.gui.enabled != yaml["gui"]["enabled"].as<bool>() ||
+        config.gui.video.host != yaml["gui"]["video"]["host"].as<std::string>() ||
         config.gui.video.port != 5000 ||
-        config.gui.video.codec != GuiVideoCodec::JPEG ||
-        config.gui.video.encoder != "mppjpegenc" ||
+        config.gui.video.codec != GuiVideoCodec::H264 ||
+        config.gui.video.encoder != "mpph264enc" ||
         config.gui.video.bitrate_kbps != 3000 ||
         config.gui.video.fps != 30 ||
         config.gui.video.rtp_mtu != 1200 ||
         !config.gui.metadata.enabled ||
-        config.gui.metadata.host != "127.0.0.1" ||
+        config.gui.metadata.host != yaml["gui"]["metadata"]["host"].as<std::string>() ||
         config.gui.metadata.port != 5001 ||
         config.gui.metadata.max_packet_bytes != 1200 ||
         !config.gui.command.enabled ||
-        config.gui.command.bind_address != "0.0.0.0" ||
+        config.gui.command.bind_address != yaml["gui"]["command"]["bind_address"].as<std::string>() ||
         config.gui.command.port != 5002 ||
         config.gui.command.receive_timeout_ms != 1000)
         return 8;
-    auto yaml = YAML::LoadFile("config/runtime.yaml");
     auto gui = yaml["gui"];
     if (config.gui.video.jpeg_quality != 80 || config.gui.video.keyframe_interval != 30) return 9;
     gui["video"]["codec"] = "h264";
@@ -88,5 +88,14 @@ int main()
     gui["video"]["jpeg_quality"] = 80;
     gui["video"]["keyframe_interval"] = 0;
     if (!rejects()) return 13;
+    gui["video"]["keyframe_interval"] = 30;
+    gui["command"]["handler"] = "auto_tracking";
+    if (!rejects()) return 16;
+    gui["command"]["handler"] = "deferred";
+    auto typed = config_parser::load_gui_config(gui);
+    if (typed.command.handler != GuiCommandHandlerType::Deferred) return 17;
+    // The command handler selection is optional for existing YAML configurations.
+    gui["command"].remove("handler");
+    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Deferred) return 18;
     return 0;
 }

@@ -102,8 +102,7 @@ control:
 # ============================================================
 
 gui:
-  # GUI 프로그램이 준비되기 전에는 관련 worker를 시작하지 않는다.
-  enabled: false
+  enabled: true
 
   # ----------------------------------------------------------
   # 6-1. Video
@@ -112,13 +111,14 @@ gui:
   # ----------------------------------------------------------
 
   video:
-    host: 127.0.0.1
+    host: 192.168.50.1
     port: 5000
 
-    # Compare with codec: h264 / encoder: mpph264enc on Orange Pi.
-    # Software encoders (jpegenc/x264enc) are explicit development-only choices.
-    codec: jpeg
-    encoder: mppjpegenc
+    # JPEG : jpegenc / mppjpegenc
+    # H.264 : x264enc / mpph264enc
+
+    codec: h264
+    encoder: mpph264enc
 
     bitrate_kbps: 3000
     jpeg_quality: 80
@@ -135,7 +135,7 @@ gui:
   metadata:
     enabled: true
 
-    host: 127.0.0.1
+    host: 192.168.50.1
     port: 5001
 
     max_packet_bytes: 1200
@@ -143,13 +143,14 @@ gui:
   # ----------------------------------------------------------
   # 6-3. GUI Command
   # GUI -> Orange Pi
-  # 선택한 track_id를 TCP로 전달
+  # PC 명령 수신 및 ACK/STATUS 응답 (ID 기반 추적은 추후 구현)
   # ----------------------------------------------------------
 
   command:
+    handler: deferred  # PING/STATUS supported; AUTO/HOME return NOT_READY, MOVE ignored
     enabled: true
 
-    bind_address: 0.0.0.0
+    bind_address: 192.168.50.2
     port: 5002
 
     receive_timeout_ms: 1000
