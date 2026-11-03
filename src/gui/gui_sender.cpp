@@ -387,10 +387,10 @@ bool GuiSender::send(
     {
         const auto values = stats();
         if (values.submitted_frames && values.processing_samples)
-            Logger::info("[GuiSender] average preprocess=" +
+            Logger::debug("[GuiSender] average preprocess=" +
                 std::to_string(double(values.preprocessing_ns) / values.submitted_frames / 1e6) +
                 " ms, encode+RTP=" + std::to_string(double(values.encode_rtp_ns) / values.processing_samples / 1e6) +
-                " ms (includes queue and pixel conversion), encoded=" + std::to_string(values.encoded_frames));
+                " ms, encoded=" + std::to_string(values.encoded_frames));
         last_report_ns_ = now;
     }
     return true;

@@ -163,6 +163,7 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 - Runtime/Benchmark model 설정: `model.config`
 
 Runtime–PC 통신은 [PC 통신 계약](docs/pc_communication.md)을 따릅니다.
+고정 IP와 직결 LAN·Windows 수신 방화벽 설정은 [네트워크 설정](docs/network_setup.md)을 참고합니다.
 통신 형식은 PC 규격으로 고정합니다. `gui.command.handler`는 AppConfig가 검증하고
 팩토리가 명령 처리 전략을 생성합니다. 기본 `deferred` 처리기는
 PING/상태 응답만 제공하며 입력 Track ID 기반 추적과 짐벌 동작은 추후 구현합니다.
