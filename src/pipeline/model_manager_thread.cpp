@@ -13,12 +13,14 @@ ModelManagerThread::ModelManagerThread(
     ThreadSafeQueue<ModelChangeRequest>& requests,
     ActivePipelineSlot& active_pipeline,
     RuntimeControl& runtime_control,
+    ThreadSafeQueue<ModelChangeResult>* results,
     std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
         pipeline_creator)
     : initial_model_(std::move(initial_model)),
       active_model_(initial_model_),
       detection_config_(std::move(detection_config)),
       requests_(requests),
+      results_(results),
       active_pipeline_(active_pipeline),
       runtime_control_(runtime_control),
       pipeline_creator_(std::move(pipeline_creator))
@@ -128,13 +130,16 @@ void ModelManagerThread::run()
 
     // The old DXNN instance must be released before loading another. If loading
     // fails, recreate the last working model from its validated configuration.
-    const auto restore_previous_model = [this](const std::string& failure) {
+    const auto restore_previous_model = [this](
+        const ModelChangeRequest& request, const std::string& failure) {
         Logger::error("[ModelManagerThread] model change failed: " + failure);
+        if (runtime_control_.stop_requested.load()) return;
         try
         {
             auto restored = create_pipeline(active_model_);
             if (!restored)
                 throw std::runtime_error("Rollback pipeline creation returned null");
+            if (runtime_control_.stop_requested.load()) return;
             active_pipeline_.set(std::move(restored));
             active_model_id_.store(active_model_.id);
             {
@@ -143,6 +148,8 @@ void ModelManagerThread::run()
             }
             runtime_control_.generation.fetch_add(1);
             runtime_control_.state.store(RuntimeState::Running);
+            if (results_) results_->push({request.request_id, request.entry.id,
+                active_model_.id, ModelChangeOutcome::Restored, failure});
             Logger::warn("[ModelManagerThread] restored model id=" +
                 std::to_string(active_model_.id));
         }
@@ -154,6 +161,8 @@ void ModelManagerThread::run()
                 error_message_ = failure + "; rollback failed: " + e.what();
             }
             runtime_control_.state.store(RuntimeState::SwitchFailed);
+            if (results_) results_->push({request.request_id, request.entry.id,
+                0, ModelChangeOutcome::Failed, error_message()});
             Logger::error("[ModelManagerThread] " + error_message());
         }
         catch (...)
@@ -164,6 +173,8 @@ void ModelManagerThread::run()
                 error_message_ = failure + "; rollback failed: unknown error";
             }
             runtime_control_.state.store(RuntimeState::SwitchFailed);
+            if (results_) results_->push({request.request_id, request.entry.id,
+                0, ModelChangeOutcome::Failed, error_message()});
             Logger::error("[ModelManagerThread] " + error_message());
         }
     };
@@ -174,7 +185,8 @@ void ModelManagerThread::run()
         if (runtime_control_.stop_requested.load())
             break;
 
-        runtime_control_.wait_detection_quiesced();
+        if (!runtime_control_.wait_detection_quiesced())
+            break;
 
         std::shared_ptr<IDetectionPipeline> old_pipeline =
             active_pipeline_.take();
@@ -191,6 +203,7 @@ void ModelManagerThread::run()
                 create_pipeline(request.entry);
             if (!new_pipeline)
                 throw std::runtime_error("Model pipeline creation returned null");
+            if (runtime_control_.stop_requested.load()) break;
             active_model_ = request.entry;
             active_pipeline_.set(std::move(new_pipeline));
             active_model_id_.store(request.entry.id);
@@ -200,6 +213,8 @@ void ModelManagerThread::run()
             }
             runtime_control_.generation.fetch_add(1);
             runtime_control_.state.store(RuntimeState::Running);
+            if (results_) results_->push({request.request_id, request.entry.id,
+                request.entry.id, ModelChangeOutcome::Activated, {}});
             Logger::info(
                 "[ModelManagerThread] model changed to id=" +
                 std::to_string(request.entry.id) +
@@ -208,12 +223,12 @@ void ModelManagerThread::run()
         catch (const std::exception& e)
         {
             old_pipeline.reset();
-            restore_previous_model(e.what());
+            restore_previous_model(request, e.what());
         }
         catch (...)
         {
             old_pipeline.reset();
-            restore_previous_model("Unknown model change error");
+            restore_previous_model(request, "Unknown model change error");
         }
     }
 

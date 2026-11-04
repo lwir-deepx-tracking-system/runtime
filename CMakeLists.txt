@@ -155,6 +155,7 @@ if(LWIR_NEEDS_VISION)
         src/detection/lwir_preprocessor.cpp
         src/detection/dxrt_detection_pipeline.cpp
         src/tracking/bytetrack_tracker.cpp
+        src/tracking/tracker_factory.cpp
         src/tracking/kalman_filter.cpp
     )
 
@@ -252,6 +253,8 @@ if(LWIR_BUILD_RUNTIME)
     add_executable(lwir_runtime
         apps/runtime/main.cpp
         apps/runtime/runtime.cpp
+        apps/runtime/runtime_metrics.cpp
+        apps/runtime/runtime_workers.cpp
     )
 
     target_link_libraries(lwir_runtime
@@ -338,6 +341,8 @@ if(BUILD_TESTING)
         test_app_config
         tests/app/test_app_config.cpp
         apps/runtime/runtime.cpp
+        apps/runtime/runtime_metrics.cpp
+        apps/runtime/runtime_workers.cpp
     )
     target_include_directories(test_app_config PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/apps
@@ -475,6 +480,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_model_manager_recovery PRIVATE lwir_runtime_core)
     add_test(NAME model_manager_recovery COMMAND test_model_manager_recovery)
 
+    add_executable(test_model_switch_wakeup
+        tests/pipeline/test_model_switch_wakeup.cpp)
+    target_link_libraries(test_model_switch_wakeup PRIVATE lwir_runtime_core)
+    add_test(NAME model_switch_wakeup COMMAND test_model_switch_wakeup)
+
 
     # --------------------------------------------------------------------------
     # 객체 추적 테스트
@@ -486,6 +496,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_bytetrack PRIVATE lwir_vision)
     add_test(NAME bytetrack COMMAND test_bytetrack)
+
+    add_executable(test_tracker_factory
+        tests/tracking/test_tracker_factory.cpp)
+    target_link_libraries(test_tracker_factory PRIVATE lwir_vision)
+    add_test(NAME tracker_factory COMMAND test_tracker_factory)
 
     set_tests_properties(
         bytetrack

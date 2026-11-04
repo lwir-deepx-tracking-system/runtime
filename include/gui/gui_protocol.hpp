@@ -11,6 +11,8 @@ constexpr std::size_t kGuiCommandHeaderSize = 8;
 constexpr std::uint32_t kGuiMetadataMagic = 0x4c574952U;
 constexpr std::size_t kGuiMetadataHeaderSize = 28;
 constexpr std::size_t kGuiTrackMetadataSize = 25;
+constexpr std::uint32_t kGuiFrameWidth = 640;
+constexpr std::uint32_t kGuiFrameHeight = 480;
 
 enum class GuiCategory : std::uint8_t { System = 1, Mode = 2, Gimbal = 3 };
 enum class GuiSystem : std::uint8_t { Ack = 1, Init = 2, Status = 3, Ping = 4 };

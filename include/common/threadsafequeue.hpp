@@ -3,6 +3,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <cstdint>
 #include <queue>
 #include <utility>
 
@@ -22,8 +23,11 @@ private:
 
     // Queue 종료 상태
     bool closed_;
+    std::uint64_t interrupt_generation_ = 0;
     
 public:
+    // 중단 가능한 pop의 결과를 데이터 수신·상태 전환·큐 종료로 구분한다.
+    enum class PopResult { Item, Interrupted, Closed };
     // Mutex, Condition Variable 초기화
     ThreadSafeQueue()
         : closed_(false)
@@ -43,16 +47,15 @@ public:
     // Queue가 이미 닫힌 경우 false를 반환한다.
     bool push(T data)
     {
-        mutex_.lock();
-        if (closed_)
         {
-            mutex_.unlock();
-            return false;
+            std::lock_guard lock(mutex_);
+            if(closed_)
+            {
+                return false;
+            }
+
+            queue_.push(std::move(data));
         }
-
-        queue_.push(std::move(data));
-
-        mutex_.unlock();
 
         cond_.notify_one();
         return true;
@@ -62,20 +65,18 @@ public:
     // max_size를 넘으면 가장 오래된 항목을 제거하고 새 항목을 넣는다.
     bool push_latest(T data, std::size_t max_size)
     {
-        mutex_.lock();
-
-        if (closed_ || max_size == 0)
         {
-            mutex_.unlock();
-            return false;
+            std::lock_guard lock(mutex_);
+            if (closed_ || max_size == 0)
+            {
+                return false;
+            }
+
+            while (queue_.size() >= max_size)
+                queue_.pop();
+
+            queue_.push(std::move(data));
         }
-
-        while (queue_.size() >= max_size)
-            queue_.pop();
-
-        queue_.push(std::move(data));
-
-        mutex_.unlock();
 
         cond_.notify_one();
         return true;
@@ -103,6 +104,41 @@ public:
         queue_.pop();
 
         return true;
+    }
+
+    // 대기하지 않고 현재 큐의 항목 하나를 꺼낸다.
+    bool try_pop(T& data)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (queue_.empty()) return false;
+        data = std::move(queue_.front());
+        queue_.pop();
+        return true;
+    }
+
+    // A control transition can wake a consumer even when no new item arrives.
+    PopResult pop_interruptible(T& data, std::uint64_t& observed_interrupt)
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cond_.wait(lock, [&] { return closed_ ||
+            interrupt_generation_ != observed_interrupt || !queue_.empty(); });
+        if (interrupt_generation_ != observed_interrupt) {
+            observed_interrupt = interrupt_generation_;
+            return PopResult::Interrupted;
+        }
+        if (queue_.empty()) return PopResult::Closed;
+        data = std::move(queue_.front());
+        queue_.pop();
+        return PopResult::Item;
+    }
+
+    // 항목을 추가하지 않고 pop_interruptible() 대기자를 깨운다.
+    void interrupt_waiters() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++interrupt_generation_;
+        }
+        cond_.notify_all();
     }
 
     // Queue를 종료 상태로 만들고,

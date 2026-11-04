@@ -14,6 +14,13 @@ logging:
 model:
   # 사용할 모델 설정 파일
   config: config/model/yolo26s.yaml
+  postprocess_id: 2
+
+postprocess_catalog:
+  - id: 1
+    config: config/postprocess/yolov8n.yaml
+  - id: 2
+    config: config/postprocess/yolo26s.yaml
 
 
 # ============================================================
@@ -37,6 +44,7 @@ detection:
 # ============================================================
 
 tracking:
+  type: bytetrack
   # Track으로 사용할 Detection confidence 기준
   track_threshold: 0.2
 

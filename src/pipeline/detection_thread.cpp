@@ -60,12 +60,24 @@ void DetectionThread::run()
     Logger::info("[DetectionThread] 시작");
     auto last_bypass_sent = std::chrono::steady_clock::time_point{};
     bool has_sent_bypass = false;
+    std::uint64_t observed_interrupt = 0;
 
     try
     {
         FrameMessage input;
-        while (!failed_.load() && input_queue_.pop(input))
+        while (!failed_.load())
         {
+            const auto popped = input_queue_.pop_interruptible(input, observed_interrupt);
+            if (popped == ThreadSafeQueue<FrameMessage>::PopResult::Closed)
+                break;
+            if (popped == ThreadSafeQueue<FrameMessage>::PopResult::Interrupted)
+            {
+                if (runtime_control_.state.load() == RuntimeState::Stopping)
+                    break;
+                if (runtime_control_.state.load() != RuntimeState::Running)
+                    runtime_control_.set_detection_quiesced(true);
+                continue;
+            }
             if (!input.frame)
                 continue;
 

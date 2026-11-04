@@ -70,7 +70,7 @@ bool PcGuiProtocol::decode_command(const std::uint8_t* p, std::size_t n, GuiComm
 std::vector<std::uint8_t> PcGuiProtocol::encode_command(const GuiCommand& command) const
 { return encode_gui_command(command); }
 bool PcGuiProtocol::accepts_frame(std::uint32_t width, std::uint32_t height) const
-{ return width == 640 && height == 480; }
+{ return width == kGuiFrameWidth && height == kGuiFrameHeight; }
 bool PcGuiProtocol::encode_metadata(const GuiTrackingMetadata& metadata, std::size_t limit,
                                     std::vector<std::uint8_t>& out) const
 { return encode_tracking_metadata(metadata, limit, out); }

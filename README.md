@@ -158,7 +158,10 @@ Runtime 결과는 같은 조합 아래에서 `core`, `gui`, `full` 모드와 실
 
 Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yaml`,
 `config/benchmark.yaml` 설정을 사용합니다. 모델 관련 설정은 `config/model/` 아래의
-별도 model configuration으로 관리하며 실행 파라미터는 YAML에서 변경합니다.
+별도 model configuration으로, 후처리 설정은 `config/postprocess/` 아래의 별도 YAML로
+관리합니다. Runtime과 Benchmark의 `postprocess_catalog`는 후처리 ID와 설정 파일을
+연결합니다. Runtime의 `model_catalog[].postprocess_id`와 Benchmark의
+`model.postprocess_id`가 사용할 후처리를 선택합니다.
 
 - Runtime 측정 결과 root: `measurement.output_root`
 - Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`

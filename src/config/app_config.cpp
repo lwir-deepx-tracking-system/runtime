@@ -1,10 +1,14 @@
 #include "config/app_config.hpp"
 #include "common/logger.hpp"
+#include "gui/gui_protocol.hpp"
 
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
+
+namespace fs = std::filesystem;
 
 namespace {
 // 필수 키가 없거나 요청한 타입으로 변환되지 않으면 경로가 포함된 오류를 만든다.
@@ -129,6 +133,12 @@ DetectionConfig load_detection_config(const YAML::Node& node)
 TrackingConfig load_tracking_config(const YAML::Node& node)
 {
     TrackingConfig c;
+    const std::string type = optional_value<std::string>(
+        node, "type", "tracking", "bytetrack");
+    if (type == "bytetrack")
+        c.type = TrackerType::ByteTrack;
+    else
+        throw std::runtime_error("tracking.type is unsupported: " + type);
     c.track_threshold = required<float>(
         node, "track_threshold", "tracking");
     c.match_threshold = required<float>(
@@ -432,6 +442,8 @@ CaptureConditionConfig load_capture_condition_config(const YAML::Node& node)
 ModelConfig load_model_config(const std::string& path)
 {
     const YAML::Node root = config_parser::load_yaml(path);
+    if (root["postprocess"])
+        throw std::runtime_error("postprocess settings belong in config/postprocess YAML");
     ModelConfig c;
     c.name = required<std::string>(root["model"], "name", "model");
     c.path = required<std::string>(root["model"], "path", "model");
@@ -448,26 +460,6 @@ ModelConfig load_model_config(const std::string& path)
     c.preprocess.resize = required<std::string>(root["preprocess"], "resize", "preprocess");
     c.preprocess.normalize = required<bool>(root["preprocess"], "normalize", "preprocess");
     c.preprocess.pad_value = required<int>(root["preprocess"], "pad_value", "preprocess");
-    const YAML::Node post = root["postprocess"];
-    c.postprocess.type = required<std::string>(post, "type", "postprocess");
-    c.postprocess.output_format = parse_postprocess_output_format(
-        required<std::string>(post, "output_format", "postprocess"));
-    c.postprocess.split_output_levels = required<int>(
-        post, "split_output_levels", "postprocess");
-    c.postprocess.split_regression_bins = required<int>(
-        post, "split_regression_bins", "postprocess");
-    c.postprocess.split_class_score_activation =
-        parse_postprocess_score_activation(required<std::string>(
-            post, "split_class_score_activation", "postprocess"));
-    c.postprocess.nms_mode = parse_postprocess_nms_mode(
-        required<std::string>(post, "nms_mode", "postprocess"));
-    c.postprocess.class_agnostic_nms = required<bool>(
-        post, "class_agnostic_nms", "postprocess");
-    c.postprocess.confidence_threshold = required<float>(post, "confidence_threshold", "postprocess");
-    c.postprocess.nms_threshold = required<float>(post, "nms_threshold", "postprocess");
-    c.postprocess.num_classes = required<int>(post, "num_classes", "postprocess");
-    c.postprocess.class_names = required<std::vector<std::string>>(post, "class_names", "postprocess");
-
     // 현재 LWIR 전처리 구현이 안전하게 처리할 수 있는 계약만 허용한다.
     if (c.camera_input.opencv_type != "CV_16UC1") throw std::runtime_error("camera_input.opencv_type must be CV_16UC1");
     if (c.camera_input.width <= 0 || c.camera_input.height <= 0 || c.input.width <= 0 || c.input.height <= 0)
@@ -478,29 +470,178 @@ ModelConfig load_model_config(const std::string& path)
     c.camera_input.clip_max = static_cast<std::uint16_t>(clip_max);
     if (c.camera_input.channel_mode != "replicate_gray_to_rgb") throw std::runtime_error("unsupported camera_input.channel_mode");
     if (c.preprocess.type != "lwir_letterbox") throw std::runtime_error("unsupported preprocess.type");
-    if (c.postprocess.type != "yolov8" && c.postprocess.type != "yolo26") throw std::runtime_error("postprocess.type must be yolov8 or yolo26");
     if (c.preprocess.resize != "letterbox" || c.preprocess.normalize)
         throw std::runtime_error("only letterbox with normalize=false is supported");
     if (c.preprocess.pad_value < 0 || c.preprocess.pad_value > 255)
         throw std::runtime_error("preprocess.pad_value must be in [0, 255]");
-    if (c.postprocess.split_output_levels <= 0 ||
-        c.postprocess.split_output_levels > 16)
-        throw std::runtime_error(
-            "postprocess.split_output_levels must be in [1, 16]");
-    if (c.postprocess.split_regression_bins <= 0 ||
-        c.postprocess.split_regression_bins > 256)
-        throw std::runtime_error(
-            "postprocess.split_regression_bins must be in [1, 256]");
-    if (!std::isfinite(c.postprocess.confidence_threshold) ||
-        c.postprocess.confidence_threshold < 0.0F ||
-        c.postprocess.confidence_threshold > 1.0F)
-        throw std::runtime_error(
-            "postprocess.confidence_threshold must be in [0, 1]");
-    if (!std::isfinite(c.postprocess.nms_threshold) ||
-        c.postprocess.nms_threshold < 0.0F ||
-        c.postprocess.nms_threshold > 1.0F)
+    return c;
+}
+
+// 후처리 전용 YAML의 출력 해석 방식과 필터링 조건을 읽고 검증한다.
+ModelPostprocessConfig load_postprocess_config(const std::string& path)
+{
+    const YAML::Node post = config_parser::load_yaml(path)["postprocess"];
+    ModelPostprocessConfig c;
+    c.type = required<std::string>(post, "type", "postprocess");
+    c.output_format = parse_postprocess_output_format(
+        required<std::string>(post, "output_format", "postprocess"));
+    c.split_output_levels = required<int>(post, "split_output_levels", "postprocess");
+    c.split_regression_bins = required<int>(post, "split_regression_bins", "postprocess");
+    c.split_class_score_activation = parse_postprocess_score_activation(
+        required<std::string>(post, "split_class_score_activation", "postprocess"));
+    c.nms_mode = parse_postprocess_nms_mode(
+        required<std::string>(post, "nms_mode", "postprocess"));
+    c.class_agnostic_nms = required<bool>(post, "class_agnostic_nms", "postprocess");
+    c.confidence_threshold = required<float>(post, "confidence_threshold", "postprocess");
+    c.nms_threshold = required<float>(post, "nms_threshold", "postprocess");
+    c.num_classes = required<int>(post, "num_classes", "postprocess");
+    c.class_names = required<std::vector<std::string>>(post, "class_names", "postprocess");
+
+    if (c.type != "yolov8" && c.type != "yolo26")
+        throw std::runtime_error("postprocess.type must be yolov8 or yolo26");
+    if (c.split_output_levels <= 0 || c.split_output_levels > 16)
+        throw std::runtime_error("postprocess.split_output_levels must be in [1, 16]");
+    if (c.split_regression_bins <= 0 || c.split_regression_bins > 256)
+        throw std::runtime_error("postprocess.split_regression_bins must be in [1, 256]");
+    if (!std::isfinite(c.confidence_threshold) ||
+        c.confidence_threshold < 0.0F || c.confidence_threshold > 1.0F)
+        throw std::runtime_error("postprocess.confidence_threshold must be in [0, 1]");
+    if (!std::isfinite(c.nms_threshold) ||
+        c.nms_threshold < 0.0F || c.nms_threshold > 1.0F)
         throw std::runtime_error("postprocess.nms_threshold must be in [0, 1]");
-    if (c.postprocess.num_classes <= 0 || static_cast<int>(c.postprocess.class_names.size()) != c.postprocess.num_classes)
+    if (c.num_classes <= 0 || static_cast<int>(c.class_names.size()) != c.num_classes)
         throw std::runtime_error("postprocess.class_names size must equal num_classes");
+    return c;
+}
+
+// 카탈로그의 중복 ID와 참조 YAML을 검증해 ID별 후처리 설정을 준비한다.
+std::map<int, PostprocessCatalogEntry> config_parser::load_postprocess_catalog(
+    const YAML::Node& node)
+{
+    if (!node || !node.IsSequence() || node.size() == 0)
+        throw std::runtime_error("postprocess_catalog must be a nonempty sequence");
+    std::map<int, PostprocessCatalogEntry> catalog;
+    for (const YAML::Node& item : node)
+    {
+        PostprocessCatalogEntry entry;
+        entry.id = required<int>(item, "id", "postprocess_catalog");
+        entry.config_path = required_string(item, "config", "postprocess_catalog");
+        if (entry.id <= 0 || entry.config_path.empty())
+            throw std::runtime_error("postprocess_catalog entries need a positive id and config path");
+        entry.config = load_postprocess_config(entry.config_path);
+        if (!catalog.emplace(entry.id, std::move(entry)).second)
+            throw std::runtime_error("Duplicate postprocess_catalog id");
+    }
+    return catalog;
+}
+
+// 모델 선택 항목에 지정된 양수 후처리 ID를 읽는다.
+int config_parser::load_model_postprocess_id(const YAML::Node& node)
+{
+    const int id = required<int>(node, "postprocess_id", "model");
+    if (id <= 0)
+        throw std::runtime_error("model.postprocess_id must be positive");
+    return id;
+}
+
+// runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
+RuntimeConfig load_runtime_config(const std::string& path)
+{
+    const YAML::Node root = config_parser::load_yaml(path);
+    RuntimeConfig c;
+    c.logging = config_parser::load_logging_config(root["logging"]);
+
+    c.model_config_path = config_parser::required_string(
+        root["model"], "config", "model");
+    if (c.model_config_path.empty())
+        throw std::runtime_error("model.config must not be empty");
+    c.model = load_model_config(c.model_config_path);
+    c.postprocess_catalog = config_parser::load_postprocess_catalog(
+        root["postprocess_catalog"]);
+
+    const YAML::Node model_catalog = root["model_catalog"];
+    if (model_catalog && !model_catalog.IsSequence())
+        throw std::runtime_error("model_catalog must be a sequence");
+    if (model_catalog)
+    {
+        for (const YAML::Node& item : model_catalog)
+        {
+            ModelCatalogEntry entry;
+            entry.id = item["id"].as<int>();
+            entry.config_path = config_parser::required_string(
+                item, "config", "model_catalog");
+            entry.postprocess_id = required<int>(
+                item, "postprocess_id", "model_catalog");
+            if (entry.id <= 0 || entry.config_path.empty())
+                throw std::runtime_error(
+                    "model_catalog entries need a positive id and config path");
+            const auto post = c.postprocess_catalog.find(entry.postprocess_id);
+            if (post == c.postprocess_catalog.end())
+                throw std::runtime_error("Unknown model_catalog postprocess_id=" +
+                    std::to_string(entry.postprocess_id));
+            entry.model = load_model_config(entry.config_path);
+            entry.model.postprocess = post->second.config;
+            if (!c.model_catalog.emplace(entry.id, std::move(entry)).second)
+                throw std::runtime_error("Duplicate model_catalog id");
+        }
+    }
+    if (c.model_catalog.empty())
+    {
+        ModelCatalogEntry entry;
+        entry.id = 1;
+        entry.config_path = c.model_config_path;
+        entry.postprocess_id = config_parser::load_model_postprocess_id(root["model"]);
+        const auto post = c.postprocess_catalog.find(entry.postprocess_id);
+        if (post == c.postprocess_catalog.end())
+            throw std::runtime_error("Unknown model.postprocess_id=" +
+                std::to_string(entry.postprocess_id));
+        entry.model = c.model;
+        entry.model.postprocess = post->second.config;
+        c.model_catalog.emplace(entry.id, std::move(entry));
+    }
+
+    const std::string active_config =
+        fs::path(c.model_config_path).lexically_normal().string();
+    for (const auto& item : c.model_catalog)
+    {
+        if (fs::path(item.second.config_path).lexically_normal().string() ==
+            active_config)
+            c.initial_model_id = item.first;
+    }
+    if (c.initial_model_id == 0)
+        throw std::runtime_error(
+            "model.config must be listed in model_catalog");
+    c.model = c.model_catalog.at(c.initial_model_id).model;
+
+    c.detection = config_parser::load_detection_config(root["detection"]);
+    c.tracking = config_parser::load_tracking_config(root["tracking"]);
+    c.control = config_parser::load_control_config(root["control"]);
+    c.measurement = config_parser::load_measurement_config(root["measurement"]);
+    c.gui = config_parser::load_gui_config(root["gui"]);
+
+    // Camera and display conversion remain active while the inference model changes.
+    for (const auto& [id, entry] : c.model_catalog)
+    {
+        const auto& camera = entry.model.camera_input;
+        const auto& initial = c.model.camera_input;
+        if (camera.width != initial.width || camera.height != initial.height ||
+            camera.opencv_type != initial.opencv_type ||
+            camera.channel_mode != initial.channel_mode ||
+            camera.clip_min != initial.clip_min || camera.clip_max != initial.clip_max)
+            throw std::runtime_error("model_catalog camera input differs for model id=" +
+                std::to_string(id));
+    }
+    if (c.gui.enabled)
+    {
+        if (c.model.camera_input.width != static_cast<int>(kGuiFrameWidth) ||
+            c.model.camera_input.height != static_cast<int>(kGuiFrameHeight))
+            throw std::runtime_error("Camera dimensions do not match the configured GUI protocol");
+    }
+
+    const bool tracking_handler = c.gui.command.handler == GuiCommandHandlerType::Tracking;
+    if ((tracking_handler && !c.control.enabled) ||
+        (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !tracking_handler)))
+        throw std::runtime_error("Gimbal control requires control.enabled=true, GUI command enabled and handler=tracking");
+
     return c;
 }

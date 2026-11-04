@@ -9,10 +9,11 @@ void RuntimeControl::set_detection_quiesced(bool value)
     condition_.notify_all();
 }
 
-void RuntimeControl::wait_detection_quiesced()
+bool RuntimeControl::wait_detection_quiesced()
 {
     std::unique_lock<std::mutex> lock(mutex_);
-    condition_.wait(lock, [this] { return detection_quiesced_; });
+    condition_.wait(lock, [this] { return detection_quiesced_ || stop_requested.load(); });
+    return detection_quiesced_ && !stop_requested.load();
 }
 
 void RuntimeControl::request_stop()

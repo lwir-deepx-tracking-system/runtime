@@ -15,17 +15,22 @@
 #include "pipeline/runtime_control.hpp"
 #include "pipeline/active_pipeline_slot.hpp"
 
-struct ModelCatalogEntry
-{
-    int id = 0;
-    std::string config_path;
-    ModelConfig model;
-};
-
+// 모델 변경 요청의 식별자와 교체할 모델 설정을 전달한다.
 struct ModelChangeRequest
 {
     std::uint64_t request_id = 0;
     ModelCatalogEntry entry;
+};
+
+enum class ModelChangeOutcome { Activated, Restored, Failed };
+// 변경 결과와 복구 여부를 요청자에게 전달한다.
+struct ModelChangeResult
+{
+    std::uint64_t request_id = 0;
+    int requested_model_id = 0;
+    int active_model_id = 0;
+    ModelChangeOutcome outcome = ModelChangeOutcome::Failed;
+    std::string error;
 };
 
 class ModelManagerThread
@@ -35,6 +40,7 @@ private:
     ModelCatalogEntry active_model_;
     DetectionConfig detection_config_;
     ThreadSafeQueue<ModelChangeRequest>& requests_;
+    ThreadSafeQueue<ModelChangeResult>* results_;
     ActivePipelineSlot& active_pipeline_;
     RuntimeControl& runtime_control_;
     std::thread thread_;
@@ -61,6 +67,7 @@ public:
         ThreadSafeQueue<ModelChangeRequest>& requests,
         ActivePipelineSlot& active_pipeline,
         RuntimeControl& runtime_control,
+        ThreadSafeQueue<ModelChangeResult>* results = nullptr,
         std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
             pipeline_creator = {});
 

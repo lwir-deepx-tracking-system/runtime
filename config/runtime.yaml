@@ -19,7 +19,6 @@ measurement:
 # - camera input format
 # - model input size
 # - preprocess
-# - postprocess
 model:
   config: config/model/yolov8n.yaml
 
@@ -27,8 +26,17 @@ model:
 model_catalog:
   - id: 1
     config: config/model/yolov8n.yaml
+    postprocess_id: 1
   - id: 2
     config: config/model/yolo26s.yaml
+    postprocess_id: 2
+
+# Each model catalog entry selects the decoder compatible with its tensors.
+postprocess_catalog:
+  - id: 1
+    config: config/postprocess/yolov8n.yaml
+  - id: 2
+    config: config/postprocess/yolo26s.yaml
 
 
 # ============================================================
@@ -51,6 +59,7 @@ detection:
 # ============================================================
 
 tracking:
+  type: bytetrack
   # Detection confidence 기준
   track_threshold: 0.5
 

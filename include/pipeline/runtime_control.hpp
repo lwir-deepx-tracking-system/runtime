@@ -26,6 +26,6 @@ public:
     std::atomic<bool> stop_requested{false};
 
     void set_detection_quiesced(bool value);
-    void wait_detection_quiesced();
+    bool wait_detection_quiesced();
     void request_stop();
 };

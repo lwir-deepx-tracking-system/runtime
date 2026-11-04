@@ -7,7 +7,7 @@
 #include "common/track.hpp"
 
 #include "detection/detector_factory.hpp"
-#include "tracking/bytetrack_tracker.hpp"
+#include "tracking/tracker_factory.hpp"
 #include "tracking/tracker.hpp"
 
 #include <algorithm>
@@ -32,13 +32,6 @@
 
 namespace fs = std::filesystem;
 
-namespace {
-// 현재 직접 생성하는 ByteTrack 구현의 결과 이름이다.
-// tracker 선택 기능이 생기면 선택값으로 교체한다.
-constexpr const char* kTrackerName = "bytetrack";
-}  // namespace
-
-
 // benchmark.yaml과 model YAML을 읽어 Benchmark 설정을 구성한다.
 BenchmarkConfig load_benchmark_config(const std::string& path)
 {
@@ -55,6 +48,14 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
         throw std::runtime_error("model.config must not be empty");
 
     c.model = load_model_config(c.model_config_path);
+    c.postprocess_catalog = config_parser::load_postprocess_catalog(
+        root["postprocess_catalog"]);
+    const int postprocess_id = config_parser::load_model_postprocess_id(root["model"]);
+    const auto post = c.postprocess_catalog.find(postprocess_id);
+    if (post == c.postprocess_catalog.end())
+        throw std::runtime_error("Unknown model.postprocess_id=" +
+            std::to_string(postprocess_id));
+    c.model.postprocess = post->second.config;
     c.detection = config_parser::load_detection_config(root["detection"]);
     c.tracking = config_parser::load_tracking_config(root["tracking"]);
     c.sequence = config_parser::load_benchmark_sequence_config(root["sequence"]);
@@ -208,6 +209,7 @@ class BenchmarkApplication
 private:
     BenchmarkConfig config_;
     std::string config_path_;
+    std::string tracker_name_;
 
     std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<Tracker> tracker_;
@@ -226,8 +228,9 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
     detection_pipeline_ = detector_factory->create(
         config_.model, config_.detection);
 
-    tracker_ = std::make_unique<ByteTrackTracker>(
-        config_.tracking);
+    auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
+    tracker_name_ = tracker_factory->name();
+    tracker_ = tracker_factory->create(config_.tracking);
 }
 
 
@@ -275,7 +278,7 @@ void BenchmarkApplication::run()
     }
 
     const fs::path run_dir = create_run_directory(
-        output_root, config_.model.name, kTrackerName);
+        output_root, config_.model.name, tracker_name_);
 
     // run 디렉터리 생성 이후의 모든 실패는 불완전한 결과를 통째로 정리한다.
     try
@@ -285,6 +288,12 @@ void BenchmarkApplication::run()
         fs::copy_file(
             config_.model_config_path,
             run_dir / fs::path(config_.model_config_path).filename());
+        const fs::path postprocess_dir = run_dir / "postprocess";
+        fs::create_directory(postprocess_dir);
+        for (const auto& [id, entry] : config_.postprocess_catalog)
+            fs::copy_file(entry.config_path,
+                postprocess_dir / (std::to_string(id) + "_" +
+                    fs::path(entry.config_path).filename().string()));
 
         Logger::info("[Benchmark] Sequence 수: " + std::to_string(sequence_dirs.size()));
         if (config_.sequence.range_enabled)

@@ -18,12 +18,23 @@ int main()
 
     // ByteTrack, Control, Measurement 설정도 runtime.yaml에서 직접 읽는다.
     if (config.tracking.track_threshold != 0.5F ||
+        config.tracking.type != TrackerType::ByteTrack ||
         config.tracking.match_threshold != 0.8F ||
         config.tracking.track_buffer != 30 ||
-        config.control.enabled ||
+        config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
         !config.measurement.enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")
         return 2;
+
+    auto tracking = YAML::Clone(yaml["tracking"]);
+    tracking["type"] = "unsupported";
+    try {
+        config_parser::load_tracking_config(tracking);
+        return 41;
+    } catch (const std::runtime_error&) {}
+    tracking.remove("type");
+    if (config_parser::load_tracking_config(tracking).type != TrackerType::ByteTrack)
+        return 42;
 
     // 연결된 모델 YAML의 Camera와 모델 입력 계약 검증.
     if (config.model.camera_input.opencv_type != "CV_16UC1") return 3;
@@ -45,7 +56,8 @@ int main()
         return 6;
 
     // YOLO26은 같은 parser를 사용하되 DFL-free split-head와 NMS auto 계약을 갖는다.
-    const ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
+    ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
+    yolo26.postprocess = load_postprocess_config("config/postprocess/yolo26s.yaml");
     if (yolo26.name != "yolo26s" ||
         yolo26.preprocess.type != "lwir_letterbox" ||
         yolo26.postprocess.type != "yolo26" ||
@@ -58,6 +70,14 @@ int main()
         !yolo26.postprocess.class_agnostic_nms ||
         yolo26.postprocess.num_classes != 16)
         return 7;
+    if (config.postprocess_catalog.size() != 2 ||
+        config.model_catalog.at(1).postprocess_id != 1 ||
+        config.model_catalog.at(2).postprocess_id != 2 ||
+        config.model_catalog.at(2).model.postprocess.type != "yolo26")
+        return 44;
+    if (YAML::LoadFile("config/model/yolov8n.yaml")["postprocess"] ||
+        YAML::LoadFile("config/model/yolo26s.yaml")["postprocess"])
+        return 47;
 
     // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
     if (config.gui.enabled != yaml["gui"]["enabled"].as<bool>() ||
@@ -156,5 +176,22 @@ int main()
     runtime["gui"]["command"]["enabled"] = true;
     runtime["control"]["enabled"] = false;
     if (!invalid_combination()) return 29;
+    char model_filename[] = "/tmp/lwir-model-config-XXXXXX";
+    const int model_fd = ::mkstemp(model_filename);
+    if (model_fd < 0) return 42;
+    ::close(model_fd);
+    RemoveConfig model_cleanup{model_filename};
+    auto alternate = YAML::LoadFile("config/model/yolo26s.yaml");
+    alternate["camera_input"]["clip_max"] = 32000;
+    { std::ofstream out(model_filename); out << alternate; }
+    runtime["gui"]["command"]["handler"] = "deferred";
+    runtime["model_catalog"][1]["config"] = model_filename;
+    if (!invalid_combination()) return 43;
+    runtime = YAML::Clone(yaml);
+    runtime["model_catalog"][1]["postprocess_id"] = 99;
+    if (!invalid_combination()) return 45;
+    runtime = YAML::Clone(yaml);
+    runtime["postprocess_catalog"][1]["id"] = 1;
+    if (!invalid_combination()) return 46;
     return 0;
 }
