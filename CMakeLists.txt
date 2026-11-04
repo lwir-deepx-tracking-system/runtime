@@ -156,6 +156,7 @@ if(LWIR_NEEDS_VISION)
         src/detection/dxrt_detection_pipeline.cpp
         src/tracking/bytetrack_tracker.cpp
         src/tracking/tracker_factory.cpp
+        src/tracking/tracker_manager.cpp
         src/tracking/kalman_filter.cpp
     )
 
@@ -493,6 +494,10 @@ if(BUILD_TESTING)
         tests/pipeline/test_model_switch_wakeup.cpp)
     target_link_libraries(test_model_switch_wakeup PRIVATE lwir_runtime_core)
     add_test(NAME model_switch_wakeup COMMAND test_model_switch_wakeup)
+
+    add_executable(test_tracker_hotswap tests/pipeline/test_tracker_hotswap.cpp)
+    target_link_libraries(test_tracker_hotswap PRIVATE lwir_runtime_core)
+    add_test(NAME tracker_hotswap COMMAND test_tracker_hotswap)
 
 
     # --------------------------------------------------------------------------

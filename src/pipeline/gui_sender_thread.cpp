@@ -61,7 +61,8 @@ void GuiSenderThread::run()
                     sent = sender_.send_bypass(result->frame, gui_started_us);
             }
             else if (state == RuntimeState::Running &&
-                     result->model_generation == runtime_control_.generation.load())
+                     result->model_generation == runtime_control_.generation.load() &&
+                     result->tracker_epoch == runtime_control_.tracker_epoch.load())
                 sent = sender_.send(*result, gui_started_us);
 
             if (!sent)

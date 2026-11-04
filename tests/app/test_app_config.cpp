@@ -1,4 +1,5 @@
 #include "runtime/runtime.hpp"
+#include "config/app_config.hpp"
 #include <yaml-cpp/yaml.h>
 #include <stdexcept>
 #include <fstream>

@@ -23,6 +23,7 @@ private:
 public:
     std::atomic<RuntimeState> state{RuntimeState::Running};
     std::atomic<std::uint64_t> generation{0};
+    std::atomic<std::uint64_t> tracker_epoch{0};
     std::atomic<bool> stop_requested{false};
 
     void set_detection_quiesced(bool value);

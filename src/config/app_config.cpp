@@ -544,7 +544,7 @@ std::map<int, TrackingCatalogEntry> config_parser::load_tracking_catalog(
 }
 
 // 실행 설정의 tracking.id를 카탈로그에서 찾아 검증된 설정을 돌려준다.
-TrackingConfig config_parser::select_tracking_config(
+int config_parser::select_tracking_id(
     const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog)
 {
     if (!node || !node.IsMap() || node.size() != 1)
@@ -553,7 +553,13 @@ TrackingConfig config_parser::select_tracking_config(
     const auto it = catalog.find(id);
     if (it == catalog.end())
         throw std::runtime_error("Unknown tracking.id=" + std::to_string(id));
-    return it->second.config;
+    return id;
+}
+
+TrackingConfig config_parser::select_tracking_config(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog)
+{
+    return catalog.at(select_tracking_id(node, catalog)).config;
 }
 
 // runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
@@ -612,8 +618,9 @@ RuntimeConfig load_runtime_config(const std::string& path)
 
     c.detection = config_parser::load_detection_config(root["detection"]);
     c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
-    c.tracking = config_parser::select_tracking_config(
+    c.initial_tracker_id = config_parser::select_tracking_id(
         root["tracking"], c.tracking_catalog);
+    c.tracking = c.tracking_catalog.at(c.initial_tracker_id).config;
     c.control = config_parser::load_control_config(root["control"]);
     c.measurement = config_parser::load_measurement_config(root["measurement"]);
     c.gui = config_parser::load_gui_config(root["gui"]);

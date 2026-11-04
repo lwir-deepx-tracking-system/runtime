@@ -10,6 +10,7 @@
 #include "pipeline/detection_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
 #include "tracking/tracker.hpp"
+#include "tracking/tracker_manager.hpp"
 
 class FakeDetectionPipeline : public IDetectionPipeline
 {
@@ -68,7 +69,12 @@ int main()
     ActivePipelineSlot active_pipeline;
     active_pipeline.set(std::make_shared<FakeDetectionPipeline>());
 
-    FakeTracker tracker;
+    TrackingCatalogEntry tracker_entry;
+    tracker_entry.id = 1;
+    TrackerManager tracker_manager({{1, tracker_entry}}, 1,
+        [](const TrackingConfig&) -> std::shared_ptr<Tracker> {
+            return std::make_shared<FakeTracker>();
+        });
     DetectionThread detection_thread(
         runtime_control,
         active_pipeline,
@@ -78,7 +84,7 @@ int main()
         false,
         false);
     TrackingThread tracking_thread(
-        tracker,
+        tracker_manager,
         runtime_control,
         detection_queue,
         control_queue,

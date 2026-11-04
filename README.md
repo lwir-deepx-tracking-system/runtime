@@ -164,6 +164,9 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 Benchmark의 `tracking_catalog`가 트래커 ID와 설정 파일을 연결합니다.
 `tracking.id`로 실행에 사용할 트래커 설정을 선택합니다.
 Runtime과 Benchmark는 같은 `config/tracking/bytetrack.yaml`을 참조합니다.
+runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고 실행 루프가 처리합니다.
+새 인스턴스를 먼저 만든 뒤 활성 트래커를 교체하며, 진행 중이던 프레임이 끝나면 이전
+인스턴스가 소멸합니다. PC GUI 프로토콜에는 트래커 변경 명령이 아직 정의되어 있지 않습니다.
 
 - Runtime 측정 결과 root: `measurement.output_root`
 - Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`

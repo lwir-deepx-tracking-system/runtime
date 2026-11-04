@@ -9,12 +9,14 @@
 
 #include "detection/detector_factory.hpp"
 #include "tracking/tracker_factory.hpp"
+#include "tracking/tracker_manager.hpp"
 
 #include "camera/camera.hpp"
 #include "gui/gui_receiver.hpp"
 #include "gui/gui_sender.hpp"
 #include "tracking/tracker.hpp"
 
+#include "pipeline/model_manager_thread.hpp"
 #include "pipeline/camera_thread.hpp"
 #include "pipeline/detection_thread.hpp"
 #include "pipeline/tracking_thread.hpp"
@@ -52,7 +54,7 @@ void handle_sigint(int)
 
 }  // namespace
 
-// 프로그램의 구성 요소를 생성하고
+// Runtime 구성 요소를 소유하고 실행 중 모델·트래커 교체 요청을 받는다.
 // Pipeline 실행을 관리하는 최상위 Application 클래스
 class RuntimeApplication
 {
@@ -79,7 +81,7 @@ private:
     std::uint64_t next_model_request_id_ = 1;
     ThreadSafeQueue<ModelChangeRequest> model_change_requests_;
     ThreadSafeQueue<ModelChangeResult> model_change_results_;
-
+    ThreadSafeQueue<int> tracker_change_requests_;
 /************************************************************************/
     // Camera 객체
     std::unique_ptr<Camera> camera_;
@@ -93,6 +95,7 @@ private:
 
     // 현재 사용하는 Tracker 객체를 Application이 소유한다.
     std::unique_ptr<Tracker> tracker_;
+    std::unique_ptr<TrackerManager> tracker_manager_;
 
     // Tracking thread
     std::unique_ptr<TrackingThread> tracking_thread_;
@@ -109,13 +112,16 @@ private:
     std::unique_ptr<GuiReceiverThread> gui_receiver_thread_;
     std::unique_ptr<RuntimeWorkers> workers_;
 
-
 public:
     // YAML 설정을 읽고 필요한 객체를 생성
     explicit RuntimeApplication(const std::string& config_path);
+    RuntimeApplication(const RuntimeApplication&) = delete;
+    RuntimeApplication& operator=(const RuntimeApplication&) = delete;
 
     // Pipeline Worker 실행
     bool request_model_change(int model_id);
+    // 카탈로그 ID를 검증하고 runtime 루프에 트래커 변경을 요청한다.
+    bool request_tracker_change(int tracker_id);
     void run();
 };
 
@@ -169,7 +175,11 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
 
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
-    tracker_ = tracker_factory->create(config_.tracking);
+    if (config_.tracking_catalog.size() > 1)
+        tracker_name_ = "switchable";
+    tracker_manager_ = std::make_unique<TrackerManager>(
+        config_.tracking_catalog, config_.initial_tracker_id,
+        TrackerManager::Creator{}, &runtime_control_.tracker_epoch);
 
     
     // Camera Thread에 연결
@@ -195,7 +205,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
     // detection_queue → Tracking → track_queue
     tracking_thread_ =
         std::make_unique<TrackingThread>(
-            *tracker_,
+            *tracker_manager_,
             runtime_control_,
             detection_queue_,
             control_track_queue_,
@@ -275,6 +285,15 @@ bool RuntimeApplication::request_model_change(int model_id)
     return true;
 }
 
+// 유효한 트래커 변경 요청만 큐에 넣고 실제 생성·교체는 runtime 루프에 맡긴다.
+bool RuntimeApplication::request_tracker_change(int tracker_id)
+{
+    if (runtime_control_.stop_requested.load() ||
+        config_.tracking_catalog.find(tracker_id) == config_.tracking_catalog.end())
+        return false;
+    return tracker_change_requests_.push(tracker_id);
+}
+
 void RuntimeApplication::run()
 {
     fs::path result_dir;
@@ -282,6 +301,27 @@ void RuntimeApplication::run()
     if (std::signal(SIGINT, handle_sigint) == SIG_ERR ||
         std::signal(SIGTERM, handle_sigint) == SIG_ERR)
         throw std::runtime_error("Runtime signal handler 등록에 실패했습니다");
+
+    // 요청된 트래커를 먼저 생성한 뒤 교체하며 생성 실패는 기존 인스턴스에 영향을 주지 않는다.
+    auto process_tracker_changes = [this]() {
+        int tracker_id = 0;
+        while (!runtime_control_.stop_requested.load() &&
+               tracker_change_requests_.try_pop(tracker_id))
+        {
+            try
+            {
+                tracker_manager_->activate(tracker_id, [this] {
+                    if (gimbal_executor_) gimbal_executor_->suspend();
+                });
+                Logger::info("[Runtime] active tracker id=" + std::to_string(tracker_id));
+            }
+            catch (const std::exception& error)
+            {
+                Logger::error("[Runtime] tracker change failed id=" +
+                    std::to_string(tracker_id) + ": " + error.what());
+            }
+        }
+    };
 
     auto report_model_changes = [this]() {
         ModelChangeResult result;
@@ -328,6 +368,7 @@ void RuntimeApplication::run()
         while (!camera_thread_->finished())
         {
             report_model_changes();
+            process_tracker_changes();
             const bool worker_failed = detection_thread_->failed() ||
                 (model_manager_thread_ && model_manager_thread_->failed()) ||
                 tracking_thread_->failed() || control_thread_->failed() ||
@@ -355,6 +396,7 @@ void RuntimeApplication::run()
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
+        tracker_change_requests_.close();
         workers_->join();
         report_model_changes();
 
@@ -390,6 +432,7 @@ void RuntimeApplication::run()
     }
     catch (...)
     {
+        tracker_change_requests_.close();
         workers_->stop();
         workers_->join();
 

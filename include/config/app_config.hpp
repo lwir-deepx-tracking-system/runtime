@@ -299,6 +299,7 @@ struct RuntimeConfig
     int initial_model_id = 0;
     std::map<int, ModelCatalogEntry> model_catalog;
     std::map<int, TrackingCatalogEntry> tracking_catalog;
+    int initial_tracker_id = 0;
     ModelConfig model;
     DetectionConfig detection;
     TrackingConfig tracking;
@@ -326,6 +327,9 @@ DetectionConfig load_detection_config(const YAML::Node& node);
 TrackingConfig load_tracking_config(const YAML::Node& node);
 // 트래커 카탈로그의 ID·경로를 검증하고 각 YAML을 typed 설정으로 읽는다.
 std::map<int, TrackingCatalogEntry> load_tracking_catalog(const YAML::Node& node);
+// 실행 YAML의 tracking.id가 카탈로그에 존재하는지 확인한다.
+int select_tracking_id(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog);
 // 실행 YAML의 tracking.id에 해당하는 검증된 추적 설정을 선택한다.
 TrackingConfig select_tracking_config(
     const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog);

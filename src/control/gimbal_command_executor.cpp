@@ -9,7 +9,8 @@
 GimbalCommandExecutor::GimbalCommandExecutor(ControlConfig config,
     std::unique_ptr<IGimbalDevice> device, RuntimeControl& runtime)
     : config_(config), runtime_(runtime), device_(std::move(device)),
-      controller_(config.automatic), model_generation_(runtime.generation.load())
+      controller_(config.automatic), model_generation_(runtime.generation.load()),
+      tracker_epoch_(runtime.tracker_epoch.load())
 {
     if (!config.enabled || !device_) throw std::invalid_argument("Tracking control needs an enabled device");
     worker_ = std::thread([this] { run(); });
@@ -54,16 +55,23 @@ void GimbalCommandExecutor::publish(TrackingResultPtr input)
     if (!input || !input->frame) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!pending_ || input->model_generation > pending_->model_generation ||
-            (input->model_generation == pending_->model_generation &&
-             input->frame->metadata.frame_id > pending_->frame->metadata.frame_id))
+        if (!pending_ || input->tracker_epoch > pending_->tracker_epoch ||
+            (input->tracker_epoch == pending_->tracker_epoch &&
+             (input->model_generation > pending_->model_generation ||
+              (input->model_generation == pending_->model_generation &&
+               input->frame->metadata.frame_id > pending_->frame->metadata.frame_id))))
             pending_ = std::move(input);
     }
     wake_.notify_one();
 }
 void GimbalCommandExecutor::ingest(TrackingResultPtr input)
 {
-    if (input->model_generation != runtime_.generation.load()) return;
+    if (input->model_generation != runtime_.generation.load() ||
+        input->tracker_epoch != runtime_.tracker_epoch.load()) return;
+    if (input->tracker_epoch != tracker_epoch_) {
+        invalidate("tracker generation"); latest_.reset(); last_frame_id_ = 0;
+        tracker_epoch_ = input->tracker_epoch;
+    }
     if (input->model_generation != model_generation_) {
         invalidate("model generation"); latest_.reset(); last_frame_id_ = 0;
         model_generation_ = input->model_generation;
@@ -80,12 +88,14 @@ bool GimbalCommandExecutor::ready() const
 {
     return !stopped_ && !state_.error && alive() && !runtime_.stop_requested.load() &&
         runtime_.state.load() == RuntimeState::Running &&
-        runtime_.generation.load() == model_generation_;
+        runtime_.generation.load() == model_generation_ &&
+        runtime_.tracker_epoch.load() == tracker_epoch_;
 }
 bool GimbalCommandExecutor::fresh() const
 {
     if (!latest_ || !latest_->frame || latest_->bypass ||
         latest_->model_generation != runtime_.generation.load() ||
+        latest_->tracker_epoch != runtime_.tracker_epoch.load() ||
         latest_->frame->image.type() != CV_16UC1 || latest_->frame->image.empty()) return false;
     const auto captured = latest_->frame->metadata.captured_at;
     const auto now = Clock::now();
@@ -140,9 +150,11 @@ void GimbalCommandExecutor::send(int x, int y, int speed, bool automatic)
 void GimbalCommandExecutor::tick()
 {
     if (runtime_.generation.load() != model_generation_ ||
+        runtime_.tracker_epoch.load() != tracker_epoch_ ||
         runtime_.state.load() != RuntimeState::Running || runtime_.stop_requested.load()) {
-        invalidate("runtime/model transition"); latest_.reset(); last_frame_id_ = 0;
+        invalidate("runtime/model/tracker transition"); latest_.reset(); last_frame_id_ = 0;
         model_generation_ = runtime_.generation.load();
+        tracker_epoch_ = runtime_.tracker_epoch.load();
         return;
     }
     if (!alive()) { if (state_.automatic || state_.moving) invalidate("heartbeat/disconnect"); return; }

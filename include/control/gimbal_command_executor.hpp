@@ -38,6 +38,7 @@ class GimbalCommandExecutor {
     ControlSnapshot state_;
     TrackingResultPtr latest_;
     std::uint64_t model_generation_ = 0, last_frame_id_ = 0;
+    std::uint64_t tracker_epoch_ = 0;
     bool connected_ = false;
     bool stopped_ = false;
     Clock::time_point ping_{}, lost_since_{}, last_output_{}, next_auto_{};
