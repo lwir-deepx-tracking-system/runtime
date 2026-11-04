@@ -16,17 +16,20 @@ int main()
         config.detection.buffer_count != 6 ||
         config.detection.use_ort) return 1;
 
-    // ByteTrack, Control, Measurement 설정도 runtime.yaml에서 직접 읽는다.
+    // runtime 카탈로그가 ByteTrack YAML을 선택하고 실행 설정으로 합치는지 확인한다.
     if (config.tracking.track_threshold != 0.5F ||
         config.tracking.type != TrackerType::ByteTrack ||
         config.tracking.match_threshold != 0.8F ||
         config.tracking.track_buffer != 30 ||
+        config.tracking_catalog.size() != 1 ||
+        config.tracking_catalog.at(1).config_path !=
+            "config/tracking/bytetrack.yaml" ||
         config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
         !config.measurement.enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")
         return 2;
 
-    auto tracking = YAML::Clone(yaml["tracking"]);
+    auto tracking = YAML::LoadFile("config/tracking/bytetrack.yaml")["tracking"];
     tracking["type"] = "unsupported";
     try {
         config_parser::load_tracking_config(tracking);
@@ -56,8 +59,7 @@ int main()
         return 6;
 
     // YOLO26은 같은 parser를 사용하되 DFL-free split-head와 NMS auto 계약을 갖는다.
-    ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
-    yolo26.postprocess = load_postprocess_config("config/postprocess/yolo26s.yaml");
+    const ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
     if (yolo26.name != "yolo26s" ||
         yolo26.preprocess.type != "lwir_letterbox" ||
         yolo26.postprocess.type != "yolo26" ||
@@ -70,13 +72,10 @@ int main()
         !yolo26.postprocess.class_agnostic_nms ||
         yolo26.postprocess.num_classes != 16)
         return 7;
-    if (config.postprocess_catalog.size() != 2 ||
-        config.model_catalog.at(1).postprocess_id != 1 ||
-        config.model_catalog.at(2).postprocess_id != 2 ||
-        config.model_catalog.at(2).model.postprocess.type != "yolo26")
+    if (config.model_catalog.at(2).model.postprocess.type != "yolo26")
         return 44;
-    if (YAML::LoadFile("config/model/yolov8n.yaml")["postprocess"] ||
-        YAML::LoadFile("config/model/yolo26s.yaml")["postprocess"])
+    if (!YAML::LoadFile("config/model/yolov8n.yaml")["postprocess"] ||
+        !YAML::LoadFile("config/model/yolo26s.yaml")["postprocess"])
         return 47;
 
     // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
@@ -188,10 +187,13 @@ int main()
     runtime["model_catalog"][1]["config"] = model_filename;
     if (!invalid_combination()) return 43;
     runtime = YAML::Clone(yaml);
-    runtime["model_catalog"][1]["postprocess_id"] = 99;
+    runtime["tracking"]["id"] = 99;
     if (!invalid_combination()) return 45;
     runtime = YAML::Clone(yaml);
-    runtime["postprocess_catalog"][1]["id"] = 1;
+    runtime["tracking_catalog"].push_back(runtime["tracking_catalog"][0]);
     if (!invalid_combination()) return 46;
+    runtime = YAML::Clone(yaml);
+    runtime["tracking"]["track_threshold"] = 0.9;
+    if (!invalid_combination()) return 48;
     return 0;
 }

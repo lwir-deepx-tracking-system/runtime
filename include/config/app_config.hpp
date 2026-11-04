@@ -275,31 +275,30 @@ struct CaptureConditionConfig
 };
 
 
-// 모델 ID에 모델 YAML과 호환 후처리 ID를 연결한다.
+// 모델 ID에 모델 YAML 경로와 파싱된 설정을 연결한다.
 struct ModelCatalogEntry
 {
     int id = 0;
     std::string config_path;
-    int postprocess_id = 0;
     ModelConfig model;
 };
 
-// 후처리 ID에 YAML 경로와 검증된 typed 설정을 연결한다.
-struct PostprocessCatalogEntry
+// 트래커 ID에 설정 YAML 경로와 검증된 typed 설정을 연결한다.
+struct TrackingCatalogEntry
 {
     int id = 0;
     std::string config_path;
-    ModelPostprocessConfig config;
+    TrackingConfig config;
 };
 
-// runtime YAML과 참조된 모델·후처리 YAML을 합친 실행 설정이다.
+// runtime YAML과 참조된 모델·트래커 YAML을 합친 실행 설정이다.
 struct RuntimeConfig
 {
     LoggingConfig logging;
     std::string model_config_path;
     int initial_model_id = 0;
     std::map<int, ModelCatalogEntry> model_catalog;
-    std::map<int, PostprocessCatalogEntry> postprocess_catalog;
+    std::map<int, TrackingCatalogEntry> tracking_catalog;
     ModelConfig model;
     DetectionConfig detection;
     TrackingConfig tracking;
@@ -311,8 +310,8 @@ struct RuntimeConfig
 RuntimeConfig load_runtime_config(const std::string& path);
 
 ModelConfig load_model_config(const std::string& config_path);
-// 후처리 전용 YAML을 읽고 지원 형식·임계값·클래스 계약을 검증한다.
-ModelPostprocessConfig load_postprocess_config(const std::string& config_path);
+// 트래커 전용 YAML을 읽고 종류별 설정을 검증한다.
+TrackingConfig load_tracker_config(const std::string& config_path);
 
 namespace config_parser
 {
@@ -325,10 +324,11 @@ std::string required_string(
 LoggingConfig load_logging_config(const YAML::Node& node);
 DetectionConfig load_detection_config(const YAML::Node& node);
 TrackingConfig load_tracking_config(const YAML::Node& node);
-// 후처리 카탈로그의 ID·경로를 검증하고 각 YAML을 typed 설정으로 읽는다.
-std::map<int, PostprocessCatalogEntry> load_postprocess_catalog(const YAML::Node& node);
-// 선택 모델이 사용할 후처리 ID를 model 설정에서 읽는다.
-int load_model_postprocess_id(const YAML::Node& node);
+// 트래커 카탈로그의 ID·경로를 검증하고 각 YAML을 typed 설정으로 읽는다.
+std::map<int, TrackingCatalogEntry> load_tracking_catalog(const YAML::Node& node);
+// 실행 YAML의 tracking.id에 해당하는 검증된 추적 설정을 선택한다.
+TrackingConfig select_tracking_config(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog);
 ControlConfig load_control_config(const YAML::Node& node);
 MeasurementConfig load_measurement_config(const YAML::Node& node);
 GuiConfig load_gui_config(const YAML::Node& node);

@@ -11,7 +11,7 @@ struct BenchmarkConfig
     LoggingConfig logging;
     std::string model_config_path;
     ModelConfig model;
-    std::map<int, PostprocessCatalogEntry> postprocess_catalog;
+    std::map<int, TrackingCatalogEntry> tracking_catalog;
     DetectionConfig detection;
     TrackingConfig tracking;
     BenchmarkSequenceConfig sequence;

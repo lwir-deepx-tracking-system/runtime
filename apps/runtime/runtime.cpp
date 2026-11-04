@@ -314,11 +314,11 @@ void RuntimeApplication::run()
             fs::copy_file(
                 config_.model_config_path,
                 result_dir / fs::path(config_.model_config_path).filename());
-            const fs::path postprocess_dir = result_dir / "postprocess";
-            fs::create_directory(postprocess_dir);
-            for (const auto& [id, entry] : config_.postprocess_catalog)
+            const fs::path tracking_dir = result_dir / "tracking";
+            fs::create_directory(tracking_dir);
+            for (const auto& [id, entry] : config_.tracking_catalog)
                 fs::copy_file(entry.config_path,
-                    postprocess_dir / (std::to_string(id) + "_" +
+                    tracking_dir / (std::to_string(id) + "_" +
                         fs::path(entry.config_path).filename().string()));
         }
 

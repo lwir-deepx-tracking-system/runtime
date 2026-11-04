@@ -438,12 +438,12 @@ CaptureConditionConfig load_capture_condition_config(const YAML::Node& node)
 
 }  // namespace config_parser
 
+static ModelPostprocessConfig parse_postprocess_config(const YAML::Node& post);
+
 // 모델 YAML 전체를 typed config로 변환한다.
 ModelConfig load_model_config(const std::string& path)
 {
     const YAML::Node root = config_parser::load_yaml(path);
-    if (root["postprocess"])
-        throw std::runtime_error("postprocess settings belong in config/postprocess YAML");
     ModelConfig c;
     c.name = required<std::string>(root["model"], "name", "model");
     c.path = required<std::string>(root["model"], "path", "model");
@@ -460,6 +460,7 @@ ModelConfig load_model_config(const std::string& path)
     c.preprocess.resize = required<std::string>(root["preprocess"], "resize", "preprocess");
     c.preprocess.normalize = required<bool>(root["preprocess"], "normalize", "preprocess");
     c.preprocess.pad_value = required<int>(root["preprocess"], "pad_value", "preprocess");
+    c.postprocess = parse_postprocess_config(root["postprocess"]);
     // 현재 LWIR 전처리 구현이 안전하게 처리할 수 있는 계약만 허용한다.
     if (c.camera_input.opencv_type != "CV_16UC1") throw std::runtime_error("camera_input.opencv_type must be CV_16UC1");
     if (c.camera_input.width <= 0 || c.camera_input.height <= 0 || c.input.width <= 0 || c.input.height <= 0)
@@ -477,10 +478,9 @@ ModelConfig load_model_config(const std::string& path)
     return c;
 }
 
-// 후처리 전용 YAML의 출력 해석 방식과 필터링 조건을 읽고 검증한다.
-ModelPostprocessConfig load_postprocess_config(const std::string& path)
+// 모델 YAML의 후처리 계약을 파싱하고 출력 해석 방식·필터링 조건을 검증한다.
+static ModelPostprocessConfig parse_postprocess_config(const YAML::Node& post)
 {
-    const YAML::Node post = config_parser::load_yaml(path)["postprocess"];
     ModelPostprocessConfig c;
     c.type = required<std::string>(post, "type", "postprocess");
     c.output_format = parse_postprocess_output_format(
@@ -514,34 +514,46 @@ ModelPostprocessConfig load_postprocess_config(const std::string& path)
     return c;
 }
 
-// 카탈로그의 중복 ID와 참조 YAML을 검증해 ID별 후처리 설정을 준비한다.
-std::map<int, PostprocessCatalogEntry> config_parser::load_postprocess_catalog(
+// 트래커 전용 YAML을 읽어 알고리즘별 설정을 검증한다.
+TrackingConfig load_tracker_config(const std::string& path)
+{
+    const YAML::Node tracking = config_parser::load_yaml(path)["tracking"];
+    (void)config_parser::required_string(tracking, "type", "tracking");
+    return config_parser::load_tracking_config(tracking);
+}
+
+// 카탈로그의 ID 중복과 설정 파일을 검증해 추적 설정을 준비한다.
+std::map<int, TrackingCatalogEntry> config_parser::load_tracking_catalog(
     const YAML::Node& node)
 {
     if (!node || !node.IsSequence() || node.size() == 0)
-        throw std::runtime_error("postprocess_catalog must be a nonempty sequence");
-    std::map<int, PostprocessCatalogEntry> catalog;
+        throw std::runtime_error("tracking_catalog must be a nonempty sequence");
+    std::map<int, TrackingCatalogEntry> catalog;
     for (const YAML::Node& item : node)
     {
-        PostprocessCatalogEntry entry;
-        entry.id = required<int>(item, "id", "postprocess_catalog");
-        entry.config_path = required_string(item, "config", "postprocess_catalog");
+        TrackingCatalogEntry entry;
+        entry.id = required<int>(item, "id", "tracking_catalog");
+        entry.config_path = required_string(item, "config", "tracking_catalog");
         if (entry.id <= 0 || entry.config_path.empty())
-            throw std::runtime_error("postprocess_catalog entries need a positive id and config path");
-        entry.config = load_postprocess_config(entry.config_path);
+            throw std::runtime_error("tracking_catalog entries need a positive id and config path");
+        entry.config = load_tracker_config(entry.config_path);
         if (!catalog.emplace(entry.id, std::move(entry)).second)
-            throw std::runtime_error("Duplicate postprocess_catalog id");
+            throw std::runtime_error("Duplicate tracking_catalog id");
     }
     return catalog;
 }
 
-// 모델 선택 항목에 지정된 양수 후처리 ID를 읽는다.
-int config_parser::load_model_postprocess_id(const YAML::Node& node)
+// 실행 설정의 tracking.id를 카탈로그에서 찾아 검증된 설정을 돌려준다.
+TrackingConfig config_parser::select_tracking_config(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog)
 {
-    const int id = required<int>(node, "postprocess_id", "model");
-    if (id <= 0)
-        throw std::runtime_error("model.postprocess_id must be positive");
-    return id;
+    if (!node || !node.IsMap() || node.size() != 1)
+        throw std::runtime_error("tracking must contain only the selected id");
+    const int id = required<int>(node, "id", "tracking");
+    const auto it = catalog.find(id);
+    if (it == catalog.end())
+        throw std::runtime_error("Unknown tracking.id=" + std::to_string(id));
+    return it->second.config;
 }
 
 // runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
@@ -556,8 +568,6 @@ RuntimeConfig load_runtime_config(const std::string& path)
     if (c.model_config_path.empty())
         throw std::runtime_error("model.config must not be empty");
     c.model = load_model_config(c.model_config_path);
-    c.postprocess_catalog = config_parser::load_postprocess_catalog(
-        root["postprocess_catalog"]);
 
     const YAML::Node model_catalog = root["model_catalog"];
     if (model_catalog && !model_catalog.IsSequence())
@@ -570,17 +580,10 @@ RuntimeConfig load_runtime_config(const std::string& path)
             entry.id = item["id"].as<int>();
             entry.config_path = config_parser::required_string(
                 item, "config", "model_catalog");
-            entry.postprocess_id = required<int>(
-                item, "postprocess_id", "model_catalog");
             if (entry.id <= 0 || entry.config_path.empty())
                 throw std::runtime_error(
                     "model_catalog entries need a positive id and config path");
-            const auto post = c.postprocess_catalog.find(entry.postprocess_id);
-            if (post == c.postprocess_catalog.end())
-                throw std::runtime_error("Unknown model_catalog postprocess_id=" +
-                    std::to_string(entry.postprocess_id));
             entry.model = load_model_config(entry.config_path);
-            entry.model.postprocess = post->second.config;
             if (!c.model_catalog.emplace(entry.id, std::move(entry)).second)
                 throw std::runtime_error("Duplicate model_catalog id");
         }
@@ -590,13 +593,7 @@ RuntimeConfig load_runtime_config(const std::string& path)
         ModelCatalogEntry entry;
         entry.id = 1;
         entry.config_path = c.model_config_path;
-        entry.postprocess_id = config_parser::load_model_postprocess_id(root["model"]);
-        const auto post = c.postprocess_catalog.find(entry.postprocess_id);
-        if (post == c.postprocess_catalog.end())
-            throw std::runtime_error("Unknown model.postprocess_id=" +
-                std::to_string(entry.postprocess_id));
         entry.model = c.model;
-        entry.model.postprocess = post->second.config;
         c.model_catalog.emplace(entry.id, std::move(entry));
     }
 
@@ -614,7 +611,9 @@ RuntimeConfig load_runtime_config(const std::string& path)
     c.model = c.model_catalog.at(c.initial_model_id).model;
 
     c.detection = config_parser::load_detection_config(root["detection"]);
-    c.tracking = config_parser::load_tracking_config(root["tracking"]);
+    c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
+    c.tracking = config_parser::select_tracking_config(
+        root["tracking"], c.tracking_catalog);
     c.control = config_parser::load_control_config(root["control"]);
     c.measurement = config_parser::load_measurement_config(root["measurement"]);
     c.gui = config_parser::load_gui_config(root["gui"]);

@@ -48,16 +48,10 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
         throw std::runtime_error("model.config must not be empty");
 
     c.model = load_model_config(c.model_config_path);
-    c.postprocess_catalog = config_parser::load_postprocess_catalog(
-        root["postprocess_catalog"]);
-    const int postprocess_id = config_parser::load_model_postprocess_id(root["model"]);
-    const auto post = c.postprocess_catalog.find(postprocess_id);
-    if (post == c.postprocess_catalog.end())
-        throw std::runtime_error("Unknown model.postprocess_id=" +
-            std::to_string(postprocess_id));
-    c.model.postprocess = post->second.config;
     c.detection = config_parser::load_detection_config(root["detection"]);
-    c.tracking = config_parser::load_tracking_config(root["tracking"]);
+    c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
+    c.tracking = config_parser::select_tracking_config(
+        root["tracking"], c.tracking_catalog);
     c.sequence = config_parser::load_benchmark_sequence_config(root["sequence"]);
     c.path = config_parser::load_benchmark_path_config(root["path"]);
 
@@ -288,11 +282,11 @@ void BenchmarkApplication::run()
         fs::copy_file(
             config_.model_config_path,
             run_dir / fs::path(config_.model_config_path).filename());
-        const fs::path postprocess_dir = run_dir / "postprocess";
-        fs::create_directory(postprocess_dir);
-        for (const auto& [id, entry] : config_.postprocess_catalog)
+        const fs::path tracking_dir = run_dir / "tracking";
+        fs::create_directory(tracking_dir);
+        for (const auto& [id, entry] : config_.tracking_catalog)
             fs::copy_file(entry.config_path,
-                postprocess_dir / (std::to_string(id) + "_" +
+                tracking_dir / (std::to_string(id) + "_" +
                     fs::path(entry.config_path).filename().string()));
 
         Logger::info("[Benchmark] Sequence 수: " + std::to_string(sequence_dirs.size()));

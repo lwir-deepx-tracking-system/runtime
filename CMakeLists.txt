@@ -355,6 +355,15 @@ if(BUILD_TESTING)
     )
     add_test(NAME app_config COMMAND test_app_config)
 
+    add_executable(test_benchmark_config
+        tests/app/test_benchmark_config.cpp
+        apps/benchmark/benchmark.cpp
+        apps/benchmark/result_writer.cpp)
+    target_include_directories(test_benchmark_config PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_benchmark_config PRIVATE lwir_vision)
+    add_test(NAME benchmark_config COMMAND test_benchmark_config)
+
     add_executable(
         test_detection_config
         tests/app/test_detection_config.cpp
@@ -522,6 +531,7 @@ if(BUILD_TESTING)
 
     set_tests_properties(
         app_config
+        benchmark_config
         detection_config
         lwir_preprocessor
         PROPERTIES
