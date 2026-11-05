@@ -254,6 +254,7 @@ if(LWIR_BUILD_RUNTIME)
     add_executable(lwir_runtime
         apps/runtime/main.cpp
         apps/runtime/runtime.cpp
+        apps/runtime/runtime_console.cpp
         apps/runtime/runtime_metrics.cpp
         apps/runtime/runtime_workers.cpp
     )
@@ -342,6 +343,7 @@ if(BUILD_TESTING)
         test_app_config
         tests/app/test_app_config.cpp
         apps/runtime/runtime.cpp
+        apps/runtime/runtime_console.cpp
         apps/runtime/runtime_metrics.cpp
         apps/runtime/runtime_workers.cpp
     )
@@ -355,6 +357,12 @@ if(BUILD_TESTING)
         lwir_runtime_core
     )
     add_test(NAME app_config COMMAND test_app_config)
+
+    add_executable(test_runtime_console
+        tests/app/test_runtime_console.cpp apps/runtime/runtime_console.cpp)
+    target_include_directories(test_runtime_console PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_runtime_console PRIVATE lwir_common)
+    add_test(NAME runtime_console COMMAND test_runtime_console)
 
     add_executable(test_benchmark_config
         tests/app/test_benchmark_config.cpp

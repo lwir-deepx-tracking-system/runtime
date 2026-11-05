@@ -176,6 +176,12 @@ runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고
 - Benchmark dataset/result root: `path.dataset_root`, `path.output_root`
 - Runtime/Benchmark model 설정: `model.config`
 
+테스트용 터미널 명령은 `lwir_runtime config/runtime.yaml --console`로 활성화합니다.
+`model 2`, `tracker 1`은 기존 전환 경로로 요청을 전달하고 접수·완료 결과를 출력합니다.
+`count`는 모델·트래커 개수, `help`는 사용법, `quit`는 정상 종료를 요청합니다.
+콘솔 ID는 카탈로그의 1부터 시작하는 ID입니다. EOF는 입력만 비활성화하며 runtime은
+계속 동작합니다. 옵션을 생략하면 표준 입력을 읽지 않습니다.
+
 Runtime–PC 통신은 [PC 통신 계약](docs/pc_communication.md)을 따릅니다.
 GUI 키보드 수동 제어와 AUTO는 [통합 제어 설정·시험](docs/auto_control.md)을 참고합니다.
 고정 IP와 직결 LAN·Windows 수신 방화벽 설정은 [네트워크 설정](docs/network_setup.md)을 참고합니다.

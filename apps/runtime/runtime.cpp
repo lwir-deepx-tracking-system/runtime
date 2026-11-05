@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "runtime_console.hpp"
 #include "runtime_metrics.hpp"
 #include "runtime_workers.hpp"
 #include "common/logger.hpp"
@@ -35,6 +36,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -76,6 +78,7 @@ private:
     std::string runtime_mode_;
     std::string tracker_name_;
     bool measurement_enabled_ = false;
+    bool console_enabled_ = false;
     RuntimeControl runtime_control_;
     ActivePipelineSlot active_pipeline_;
     std::mutex model_change_mutex_;
@@ -123,7 +126,7 @@ private:
 
 public:
     // YAML 설정을 읽고 필요한 객체를 생성
-    explicit RuntimeApplication(const std::string& config_path);
+    explicit RuntimeApplication(const std::string& config_path, bool console_enabled = false);
     RuntimeApplication(const RuntimeApplication&) = delete;
     RuntimeApplication& operator=(const RuntimeApplication&) = delete;
 
@@ -138,8 +141,8 @@ public:
 
 
 // YAML을 읽고 설정에 맞는 Component들을 생성한다.
-RuntimeApplication::RuntimeApplication(const std::string& config_path)
-    : config_(load_runtime_config(config_path)), config_path_(config_path)
+RuntimeApplication::RuntimeApplication(const std::string& config_path, bool console_enabled)
+    : config_(load_runtime_config(config_path)), config_path_(config_path), console_enabled_(console_enabled)
 {
     Logger::set_level(config_.logging.level);
     measurement_enabled_ = config_.measurement.enabled;
@@ -388,10 +391,13 @@ void RuntimeApplication::run()
 
         workers_->start();
         pipeline_ready_.store(true);
+        std::unique_ptr<RuntimeConsole> console;
+        if (console_enabled_) console = std::make_unique<RuntimeConsole>(*this, std::cout);
 
         bool stop_logged = false;
         while (!camera_thread_->finished())
         {
+            if (console && !console->poll()) g_stop_requested = 1;
             if (suspend_for_model_.exchange(false) && gimbal_executor_) gimbal_executor_->suspend();
             report_model_changes();
             process_tracker_changes();
@@ -480,10 +486,10 @@ void RuntimeApplication::run()
     }
 }
 
-int run_runtime(const std::string& config_path)
+int run_runtime(const std::string& config_path, bool console_enabled)
 {
     try {
-        RuntimeApplication app(config_path);
+        RuntimeApplication app(config_path, console_enabled);
         app.run();
         return 0;
     } catch (const std::exception& error) {
