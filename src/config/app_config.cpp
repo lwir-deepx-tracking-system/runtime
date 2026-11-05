@@ -657,7 +657,11 @@ RuntimeConfig load_runtime_config(const std::string& path)
     }
 
     const bool tracking_handler = c.gui.command.handler == GuiCommandHandlerType::Tracking;
+<<<<<<< HEAD
     // 비활성 GUI/명령 구역의 handler 선택은 제어 활성화를 요구하지 않는다.
+=======
+    // 비활성 GUI/명령의 handler 값은 실제 제어 전략을 생성하지 않는다.
+>>>>>>> bf4ce41 (fix: Gimbal config error)
     const bool active_tracking_handler = c.gui.enabled && c.gui.command.enabled && tracking_handler;
     if ((active_tracking_handler && !c.control.enabled) ||
         (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !tracking_handler)))

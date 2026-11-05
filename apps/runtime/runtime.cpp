@@ -227,7 +227,10 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             measurement_enabled_
         );
 
+<<<<<<< HEAD
     // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
+=======
+>>>>>>> bf4ce41 (fix: Gimbal config error)
     if (config_.control.enabled)
         gimbal_executor_ = std::make_unique<GimbalCommandExecutor>(
             config_.control, GimbalDeviceFactory::create(config_.control.gimbal), runtime_control_);
