@@ -3,6 +3,8 @@
 
   python3 tests/tracking/target_eval.py <tracks 파일> --frame 1 --id 1 [--det <detections 파일>] [--fps 23]
   python3 tests/tracking/target_eval.py <tracks 파일> --frame 1 --box 403,228,124,250   (ID 대신 박스로 지정)
+  python3 tests/tracking/target_eval.py <tracks 파일> --gt <gt.txt> --gt-id 1,7       (정답의 대상자 ID로 지정)
+  python3 tests/tracking/target_eval.py <tracks/seq_004.txt> --subjects subjects.txt  (subjects.txt의 대상자 전원)
   여러 결과를 비교: tracks 파일을 여러 개 주면 같은 대상(같은 시작 박스)을 각각 따라가 표로 비교한다
 
 tracks 파일: Benchmark 결과 tracks/<시퀀스>.txt (frame,id,x,y,w,h,score,...) 또는 같은 열의 csv
@@ -18,6 +20,17 @@ detections : (선택) Benchmark 결과 detections/<시퀀스>.txt. 주면 끊긴
   - 같은 ID인데 한 프레임에 박스가 크게 튀면 → 다른 물체로 옮겨 붙었을 수 있음 (드리프트 의심)
   출력되는 프레임 번호를 visualization 이미지로 확인하면 추정이 맞는지 바로 알 수 있다.
 
+정답(GT)의 대상자로 지정 (--gt-id 또는 --subjects): 추정 대신 GT로 따라간다
+  - --id는 Tracker가 붙인 번호라 GT ID와 다르다. GT ID로 지정하면 매 프레임 그 대상자의 GT 박스와
+    IoU 0.5 이상 겹치는 Track을 대상자의 Track으로 본다. 단 그 Track이 같은 프레임의 다른 사람과 더 잘 맞으면
+    인정하지 않는다 (대상자끼리 겹친 프레임에서 옆 사람을 잡지 않도록).
+      대상자의 Track 번호가 바뀌면 → ID 전환, 같은 번호로 돌아오면 → 끊김 후 복구
+      대상자를 따라가던 Track이 다른 사람에게 붙으면 → 옮겨 붙음 (추정이 아니라 GT로 확인한 것)
+      GT는 있는데 맞는 Track이 없으면 → 끊긴 프레임 (--det가 있으면 검출기/Tracker 중 누가 놓쳤는지 구분)
+  - GT가 없는 프레임(가려져 라벨이 비어 있는 구간)은 건너뛴다.
+  - --subjects만 주면 tracks 파일 이름(seq_XXX.txt)에서 시퀀스를 읽고, GT는 --dataset-root/seq_XXX/gt/gt.txt를 쓴다.
+  - 여러 시퀀스·실험의 합계 지표(HOTA, IDF1 등)는 subject_eval.py로 본다.
+
 지표
   ID 전환(IDSW) 횟수, 끊김(같은 ID로 복구) 횟수, 대상 추적 시간과 비율, 가장 오래 유지된 ID 시간,
   놓친 프레임(검출 있음 = tracker가 놓침 / 검출 없음 = 검출기가 놓침), 드리프트 의심 지점
@@ -25,6 +38,7 @@ detections : (선택) Benchmark 결과 detections/<시퀀스>.txt. 주면 끊긴
 import argparse
 import collections
 import os
+import re
 import sys
 
 
@@ -49,6 +63,26 @@ def read_boxes(path, track=True, person_only=True, min_score=0.1):
                 continue
             by_frame[int(p[0])].append((float(p[2]), tuple(map(float, p[3:7]))))
     return by_frame
+
+
+def read_gt(path):
+    """GT ID → {frame: (x, y, w, h)}"""
+    by_id = collections.defaultdict(dict)
+    for line in open(path):
+        p = [s.strip() for s in line.split(",")]
+        if len(p) < 6 or not p[0].lstrip("-").isdigit():
+            continue
+        by_id[int(float(p[1]))][int(float(p[0]))] = tuple(map(float, p[2:6]))
+    return by_id
+
+
+def read_subjects(path, seq):
+    for line in open(path, encoding="utf-8"):
+        line = line.split("#", 1)[0].strip()
+        m = re.fullmatch(r"(seq_\d+)\s*[:=]\s*([\d\s,]+)", line)
+        if m and m.group(1) == seq:
+            return [int(x) for x in m.group(2).replace(" ", "").split(",") if x]
+    return None
 
 
 def iou(a, b):
@@ -126,6 +160,95 @@ def follow(tracks, start_frame, start_id, max_gap, tol, last_frame):
     return timeline, events
 
 
+def follow_gt(path, a, gid, gt_all, gt_by_frame):
+    """GT로 대상자를 따라간다. 반환 형식은 evaluate와 같다"""
+    tracks = read_boxes(path, track=True)
+    if not tracks:
+        sys.exit(f"{path}: Track이 없습니다")
+    mine = gt_all[gid]
+    frames = sorted(f for f in mine if f >= a.frame)
+    dets = read_boxes(a.det, track=False) if a.det else None
+    timeline, events = [], []
+    cur, gap_start, start, start_box, start_id = None, None, None, None, None
+    hijacked = False  # 대상자를 따라가던 Track이 지금 다른 사람에게 붙어 있는지 (한 번 붙은 것은 1회로 센다)
+    trk_miss = det_miss = 0
+    for f in frames:
+        g = mine[f]
+        here = tracks.get(f, [])
+        others = [b for oid, b in gt_by_frame.get(f, []) if oid != gid]
+        # 대상자와 IoU가 가장 큰 Track. 그 Track이 다른 사람과 더 잘 맞으면 인정하지 않는다
+        match = None
+        if here:
+            tid, tb = max(here, key=lambda c: iou(g, c[1]))
+            v = iou(g, tb)
+            if v >= a.match_iou and all(iou(o, tb) <= v for o in others):
+                match = (tid, tb)
+        # 대상자를 따라가던 Track이 이번 프레임에 다른 사람에게 붙었는지
+        now_hijacked = False
+        if cur is not None and (match is None or match[0] != cur):
+            cb = dict(here).get(cur)
+            if cb is not None:
+                best_o = max((iou(o, cb) for o in others), default=0.0)
+                now_hijacked = best_o >= a.match_iou and best_o > iou(g, cb)
+        if now_hijacked and not hijacked:
+            events.append((f, "drift", cur, cur, f"Track {cur}가 다른 사람에게 옮겨 붙음"))
+        hijacked = now_hijacked
+        if match is None:
+            if start is None:
+                continue  # 아직 대상자를 잡은 Track이 없음
+            if gap_start is None:
+                gap_start = f
+            timeline.append((f, None, g))
+            if dets is not None:
+                if any(iou(g, b) >= a.match_iou for _, b in dets.get(f, [])):
+                    trk_miss += 1
+                else:
+                    det_miss += 1
+            continue
+        tid, tb = match
+        if tid != cur:
+            hijacked = False
+        if start is None:
+            start, start_box, start_id = f, tb, tid
+        elif tid != cur:
+            if gap_start is not None:
+                events.append((f, "idsw", cur, tid, f"{f - gap_start}프레임 끊김 뒤 Track {cur} → {tid}"))
+            else:
+                events.append((f, "idsw", cur, tid, f"Track {cur} → {tid} (끊김 없이 바로)"))
+        elif gap_start is not None:
+            events.append((f, "recover", cur, cur, f"{f - gap_start}프레임 끊김 뒤 같은 Track으로 복구"))
+        gap_start = None
+        cur = tid
+        timeline.append((f, tid, tb))
+    if start is None:
+        return None
+    while timeline and timeline[-1][1] is None:
+        timeline.pop()
+    if gap_start is not None and frames and gap_start <= frames[-1]:
+        events.append((gap_start, "end_gap", cur, None, "시퀀스 끝까지 다시 잡히지 않음"))
+    segs = []
+    for f, i, _ in timeline:
+        if i is None:
+            continue
+        if segs and segs[-1][0] == i:
+            segs[-1][2] = f
+            segs[-1][3] += 1
+        else:
+            segs.append([i, f, f, 1])
+    tracked = sum(1 for t in timeline if t[1] is not None)
+    return {
+        "name": path, "start_id": start_id, "frames": len(timeline), "start": start,
+        "end": timeline[-1][0] if timeline else start, "tracked": tracked, "gaps": len(timeline) - tracked,
+        "det_miss": det_miss, "trk_miss": trk_miss,
+        "idsw": sum(1 for e in events if e[1] == "idsw"),
+        "recover": sum(1 for e in events if e[1] == "recover"),
+        "drift": sum(1 for e in events if e[1] == "drift"),
+        "lost": False, "ids": [sg[0] for sg in segs], "segs": segs,
+        "longest": max(segs, key=lambda sg: sg[3]) if segs else None, "events": events,
+        "start_box": start_box, "gt_mode": True,
+    }
+
+
 def evaluate(path, a, start_box=None):
     tracks = read_boxes(path, track=True)
     if not tracks:
@@ -189,36 +312,83 @@ def main():
     p.add_argument("--frame", type=int, default=1, help="대상을 고를 프레임")
     p.add_argument("--id", type=int, help="그 프레임에서 대상의 Track ID (첫 번째 tracks 파일 기준)")
     p.add_argument("--box", help="ID 대신 x,y,w,h 로 지정")
+    p.add_argument("--gt", help="GT 파일 (gt.txt). --gt-id와 함께 쓴다")
+    p.add_argument("--gt-id", help="대상자의 GT ID (쉼표로 여러 명). Tracker ID가 아니라 정답의 ID")
+    p.add_argument("--subjects", help="subjects.txt. tracks 파일 이름의 시퀀스에 해당하는 대상자 전원을 평가")
+    p.add_argument("--dataset-root", default="/mnt/lwir_data/datasets", help="--subjects 사용 시 GT 위치")
+    p.add_argument("--match-iou", type=float, default=0.5, help="GT로 따라갈 때 같은 사람으로 인정하는 IoU")
     p.add_argument("--det", help="detections 파일 (선택)")
     p.add_argument("--fps", type=float, default=30.0, help="실제 영상 fps (시간 환산용)")
     p.add_argument("--max-gap", type=float, default=2.0, help="이 시간(초) 넘게 안 보이면 대상 놓침")
     p.add_argument("--tol", type=float, default=1.0, help="같은 대상으로 볼 거리 (박스 높이 배수)")
     p.add_argument("--events", type=int, default=15, help="출력할 사건 수 (파일마다)")
     a = p.parse_args()
-    if a.id is None and a.box is None:
-        p.error("--id 또는 --box 가 필요합니다")
+    if a.id is None and a.box is None and a.gt_id is None and a.subjects is None:
+        p.error("--id, --box, --gt-id, --subjects 중 하나가 필요합니다")
 
-    start_box = tuple(map(float, a.box.split(","))) if a.box else None
-    results = []
-    for i, path in enumerate(a.tracks):
-        r = evaluate(path, a, start_box)
-        if r is None:
-            print(f"{path}: {a.frame}프레임에 지정한 박스와 겹치는 Track이 없습니다")
-            continue
-        if start_box is None:
-            start_box = r["start_box"]  # 다음 파일들은 같은 박스로 같은 대상을 찾는다
-        results.append(r)
+    # 대상자 목록: GT ID로 지정한 경우 (GT ID, GT 궤적) 목록, 아니면 [(None, None)] 하나
+    subjects = [(None, None)]
+    if a.gt_id is not None or a.subjects is not None:
+        gt_path, ids = a.gt, None
+        if a.gt_id is not None:
+            ids = [int(x) for x in a.gt_id.split(",") if x.strip()]
+        if a.subjects is not None:
+            m = re.search(r"(seq_\d+)", os.path.basename(a.tracks[0]))
+            if not m:
+                sys.exit(f"--subjects: tracks 파일 이름에서 시퀀스를 찾지 못했습니다: {a.tracks[0]}")
+            seq = m.group(1)
+            if ids is None:
+                ids = read_subjects(a.subjects, seq)
+                if not ids:
+                    sys.exit(f"{a.subjects}: {seq}의 대상자가 없습니다 (주석 처리되었거나 목록에 없음)")
+            gt_path = gt_path or os.path.join(a.dataset_root, seq, "gt", "gt.txt")
+        if not gt_path or not os.path.exists(gt_path):
+            sys.exit(f"GT 파일이 없습니다: {gt_path} (--gt 로 지정)")
+        gt = read_gt(gt_path)
+        missing = [i for i in ids if i not in gt]
+        if missing:
+            sys.exit(f"{gt_path}: GT에 없는 ID {missing}")
+        subjects = [(i, gt[i]) for i in ids]
+        gt_by_frame = collections.defaultdict(list)
+        for oid, fr in gt.items():
+            for f, b in fr.items():
+                gt_by_frame[f].append((oid, b))
 
+    all_results = []
+    for gid, gt_track in subjects:
+        start_box = tuple(map(float, a.box.split(","))) if a.box else None
+        results = []
+        for path in a.tracks:
+            r = follow_gt(path, a, gid, gt, gt_by_frame) if gt_track is not None else evaluate(path, a, start_box)
+            if r is None:
+                where = f"GT ID {gid}의 박스" if gid is not None else f"{a.frame}프레임에 지정한 박스"
+                print(f"{path}: {where}와 겹치는 Track이 없습니다")
+                continue
+            if start_box is None and gt_track is None:
+                start_box = r["start_box"]  # 다음 파일들은 같은 박스로 같은 대상을 찾는다
+            r["gt_id"] = gid
+            results.append(r)
+        all_results.append((gid, results))
+    for gid, results in all_results:
+        if gid is not None:
+            print(f"\n######## 대상자 GT ID {gid}")
+        report(results, a)
+    return 0
+
+
+def report(results, a):
     s = lambda n: f"{n / a.fps:.1f}s"
     for r in results:
         print(f"\n== {r['name']}")
-        print(f"  대상: {r['start']}프레임의 ID {r['start_id']} (박스 {', '.join(f'{v:.0f}' for v in r['start_box'])})")
+        who = f"GT ID {r['gt_id']} → " if r.get("gt_id") is not None else ""
+        print(f"  대상: {who}{r['start']}프레임의 Track ID {r['start_id']} (박스 {', '.join(f'{v:.0f}' for v in r['start_box'])})")
         print(f"  따라간 구간: {r['start']}~{r['end']}프레임 ({r['frames']}프레임, {s(r['frames'])})"
               + ("  ※ 중간에 대상 놓침" if r["lost"] else ""))
         print(f"  추적된 프레임: {r['tracked']} ({100 * r['tracked'] / max(r['frames'], 1):.1f}%)"
               f", 끊긴 프레임: {r['gaps']}"
               + (f" (검출은 있었는데 tracker가 놓침 {r['trk_miss']}, 검출 자체가 없음 {r['det_miss']})" if a.det else ""))
-        print(f"  ID 전환(IDSW): {r['idsw']}회, 끊김 후 같은 ID로 복구: {r['recover']}회, 드리프트 의심: {r['drift']}회")
+        drift_name = "다른 사람에게 옮겨 붙음" if r.get("gt_mode") else "드리프트 의심"
+        print(f"  ID 전환(IDSW): {r['idsw']}회, 끊김 후 같은 ID로 복구: {r['recover']}회, {drift_name}: {r['drift']}회")
         if r["longest"]:
             i, f0, f1, n = r["longest"]
             print(f"  가장 오래 유지된 ID: {i} ({f0}~{f1}프레임, {n}프레임 = {s(n)})")
@@ -228,7 +398,8 @@ def main():
         ev.sort()
         if ev:
             print("  사건 (visualization 이미지에서 확인할 프레임):")
-            kinds = {"idsw": "ID 전환", "recover": "복구", "drift": "드리프트?", "lost": "놓침", "end_gap": "끝"}
+            kinds = {"idsw": "ID 전환", "recover": "복구", "drift": "옮겨붙음" if r.get("gt_mode") else "드리프트?",
+                     "lost": "놓침", "end_gap": "끝"}
             for f, k, _, _, msg in ev[: a.events]:
                 print(f"    {f:6d}  {kinds[k]:<6} {msg}")
             if len(ev) > a.events:
@@ -236,13 +407,13 @@ def main():
 
     if len(results) > 1:
         print("\n== 비교")
-        print(f"  {'결과':<44}{'추적 비율':>9}{'IDSW':>6}{'복구':>6}{'드리프트?':>9}{'최장 유지':>10}")
+        dname = "옮겨붙음" if results[0].get("gt_mode") else "드리프트?"
+        print(f"  {'결과':<44}{'추적 비율':>9}{'IDSW':>6}{'복구':>6}{dname:>9}{'최장 유지':>10}")
         for r in results:
             n = r["longest"][3] if r["longest"] else 0
             name = r["name"] if len(r["name"]) <= 42 else "…" + r["name"][-41:]
             print(f"  {name:<44}{100 * r['tracked'] / max(r['frames'], 1):8.1f}%{r['idsw']:6d}{r['recover']:6d}"
                   f"{r['drift']:9d}{s(n):>10}")
-    return 0
 
 
 if __name__ == "__main__":
