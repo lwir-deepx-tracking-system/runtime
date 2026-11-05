@@ -30,37 +30,50 @@ def main():
         if not (result_dir / snapshot).is_file():
             raise SystemExit(f"missing Runtime snapshot: {snapshot}")
 
-    metrics_path = result_dir / "metrics.csv"
-    metrics = read_rows(
-        metrics_path,
-        ["frame_id", "stage", "queue_wait_ms", "processing_ms", "e2e_ms"])
-    stages = {row["stage"] for row in metrics}
-    required_stages = {"camera", "detection", "tracking"}
-    if not required_stages.issubset(stages):
-        raise SystemExit(f"{metrics_path}: missing stages {required_stages - stages}")
-    for row in metrics:
-        try:
-            int(row["frame_id"])
-        except ValueError:
-            raise SystemExit(f"{metrics_path}: invalid frame_id {row['frame_id']!r}")
-        for field in ("queue_wait_ms", "processing_ms", "e2e_ms"):
-            if row[field]:
-                finite_number(row[field], field, metrics_path)
+    model_dirs = sorted((result_dir / "models").glob("*"))
+    if not model_dirs:
+        raise SystemExit("missing Runtime model directories")
+    all_stages = set()
+    total_metrics = total_timings = 0
+    for model_dir in model_dirs:
+        if not (model_dir / "model.yaml").is_file():
+            raise SystemExit(f"missing model snapshot: {model_dir}")
+        if not (model_dir / "metrics.csv").exists():
+            continue  # 카탈로그에만 등록되고 사용하지 않은 모델은 CSV가 없다.
+        metrics_path = model_dir / "metrics.csv"
+        metrics = read_rows(
+            metrics_path,
+            ["frame_id", "stage", "queue_wait_ms", "processing_ms", "e2e_ms"])
+        stages = {row["stage"] for row in metrics}
+        all_stages.update(stages)
+        for row in metrics:
+            try:
+                int(row["frame_id"])
+            except ValueError:
+                raise SystemExit(f"{metrics_path}: invalid frame_id {row['frame_id']!r}")
+            for field in ("queue_wait_ms", "processing_ms", "e2e_ms"):
+                if row[field]:
+                    finite_number(row[field], field, metrics_path)
 
-    timing_path = result_dir / "detection_timing.csv"
-    timings = read_rows(
-        timing_path,
-        ["frame_id", "preprocess_ms", "latency_ms",
-         "npu_processing_ms", "postprocess_ms"])
-    for row in timings:
-        try:
-            int(row["frame_id"])
-        except ValueError:
-            raise SystemExit(f"{timing_path}: invalid frame_id {row['frame_id']!r}")
-        for field in ("preprocess_ms", "latency_ms",
-                      "npu_processing_ms", "postprocess_ms"):
-            finite_number(row[field], field, timing_path)
-    print(f"validated {len(metrics)} stage rows and {len(timings)} detection rows")
+        timing_path = model_dir / "detection_timing.csv"
+        timings = read_rows(
+            timing_path,
+            ["frame_id", "preprocess_ms", "latency_ms",
+             "npu_processing_ms", "postprocess_ms"])
+        total_metrics += len(metrics)
+        total_timings += len(timings)
+        for row in timings:
+            try:
+                int(row["frame_id"])
+            except ValueError:
+                raise SystemExit(f"{timing_path}: invalid frame_id {row['frame_id']!r}")
+            for field in ("preprocess_ms", "latency_ms",
+                          "npu_processing_ms", "postprocess_ms"):
+                finite_number(row[field], field, timing_path)
+    required_stages = {"camera", "detection", "tracking"}
+    if not required_stages.issubset(all_stages):
+        raise SystemExit(f"missing stages {required_stages - all_stages}")
+    print(f"validated {total_metrics} stage rows and {total_timings} detection rows")
 
 if __name__ == "__main__":
     main()

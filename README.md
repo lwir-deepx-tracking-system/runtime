@@ -137,23 +137,44 @@ Benchmark 결과는 model과 tracker 조합 아래에서 실행 시각별로 저
         └── timing/
 ```
 
-Runtime 결과는 같은 조합 아래에서 `core`, `gui`, `full` 모드와 실행 시각으로 구분합니다.
+Runtime 결과는 실행 모드와 실행 시각으로 구분하고, 모델별 하위 디렉터리에 기록합니다.
 
 ```text
 /mnt/lwir_data/results/runtime/
-└── yolov8n_bytetrack/
-    ├── core/20261007_193015/
-    ├── gui/20261007_194230/
-    └── full/20261007_195105/
+└── full/20261007_195105/
         ├── runtime.yaml
-        ├── yolov8n.yaml
-        ├── tracking/1_bytetrack.yaml
-        ├── metrics.csv
-        └── detection_timing.csv
+        ├── tracking/1.yaml
+        └── models/
+            ├── 1/
+            │   ├── model.yaml
+            │   ├── metrics.csv
+            │   └── detection_timing.csv
+            └── 2/
+                ├── model.yaml
+                ├── metrics.csv
+                └── detection_timing.csv
 ```
 
 실행 디렉터리는 `YYYYMMDD_HHMMSS` 형식을 사용하며 같은 초에 충돌하면 `_1`, `_2` suffix를
-붙입니다. 실행 중 오류가 발생하면 해당 timestamp 디렉터리를 삭제하여 완료된 결과만 남깁니다.
+붙입니다. Benchmark는 실패한 실행 디렉터리를 정리합니다. Runtime은 오류 종료에서도
+이미 기록한 측정값과 설정 사본을 보존합니다.
+
+Runtime worker는 측정값을 비동기 저장 큐에 전달하며 전체 실행 결과를 벡터에 누적하지
+않습니다. 저장 스레드는 128개 기록 또는 1초마다 flush하고, 모델 전환 완료 응답 전과
+정상 종료(Ctrl+C/콘솔 quit 포함)에도 flush합니다. A→B→A로 전환하면 A의 기존 파일에
+헤더를 중복 작성하지 않고 이어 붙입니다. 세대로 모델을 구분하므로 이전 모델의 늦은
+결과도 해당 모델 파일로 갑니다. 행 순서는 프레임 번호 정렬이 아니라 도착 순서입니다.
+SIGINT(Ctrl+C), SIGTERM, 콘솔 `quit`는 저장 후 종료합니다. SIGQUIT(`Ctrl+\` 또는
+`kill -QUIT <pid>`)은 저장 큐를 폐기하고 **이번 실행 디렉터리 전체를 삭제**한 뒤
+worker를 종료합니다. 실행 중 이미 기록한 CSV·설정 사본도 삭제하며 이전 실행은 보존합니다.
+SIGQUIT 뒤에 SIGINT나 콘솔 quit가 와도 폐기 종료가 우선합니다.
+카메라 시간은 실제 Detection에 제출된 프레임을 해당 모델에 귀속하며, 큐에서 버려지거나
+모델 전환 대기 중 소비된 프레임은 모델별 기록에서 제외합니다.
+
+파일 쓰기는 처리 스레드와 분리하며, flush는 OS 버퍼로의 전달까지 보장합니다.
+프레임마다 디스크 동기화(fsync)를 수행하지 않으므로 전원 차단 시의 영구 보존은 보장하지
+않습니다. 저장 큐는 16,384개로 제한하며 초과 또는 I/O 오류는 무음 누락 대신 runtime
+오류 종료로 보고합니다. NPU 및 실제 보드 저장장치에서의 성능은 별도 검증이 필요합니다.
 
 ## Configuration
 

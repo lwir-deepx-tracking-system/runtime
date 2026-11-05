@@ -1,23 +1,32 @@
 #pragma once
-#include <filesystem>
-#include <string>
-#include <vector>
-#include "common/stage_metric.hpp"
-#include "common/detection_timing.hpp"
 
-// 실행 결과 디렉터리와 단계별 측정 CSV의 생성·저장을 맡는다.
-class RuntimeMetricsWriter {
+#include <filesystem>
+#include <memory>
+#include <string>
+#include "common/measurement_sink.hpp"
+#include "config/app_config.hpp"
+
+// 실행 디렉터리·설정 사본·모델별 CSV와 비동기 저장 스레드를 소유한다.
+class RuntimeMetricsWriter final : public IMeasurementSink {
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 public:
-    // 모델·트래커·실행 모드별로 충돌 없는 결과 디렉터리를 만든다.
-    static std::filesystem::path create_directory(
-        const std::filesystem::path& output_root,
-        const std::string& model_name, const std::string& tracker_name,
+    RuntimeMetricsWriter(const RuntimeConfig& config, const std::string& config_path,
         const std::string& runtime_mode);
-    // 종료된 worker의 단계별 시간과 검출 내부 시간을 CSV로 저장한다.
-    static void write(const std::filesystem::path& result_dir,
-        const std::vector<StageMetric>& camera,
-        const std::vector<StageMetric>& detection,
-        const std::vector<StageMetric>& tracking,
-        const std::vector<StageMetric>* control,
-        std::vector<DetectionTiming> timings);
+    ~RuntimeMetricsWriter();
+    // 새 모델 세대를 등록하고 이전 모델의 파일 버퍼를 닫도록 요청한다.
+    void activate(std::uint64_t generation, int model_id) noexcept override;
+    // 처리 스레드에서 단계별 측정값을 작은 큐 이벤트로 전달한다.
+    void record(std::uint64_t generation, MetricStage stage, const StageMetric& metric) noexcept override;
+    // 큰 profiler 구조체 대신 CSV에 필요한 숫자만 추려 전달한다.
+    void record_detection(std::uint64_t generation, const DetectionTiming& timing) noexcept override;
+    // 전환 완료를 보고하기 전에 큐 앞부분의 기록을 파일 버퍼에서 내보낸다.
+    void flush();
+    // 모든 생산자가 종료한 뒤 남은 큐를 기록하고 파일을 닫는다.
+    void close() noexcept;
+    // 큐를 폐기하고 이번 실행 결과만 삭제한다. worker의 늦은 제출은 무시한다.
+    void discard();
+    bool failed() const noexcept;
+    std::string error_message() const;
+    const std::filesystem::path& directory() const;
 };

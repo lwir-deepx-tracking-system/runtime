@@ -358,6 +358,16 @@ if(BUILD_TESTING)
     )
     add_test(NAME app_config COMMAND test_app_config)
 
+    add_executable(test_runtime_metrics_writer
+        tests/app/test_runtime_metrics_writer.cpp apps/runtime/runtime_metrics.cpp)
+    target_include_directories(test_runtime_metrics_writer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_runtime_metrics_writer PRIVATE lwir_common Threads::Threads)
+    add_test(NAME runtime_metrics_writer COMMAND test_runtime_metrics_writer)
+
+    add_executable(test_runtime_shutdown tests/app/test_runtime_shutdown.cpp)
+    target_include_directories(test_runtime_shutdown PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    add_test(NAME runtime_shutdown COMMAND test_runtime_shutdown)
+
     add_executable(test_runtime_console
         tests/app/test_runtime_console.cpp apps/runtime/runtime_console.cpp)
     target_include_directories(test_runtime_console PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)

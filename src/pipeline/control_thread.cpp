@@ -10,10 +10,10 @@
 ControlThread::ControlThread(
     ThreadSafeQueue<TrackingResultPtr>& input_queue,
     GimbalCommandExecutor* executor,
-    bool measurement_enabled)
+    bool measurement_enabled, IMeasurementSink* measurements)
     : executor_(executor),
       input_queue_(input_queue),
-      measurement_enabled_(measurement_enabled)
+      measurement_enabled_(measurement_enabled), measurements_(measurements)
 {
 }
 
@@ -74,7 +74,11 @@ void ControlThread::run()
             if (measurement_enabled_)
             {
                 // mailbox 제출까지의 지연이다. 실제 제어/장치 완료 시간이 아니다.
-                record_stage_metric(metrics_, result->frame->metadata,
+                if (measurements_)
+                    measurements_->record(result->model_generation, MetricStage::Control,
+                        make_stage_metric(result->frame->metadata, result->enqueued_at,
+                            queue_started_at, started_at, finished_at, true));
+                else record_stage_metric(metrics_, result->frame->metadata,
                     result->enqueued_at, queue_started_at,
                     started_at, finished_at, true);
             }

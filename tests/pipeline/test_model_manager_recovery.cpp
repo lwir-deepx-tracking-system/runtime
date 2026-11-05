@@ -9,6 +9,13 @@
 #include "pipeline/model_manager_thread.hpp"
 
 namespace {
+class Measurements final : public IMeasurementSink {
+public:
+    std::vector<std::pair<std::uint64_t, int>> activations;
+    void activate(std::uint64_t generation, int id) noexcept override { activations.emplace_back(generation, id); }
+    void record(std::uint64_t, MetricStage, const StageMetric&) noexcept override {}
+    void record_detection(std::uint64_t, const DetectionTiming&) noexcept override {}
+};
 class Pipeline final : public IDetectionPipeline {
 public:
     void submit_async(const FrameContextPtr&, Completion) override {}
@@ -61,7 +68,8 @@ int main()
         if (creations.size() == 1) first = pipeline;
         return pipeline;
     };
-    ModelManagerThread manager(initial, {}, requests, slot, control, &results, create);
+    Measurements measurements;
+    ModelManagerThread manager(initial, {}, requests, slot, control, &results, create, &measurements);
     manager.start();
     manager.wait_until_initialized();
     int result = 0;
@@ -109,5 +117,7 @@ int main()
     control.request_stop();
     requests.close();
     manager.join();
+    if (measurements.activations != std::vector<std::pair<std::uint64_t, int>>({{0, 1}, {1, 1}, {2, 3}, {3, 3}}))
+        result = 14;
     return result;
 }

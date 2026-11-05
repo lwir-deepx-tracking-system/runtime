@@ -14,6 +14,7 @@
 #include "detection/i_detection_pipeline.hpp"
 #include "pipeline/runtime_control.hpp"
 #include "pipeline/active_pipeline_slot.hpp"
+#include "common/measurement_sink.hpp"
 
 // 모델 변경 요청의 식별자와 교체할 모델 설정을 전달한다.
 struct ModelChangeRequest
@@ -41,6 +42,7 @@ private:
     DetectionConfig detection_config_;
     ThreadSafeQueue<ModelChangeRequest>& requests_;
     ThreadSafeQueue<ModelChangeResult>* results_;
+    IMeasurementSink* measurements_;
     ActivePipelineSlot& active_pipeline_;
     RuntimeControl& runtime_control_;
     std::thread thread_;
@@ -69,7 +71,7 @@ public:
         RuntimeControl& runtime_control,
         ThreadSafeQueue<ModelChangeResult>* results = nullptr,
         std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
-            pipeline_creator = {});
+            pipeline_creator = {}, IMeasurementSink* measurements = nullptr);
 
     void start();
     void wait_until_initialized();

@@ -14,14 +14,14 @@ DetectionThread::DetectionThread(
     ThreadSafeQueue<DetectionResult>& output_queue,
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
     bool gui_enabled,
-    bool measurement_enabled)
+    bool measurement_enabled, IMeasurementSink* measurements)
     : runtime_control_(runtime_control),
       active_pipeline_(active_pipeline),
       input_queue_(input_queue),
       output_queue_(output_queue),
       gui_output_queue_(gui_output_queue),
       gui_enabled_(gui_enabled),
-      measurement_enabled_(measurement_enabled)
+      measurement_enabled_(measurement_enabled), measurements_(measurements)
 {
 }
 
@@ -124,6 +124,12 @@ void DetectionThread::run()
             const auto enqueued_at = input.enqueued_at;
             const std::uint64_t sequence = next_submit_sequence_++;
             const std::uint64_t generation = runtime_control_.generation.load();
+            if (measurements_ && frame->metadata.capture_processing_ms) {
+                StageMetric camera_metric;
+                camera_metric.frame_id = frame->metadata.frame_id;
+                camera_metric.processing_ms = *frame->metadata.capture_processing_ms;
+                measurements_->record(generation, MetricStage::Camera, camera_metric);
+            }
 
             pipeline->submit_async(
                 frame,
@@ -169,12 +175,19 @@ void DetectionThread::run()
 
                     if (measurement_enabled_)
                     {
-                        std::lock_guard<std::mutex> lock(metrics_mutex_);
-                        record_stage_metric(
+                        if (measurements_) {
+                            measurements_->record(generation, MetricStage::Detection,
+                                make_stage_metric(frame->metadata, enqueued_at,
+                                    queue_started_at, submitted_at, completed_at));
+                            measurements_->record_detection(generation, detection_timing);
+                        } else {
+                            std::lock_guard<std::mutex> lock(metrics_mutex_);
+                            record_stage_metric(
                             metrics_, frame->metadata, enqueued_at,
                             queue_started_at, submitted_at, completed_at);
-                        if (detection_timings_.size() < kMaxStageMetrics)
-                            detection_timings_.push_back(detection_timing);
+                            if (detection_timings_.size() < kMaxStageMetrics)
+                                detection_timings_.push_back(detection_timing);
+                        }
                         result.enqueued_at = completed_at;
                     }
 

@@ -14,13 +14,13 @@ TrackingThread::TrackingThread(
     ThreadSafeQueue<DetectionResult>& input_queue,
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
-    bool measurement_enabled)
+    bool measurement_enabled, IMeasurementSink* measurements)
     : tracker_manager_(tracker_manager),
       runtime_control_(runtime_control),
       input_queue_(input_queue),
       control_output_queue_(control_output_queue),
       gui_output_queue_(gui_output_queue),
-      measurement_enabled_(measurement_enabled)
+      measurement_enabled_(measurement_enabled), measurements_(measurements)
 {
 }
 
@@ -98,7 +98,11 @@ void TrackingThread::run()
             if (measurement_enabled_)
             {
                 // Tracking 완료 시점에서 Camera frame 수신 이후 지연을 기록한다.
-                record_stage_metric(metrics_, detections.frame->metadata,
+                if (measurements_)
+                    measurements_->record(detections.model_generation, MetricStage::Tracking,
+                        make_stage_metric(detections.frame->metadata, detections.enqueued_at,
+                            queue_started_at, started_at, finished_at, true));
+                else record_stage_metric(metrics_, detections.frame->metadata,
                     detections.enqueued_at, queue_started_at,
                     started_at, finished_at, true);
             }

@@ -176,7 +176,6 @@ int main()
     runtime["gui"]["command"]["enabled"] = true;
     runtime["control"]["enabled"] = false;
     if (!invalid_combination()) return 29;
-<<<<<<< HEAD
     // 상위 GUI/명령이 꺼지면 tracking 선택을 유지해도 실행 가능해야 한다.
     // 반대로 제어가 켜졌다면 GUI·명령·tracking 핸들러가 모두 필요하다.
     for (const auto* handler : {"deferred", "tracking"}) {
@@ -197,7 +196,10 @@ int main()
             if ((!invalid_combination()) != expected) return 51;
         }
     }
-=======
+    runtime = YAML::Clone(yaml);
+    runtime["control"]["enabled"] = false;
+    runtime["gui"]["enabled"] = true;
+    runtime["gui"]["command"]["handler"] = "tracking";
     // 비활성 명령의 tracking 선택값이 core/video-only 실행을 막지 않아야 한다.
     runtime["gui"]["command"]["enabled"] = false;
     write_config();
@@ -213,7 +215,6 @@ int main()
     runtime["gui"]["command"]["enabled"] = true;
     write_config();
     if (load_runtime_config(filename).gui.enabled) return 53;
->>>>>>> bf4ce41 (fix: Gimbal config error)
     runtime = YAML::Clone(yaml);
     runtime["control"]["enabled"] = false;
     char model_filename[] = "/tmp/lwir-model-config-XXXXXX";

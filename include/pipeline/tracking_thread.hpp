@@ -9,6 +9,7 @@
 #include "common/detection.hpp"
 #include "common/track.hpp"
 #include "common/stage_metric.hpp"
+#include "common/measurement_sink.hpp"
 #include "common/threadsafequeue.hpp"
 #include "tracking/tracker_manager.hpp"
 #include "pipeline/runtime_control.hpp"
@@ -27,6 +28,7 @@ private:
     std::thread thread_;
     bool started_ = false;
     bool measurement_enabled_;
+    IMeasurementSink* measurements_;
     std::atomic<bool> failed_{false};
     std::string error_message_;
     std::vector<StageMetric> metrics_;
@@ -41,7 +43,7 @@ public:
         ThreadSafeQueue<DetectionResult>& input_queue,
         ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
         ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
-        bool measurement_enabled
+        bool measurement_enabled, IMeasurementSink* measurements = nullptr
     );
 
     void start();

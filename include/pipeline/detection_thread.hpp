@@ -13,6 +13,7 @@
 #include "common/detection_timing.hpp"
 #include "common/frame.hpp"
 #include "common/stage_metric.hpp"
+#include "common/measurement_sink.hpp"
 #include "common/threadsafequeue.hpp"
 #include "pipeline/runtime_control.hpp"
 #include "pipeline/active_pipeline_slot.hpp"
@@ -29,6 +30,7 @@ private:
     std::thread thread_;
     bool started_ = false;
     bool measurement_enabled_;
+    IMeasurementSink* measurements_;
     std::atomic<bool> failed_{false};
     mutable std::mutex state_mutex_;
     std::string error_message_;
@@ -52,7 +54,7 @@ public:
         ThreadSafeQueue<DetectionResult>& output_queue,
         ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
         bool gui_enabled,
-        bool measurement_enabled);
+        bool measurement_enabled, IMeasurementSink* measurements = nullptr);
 
     void start();
     void join();

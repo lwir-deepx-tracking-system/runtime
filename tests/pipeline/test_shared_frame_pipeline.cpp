@@ -12,6 +12,26 @@
 #include "tracking/tracker.hpp"
 #include "tracking/tracker_manager.hpp"
 
+// 저장 sink 사용 시 worker가 측정 벡터를 누적하지 않고 같은 세대를 전달하는지 확인한다.
+class Measurements final : public IMeasurementSink {
+    std::mutex mutex_;
+public:
+    std::vector<MetricStage> stages;
+    unsigned detection_count = 0;
+    bool invalid = false;
+    void activate(std::uint64_t, int) noexcept override {}
+    void record(std::uint64_t generation, MetricStage stage, const StageMetric& metric) noexcept override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        invalid = invalid || generation != 0 || metric.frame_id != 42;
+        stages.push_back(stage);
+    }
+    void record_detection(std::uint64_t generation, const DetectionTiming& timing) noexcept override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        invalid = invalid || generation != 0 || timing.frame_id != 42;
+        ++detection_count;
+    }
+};
+
 class FakeDetectionPipeline : public IDetectionPipeline
 {
 public:
@@ -75,6 +95,7 @@ int main()
         [](const TrackingConfig&) -> std::shared_ptr<Tracker> {
             return std::make_shared<FakeTracker>();
         });
+    Measurements measurements;
     DetectionThread detection_thread(
         runtime_control,
         active_pipeline,
@@ -82,20 +103,21 @@ int main()
         detection_queue,
         gui_queue,
         false,
-        false);
+        true, &measurements);
     TrackingThread tracking_thread(
         tracker_manager,
         runtime_control,
         detection_queue,
         control_queue,
         gui_queue,
-        false);
+        true, &measurements);
 
     tracking_thread.start();
     detection_thread.start();
 
     auto mutable_frame = std::make_shared<FrameContext>();
     mutable_frame->metadata.frame_id = 42;
+    mutable_frame->metadata.capture_processing_ms = 1.0;
     mutable_frame->image = cv::Mat::ones(2, 2, CV_16UC1);
     FrameContextPtr original_frame = mutable_frame;
 
@@ -120,6 +142,9 @@ int main()
         return 1;
     if (control_result->tracks.size() != 1)
         return 1;
+    if (measurements.invalid || measurements.stages.size() != 3 || measurements.detection_count != 1 ||
+        !detection_thread.metrics().empty() || !detection_thread.detection_timings().empty() ||
+        !tracking_thread.metrics().empty()) return 2;
 
     return 0;
 }

@@ -1,6 +1,7 @@
 #include "runtime.hpp"
 #include "runtime_console.hpp"
 #include "runtime_metrics.hpp"
+#include "runtime_shutdown.hpp"
 #include "runtime_workers.hpp"
 #include "common/logger.hpp"
 #include "common/frame.hpp"
@@ -45,17 +46,6 @@
 #include <thread>
 #include <vector>
 
-namespace fs = std::filesystem;
-
-namespace {
-volatile std::sig_atomic_t g_stop_requested = 0;
-
-void handle_sigint(int)
-{
-    g_stop_requested = 1;
-}
-
-}  // namespace
 
 // Runtime 구성 요소를 소유하고 실행 중 모델·트래커 교체 요청을 받는다.
 // Pipeline 실행을 관리하는 최상위 Application 클래스
@@ -63,6 +53,7 @@ class RuntimeApplication : public IPipelineRequests
 {
 private:
     RuntimeConfig config_;
+    std::unique_ptr<RuntimeMetricsWriter> metrics_writer_;
 
     // Camera의 shared FrameContext를 Detection으로 전달
     ThreadSafeQueue<FrameMessage> frame_queue_;
@@ -178,6 +169,10 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         std::to_string(gui_track_queue_.size())
     );
 
+    if (measurement_enabled_) {
+        metrics_writer_ = std::make_unique<RuntimeMetricsWriter>(config_, config_path_, runtime_mode_);
+        Logger::info("[Measurement] 결과 경로: " + metrics_writer_->directory().string());
+    }
     camera_ = std::make_unique<Camera>();
 
     model_manager_thread_ = std::make_unique<ModelManagerThread>(
@@ -185,7 +180,9 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         config_.detection,
         model_change_requests_,
         active_pipeline_,
-        runtime_control_, &model_change_results_);
+        runtime_control_, &model_change_results_,
+        std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>{},
+        metrics_writer_.get());
 
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
@@ -202,7 +199,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         std::make_unique<CameraThread>(
             *camera_,
             frame_queue_,
-            measurement_enabled_
+            measurement_enabled_, false
         );
 
     detection_thread_ =
@@ -213,7 +210,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             gui_track_queue_,
             config_.gui.enabled,
-            measurement_enabled_
+            measurement_enabled_, metrics_writer_.get()
         );
     
     // detection_queue → Tracking → track_queue
@@ -224,18 +221,15 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             control_track_queue_,
             gui_track_queue_,
-            measurement_enabled_
+            measurement_enabled_, metrics_writer_.get()
         );
 
-<<<<<<< HEAD
     // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
-=======
->>>>>>> bf4ce41 (fix: Gimbal config error)
     if (config_.control.enabled)
         gimbal_executor_ = std::make_unique<GimbalCommandExecutor>(
             config_.control, GimbalDeviceFactory::create(config_.control.gimbal), runtime_control_);
     control_thread_ = std::make_unique<ControlThread>(
-        control_track_queue_, gimbal_executor_.get(), measurement_enabled_);
+        control_track_queue_, gimbal_executor_.get(), measurement_enabled_, metrics_writer_.get());
 
 
     if (config_.gui.enabled)
@@ -311,11 +305,20 @@ PipelineChangeTicket RuntimeApplication::request_tracker_change(std::uint32_t tr
 
 void RuntimeApplication::run()
 {
-    fs::path result_dir;
-    g_stop_requested = 0;
-    if (std::signal(SIGINT, handle_sigint) == SIG_ERR ||
-        std::signal(SIGTERM, handle_sigint) == SIG_ERR)
+    runtime_shutdown::reset();
+    if (std::signal(SIGINT, runtime_shutdown::handle_signal) == SIG_ERR ||
+        std::signal(SIGTERM, runtime_shutdown::handle_signal) == SIG_ERR ||
+        std::signal(SIGQUIT, runtime_shutdown::handle_signal) == SIG_ERR)
         throw std::runtime_error("Runtime signal handler 등록에 실패했습니다");
+
+    bool results_discarded = false;
+    // SIGQUIT은 이전 실행을 보존하고 현재 실행의 큐와 저장 결과만 폐기한다.
+    auto discard_if_requested = [this, &results_discarded]() {
+        if (runtime_shutdown::discard_results && !results_discarded) {
+            if (metrics_writer_) metrics_writer_->discard();
+            results_discarded = true;
+        }
+    };
 
     // 요청된 트래커를 먼저 생성한 뒤 교체하며 생성 실패는 기존 인스턴스에 영향을 주지 않는다.
     auto process_tracker_changes = [this]() {
@@ -348,6 +351,7 @@ void RuntimeApplication::run()
         ModelChangeResult result;
         while (model_change_results_.try_pop(result))
         {
+            if (metrics_writer_ && !runtime_shutdown::discard_results) metrics_writer_->flush();
             {
                 std::lock_guard<std::mutex> lock(model_change_mutex_);
                 const auto pending = model_completions_.find(result.request_id);
@@ -370,41 +374,27 @@ void RuntimeApplication::run()
 
     try
     {
-        if (measurement_enabled_)
-        {
-            result_dir = RuntimeMetricsWriter::create_directory(
-                config_.measurement.output_root,
-                config_.model.name,
-                tracker_name_,
-                runtime_mode_);
-            Logger::info("[Measurement] 결과 경로: " + result_dir.string());
-
-            // snapshot은 실행 디렉터리 바로 아래에 원본 파일명으로 보관한다.
-            fs::copy_file(config_path_, result_dir / "runtime.yaml");
-            fs::copy_file(
-                config_.model_config_path,
-                result_dir / fs::path(config_.model_config_path).filename());
-            const fs::path tracking_dir = result_dir / "tracking";
-            fs::create_directory(tracking_dir);
-            for (const auto& [id, entry] : config_.tracking_catalog)
-                fs::copy_file(entry.config_path,
-                    tracking_dir / (std::to_string(id) + "_" +
-                        fs::path(entry.config_path).filename().string()));
-        }
-
         workers_->start();
         pipeline_ready_.store(true);
         std::unique_ptr<RuntimeConsole> console;
         if (console_enabled_) console = std::make_unique<RuntimeConsole>(*this, std::cout);
 
-        bool stop_logged = false;
         while (!camera_thread_->finished())
         {
-            if (console && !console->poll()) g_stop_requested = 1;
+            if (console && !console->poll()) runtime_shutdown::request_stop();
+            if (runtime_shutdown::requested) {
+                pipeline_ready_.store(false);
+                discard_if_requested();
+                Logger::info(runtime_shutdown::discard_results ?
+                    "[Runtime] SIGQUIT: 이번 실행 결과 폐기 후 종료" :
+                    "[Runtime] 측정 결과 저장 후 종료 요청");
+                workers_->stop();
+                break;
+            }
             if (suspend_for_model_.exchange(false) && gimbal_executor_) gimbal_executor_->suspend();
             report_model_changes();
             process_tracker_changes();
-            const bool worker_failed = detection_thread_->failed() ||
+            const bool worker_failed = (metrics_writer_ && metrics_writer_->failed()) || detection_thread_->failed() ||
                 (model_manager_thread_ && model_manager_thread_->failed()) ||
                 tracking_thread_->failed() || control_thread_->failed() ||
                 (gui_sender_thread_ && gui_sender_thread_->failed()) ||
@@ -416,25 +406,21 @@ void RuntimeApplication::run()
                 break;
             }
 
-            if (g_stop_requested != 0)
-            {
-                // signal handler는 상태만 바꾸고 실제 종료 전파는 정상 흐름에서 한다.
-                if (!stop_logged)
-                {
-                    Logger::info("[Runtime] Ctrl+C 종료 요청");
-                    stop_logged = true;
-                }
-                camera_thread_->request_stop();
-                workers_->stop();
-                measurement_enabled_ = false;
-            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
         pipeline_ready_.store(false);
         tracker_change_requests_.close();
+        discard_if_requested();
         workers_->join();
+        discard_if_requested();
         report_model_changes();
+        if (metrics_writer_) {
+            if (!results_discarded) metrics_writer_->close();
+            discard_if_requested(); // close 도중 도착한 SIGQUIT도 저장 종료로 바뀌지 않는다.
+            if (!results_discarded && metrics_writer_->failed())
+                throw std::runtime_error("Measurement writer 실패: " + metrics_writer_->error_message());
+        }
 
         if (camera_thread_->failed())
             throw std::runtime_error(
@@ -455,16 +441,8 @@ void RuntimeApplication::run()
             throw std::runtime_error(
                 "GuiReceiverThread 실패: " + gui_receiver_thread_->error_message());
 
-        if (!measurement_enabled_)
-            return;
-
-        RuntimeMetricsWriter::write(result_dir,
-            camera_thread_->metrics(), detection_thread_->metrics(),
-            tracking_thread_->metrics(),
-            config_.control.enabled ? &control_thread_->metrics() : nullptr,
-            detection_thread_->detection_timings());
-
-        Logger::info("[Measurement] 측정 결과 저장 완료: " + result_dir.string());
+        if (metrics_writer_ && !results_discarded)
+            Logger::info("[Measurement] 측정 결과 저장 완료: " + metrics_writer_->directory().string());
     }
     catch (...)
     {
@@ -473,17 +451,11 @@ void RuntimeApplication::run()
         workers_->stop();
         workers_->join();
 
-        if (!result_dir.empty())
-        {
-            // 실패한 실행만 제거하고 model/tracker 및 mode 상위 디렉터리는 보존한다.
-            std::error_code cleanup_error;
-            fs::remove_all(result_dir, cleanup_error);
-            if (cleanup_error)
-                Logger::error(
-                    "[Runtime] 실패 결과 정리에 실패했습니다: " +
-                    result_dir.string() + " (" + cleanup_error.message() + ")");
-            else
-                Logger::info("[Runtime] 실패 결과 정리: " + result_dir.string());
+        // SIGQUIT은 오류 경로에서도 결과를 폐기하고, 그 외 오류는 기록을 보존한다.
+        discard_if_requested();
+        if (metrics_writer_ && !results_discarded) {
+            metrics_writer_->close();
+            discard_if_requested();
         }
         throw;
     }

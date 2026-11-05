@@ -11,10 +11,10 @@
 CameraThread::CameraThread(
     Camera& camera,
     ThreadSafeQueue<FrameMessage>& output_queue,
-    bool measurement_enabled)
+    bool measurement_enabled, bool retain_metrics)
     : camera_(camera),
       output_queue_(output_queue),
-      measurement_enabled_(measurement_enabled)
+      measurement_enabled_(measurement_enabled), retain_metrics_(retain_metrics)
 {
 }
 
@@ -79,11 +79,14 @@ void CameraThread::run()
             // Camera에서 부여한 정보를 이후 모든 stage가 그대로 전달한다.
             frame->metadata.frame_id = next_frame_id++;
             frame->metadata.captured_at = finished_at;
+            if (measurement_enabled_)
+                frame->metadata.capture_processing_ms =
+                    std::chrono::duration<double, std::milli>(finished_at - started_at).count();
             FrameMessage message;
             message.frame = std::move(frame);
             if (measurement_enabled_)
             {
-                record_stage_metric(
+                if (retain_metrics_) record_stage_metric(
                     metrics_, message.frame->metadata, {}, started_at,
                     started_at, finished_at);
                 message.enqueued_at = std::chrono::steady_clock::now();

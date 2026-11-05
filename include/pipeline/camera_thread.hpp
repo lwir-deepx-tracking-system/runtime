@@ -19,6 +19,7 @@ private:
     std::thread thread_;
     bool started_ = false;
     bool measurement_enabled_;
+    bool retain_metrics_;
     std::atomic<bool> stop_requested_{false};
     std::atomic<bool> finished_{false};
     std::atomic<bool> failed_{false};
@@ -32,7 +33,8 @@ public:
     CameraThread(
         Camera& camera,
         ThreadSafeQueue<FrameMessage>& output_queue,
-        bool measurement_enabled
+        bool measurement_enabled,
+        bool retain_metrics = true
     );
 
     void start();

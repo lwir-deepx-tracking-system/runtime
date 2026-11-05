@@ -15,12 +15,13 @@ ModelManagerThread::ModelManagerThread(
     RuntimeControl& runtime_control,
     ThreadSafeQueue<ModelChangeResult>* results,
     std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
-        pipeline_creator)
+        pipeline_creator, IMeasurementSink* measurements)
     : initial_model_(std::move(initial_model)),
       active_model_(initial_model_),
       detection_config_(std::move(detection_config)),
       requests_(requests),
       results_(results),
+      measurements_(measurements),
       active_pipeline_(active_pipeline),
       runtime_control_(runtime_control),
       pipeline_creator_(std::move(pipeline_creator))
@@ -91,6 +92,7 @@ void ModelManagerThread::run()
         active_pipeline_.set(std::move(initial_pipeline));
         active_model_id_.store(initial_model_.id);
         runtime_control_.generation.store(0);
+        if (measurements_) measurements_->activate(0, initial_model_.id);
         runtime_control_.state.store(RuntimeState::Running);
     }
     catch (const std::exception& e)
@@ -146,7 +148,8 @@ void ModelManagerThread::run()
                 std::lock_guard<std::mutex> lock(status_mutex_);
                 error_message_.clear();
             }
-            runtime_control_.generation.fetch_add(1);
+            const auto generation = runtime_control_.generation.fetch_add(1) + 1;
+            if (measurements_) measurements_->activate(generation, active_model_.id);
             runtime_control_.state.store(RuntimeState::Running);
             if (results_) results_->push({request.request_id, request.entry.id,
                 active_model_.id, ModelChangeOutcome::Restored, failure});
@@ -211,7 +214,8 @@ void ModelManagerThread::run()
                 std::lock_guard<std::mutex> lock(status_mutex_);
                 error_message_.clear();
             }
-            runtime_control_.generation.fetch_add(1);
+            const auto generation = runtime_control_.generation.fetch_add(1) + 1;
+            if (measurements_) measurements_->activate(generation, active_model_.id);
             runtime_control_.state.store(RuntimeState::Running);
             if (results_) results_->push({request.request_id, request.entry.id,
                 request.entry.id, ModelChangeOutcome::Activated, {}});
