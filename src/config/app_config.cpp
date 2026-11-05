@@ -657,7 +657,9 @@ RuntimeConfig load_runtime_config(const std::string& path)
     }
 
     const bool tracking_handler = c.gui.command.handler == GuiCommandHandlerType::Tracking;
-    if ((tracking_handler && !c.control.enabled) ||
+    // 비활성 GUI/명령 구역의 handler 선택은 제어 활성화를 요구하지 않는다.
+    const bool active_tracking_handler = c.gui.enabled && c.gui.command.enabled && tracking_handler;
+    if ((active_tracking_handler && !c.control.enabled) ||
         (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !tracking_handler)))
         throw std::runtime_error("Gimbal control requires control.enabled=true, GUI command enabled and handler=tracking");
 

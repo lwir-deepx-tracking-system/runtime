@@ -224,7 +224,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
             measurement_enabled_
         );
 
-    if (config_.gui.command.handler == GuiCommandHandlerType::Tracking)
+    // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
+    if (config_.control.enabled)
         gimbal_executor_ = std::make_unique<GimbalCommandExecutor>(
             config_.control, GimbalDeviceFactory::create(config_.control.gimbal), runtime_control_);
     control_thread_ = std::make_unique<ControlThread>(

@@ -176,6 +176,28 @@ int main()
     runtime["gui"]["command"]["enabled"] = true;
     runtime["control"]["enabled"] = false;
     if (!invalid_combination()) return 29;
+    // 상위 GUI/명령이 꺼지면 tracking 선택을 유지해도 실행 가능해야 한다.
+    // 반대로 제어가 켜졌다면 GUI·명령·tracking 핸들러가 모두 필요하다.
+    for (const auto* handler : {"deferred", "tracking"}) {
+        for (unsigned flags = 0; flags < 8; ++flags) {
+            runtime = YAML::Clone(yaml);
+            const bool gui_on = flags & 1;
+            const bool command_on = flags & 2;
+            const bool control_on = flags & 4;
+            const bool tracking = std::string(handler) == "tracking";
+            runtime["gui"]["enabled"] = gui_on;
+            runtime["gui"]["command"]["enabled"] = command_on;
+            runtime["gui"]["command"]["handler"] = handler;
+            runtime["gui"]["metadata"]["enabled"] = false;
+            runtime["control"]["enabled"] = control_on;
+            runtime["measurement"]["enabled"] = false;
+            const bool expected = control_on ? (gui_on && command_on && tracking) :
+                !(gui_on && command_on && tracking);
+            if ((!invalid_combination()) != expected) return 51;
+        }
+    }
+    runtime = YAML::Clone(yaml);
+    runtime["control"]["enabled"] = false;
     char model_filename[] = "/tmp/lwir-model-config-XXXXXX";
     const int model_fd = ::mkstemp(model_filename);
     if (model_fd < 0) return 42;
