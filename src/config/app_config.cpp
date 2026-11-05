@@ -202,37 +202,69 @@ ControlConfig load_control_config(const YAML::Node& node)
         c.gimbal.device = gimbal["device"].as<std::string>("/dev/ttyUSB0");
         c.gimbal.baud_rate = gimbal["baud_rate"].as<int>(115200);
         c.gimbal.write_timeout_ms = gimbal["write_timeout_ms"].as<int>(100);
-        c.gimbal.speed = gimbal["speed"].as<int>(30);
+        c.gimbal.speed = gimbal["speed"].as<int>(c.gimbal.speed);
+        c.gimbal.speed_limit = gimbal["speed_limit"].as<int>(c.gimbal.speed_limit);
         c.gimbal.acceleration = gimbal["acceleration"].as<int>(50);
         c.gimbal.home_x_deg = gimbal["home_x_deg"].as<int>(0);
         c.gimbal.home_y_deg = gimbal["home_y_deg"].as<int>(0);
         c.gimbal.x_sign = gimbal["x_sign"].as<int>(1);
         c.gimbal.y_sign = gimbal["y_sign"].as<int>(1);
     }
-    c.automatic.speed_max = std::min(c.automatic.speed_max, c.gimbal.speed);
     const auto automatic = node["auto"];
     if (automatic) {
 #define AUTO_VALUE(name) c.automatic.name = automatic[#name].as<decltype(c.automatic.name)>(c.automatic.name)
-        AUTO_VALUE(kp); AUTO_VALUE(deadband_x); AUTO_VALUE(deadband_y);
+        AUTO_VALUE(deadband_x); AUTO_VALUE(deadband_y);
         AUTO_VALUE(fov_x_deg); AUTO_VALUE(fov_y_deg); AUTO_VALUE(min_confidence);
         AUTO_VALUE(speed_min); AUTO_VALUE(speed_max); AUTO_VALUE(speed_rate);
         AUTO_VALUE(period_ms); AUTO_VALUE(input_timeout_ms); AUTO_VALUE(reacquire_timeout_ms);
 #undef AUTO_VALUE
     }
+    if (automatic) {
+        const auto type = automatic["controller"].as<std::string>("p");
+        if (type == "p") c.automatic.controller = AutoControllerType::P;
+        else if (type == "pi") c.automatic.controller = AutoControllerType::PI;
+        else if (type == "pd") c.automatic.controller = AutoControllerType::PD;
+        else if (type == "pid") c.automatic.controller = AutoControllerType::PID;
+        else throw std::runtime_error("control.auto.controller must be p, pi, pd or pid");
+        // Old YAML with a common kp remains valid; axis settings override it.
+        const double common_kp = automatic["kp"].as<double>(30.0);
+        if (!std::isfinite(common_kp) || common_kp <= 0)
+            throw std::runtime_error("control.auto.kp must be finite and positive");
+        const auto load_axis = [common_kp](const YAML::Node& node) {
+            PidAxisConfig axis;
+            axis.kp = common_kp;
+            if (node) {
+                if (!node.IsMap()) throw std::runtime_error("control.auto PID axis must be a map");
+                axis.kp = node["kp"].as<double>(axis.kp);
+                axis.ki = node["ki"].as<double>(axis.ki);
+                axis.kd = node["kd"].as<double>(axis.kd);
+                axis.integral_limit = node["integral_limit"].as<double>(axis.integral_limit);
+                axis.derivative_filter_ms = node["derivative_filter_ms"].as<double>(axis.derivative_filter_ms);
+            }
+            if (!std::isfinite(axis.kp) || axis.kp <= 0 ||
+                !std::isfinite(axis.ki) || axis.ki < 0 ||
+                !std::isfinite(axis.kd) || axis.kd < 0 ||
+                !std::isfinite(axis.integral_limit) || axis.integral_limit < 0 ||
+                !std::isfinite(axis.derivative_filter_ms) || axis.derivative_filter_ms <= 0)
+                throw std::runtime_error("control.auto PID gains/limits/filter are invalid");
+            return axis;
+        };
+        c.automatic.pid_x = load_axis(automatic["pid_x"]);
+        c.automatic.pid_y = load_axis(automatic["pid_y"]);
+    }
     const auto& a = c.automatic;
-    if (!std::isfinite(a.kp) || a.kp <= 0 ||
-        !std::isfinite(a.deadband_x) || a.deadband_x < 0 ||
+    if (!std::isfinite(a.deadband_x) || a.deadband_x < 0 ||
         !std::isfinite(a.deadband_y) || a.deadband_y < 0 ||
         !std::isfinite(a.fov_x_deg) || !std::isfinite(a.fov_y_deg) ||
         !((a.fov_x_deg == 0 && a.fov_y_deg == 0) ||
           (a.fov_x_deg > 0 && a.fov_x_deg < 180 && a.fov_y_deg > 0 && a.fov_y_deg < 180)) ||
         !std::isfinite(a.min_confidence) || a.min_confidence < 0 || a.min_confidence > 1 ||
-        a.speed_min < 1 || a.speed_max < a.speed_min || a.speed_max > c.gimbal.speed ||
+        a.speed_min < 1 || a.speed_max < a.speed_min || a.speed_max > c.gimbal.speed_limit ||
         !std::isfinite(a.speed_rate) || a.speed_rate <= 0 ||
         a.period_ms < 1 || a.period_ms > 1000 ||
         a.input_timeout_ms < a.period_ms || a.input_timeout_ms > 60000 ||
         a.reacquire_timeout_ms < a.input_timeout_ms || a.reacquire_timeout_ms > 60000)
-        throw std::runtime_error("control.auto settings are invalid (speed_max must not exceed gimbal.speed)");
+        throw std::runtime_error("control.auto settings are invalid (speed_max must not exceed gimbal.speed_limit)");
     if (c.heartbeat_timeout_ms < 100 || c.heartbeat_timeout_ms > 60000 ||
         c.poll_interval_ms < 1 || c.poll_interval_ms > c.heartbeat_timeout_ms / 2)
         throw std::runtime_error("control heartbeat/poll interval is invalid");
@@ -241,7 +273,8 @@ ControlConfig load_control_config(const YAML::Node& node)
         throw std::runtime_error("control.gimbal device/write timeout is invalid");
     if (c.gimbal.baud_rate != 9600 && c.gimbal.baud_rate != 57600 && c.gimbal.baud_rate != 115200)
         throw std::runtime_error("control.gimbal.baud_rate must be 9600, 57600 or 115200");
-    if (c.gimbal.speed < 1 || c.gimbal.acceleration < 1 ||
+    if (c.gimbal.speed_limit < 1 || c.gimbal.speed < 1 ||
+        c.gimbal.speed > c.gimbal.speed_limit || c.gimbal.acceleration < 1 ||
         c.gimbal.home_x_deg < -180 || c.gimbal.home_x_deg > 180 ||
         c.gimbal.home_y_deg < -30 || c.gimbal.home_y_deg > 90 ||
         (c.gimbal.x_sign != 1 && c.gimbal.x_sign != -1) ||

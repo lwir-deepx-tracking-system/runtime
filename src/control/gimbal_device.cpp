@@ -84,7 +84,7 @@ std::string WaveshareCommands::move(const GimbalConfig& config, int x, int y)
 }
 std::string WaveshareCommands::move(const GimbalConfig& config, int x, int y, int speed)
 {
-    if (speed < 1 || speed > config.speed) throw std::invalid_argument("Gimbal speed exceeds configured range");
+    if (speed < 1 || speed > config.speed_limit) throw std::invalid_argument("Gimbal speed exceeds configured range");
     if (x < -1 || x > 1 || y < -1 || y > 1) throw std::invalid_argument("Invalid gimbal direction");
     std::ostringstream command;
     command << "{\"T\":141,\"X\":" << x * config.x_sign << ",\"Y\":" << y * config.y_sign

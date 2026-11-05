@@ -63,7 +63,8 @@ struct GimbalConfig {
     std::string device = "/dev/ttyUSB0";
     int baud_rate = 115200;
     int write_timeout_ms = 100;
-    int speed = 30;
+    int speed = 50; // manual/HOME command speed
+    int speed_limit = 100; // shared software command ceiling, independent of manual speed
     int acceleration = 50;
     int home_x_deg = 0;
     int home_y_deg = 0;
@@ -71,16 +72,28 @@ struct GimbalConfig {
     int y_sign = 1;
 };
 
+enum class AutoControllerType { P, PI, PD, PID };
+
+struct PidAxisConfig {
+    double kp = 30.0;
+    double ki = 0.0;
+    double kd = 0.0;
+    double integral_limit = 10.0; // absolute I contribution, in SPD command units
+    double derivative_filter_ms = 100.0;
+};
+
 // SPD values are vendor command units, not degrees/second.
 struct AutoControlConfig {
-    double kp = 30.0;
+    AutoControllerType controller = AutoControllerType::P;
+    PidAxisConfig pid_x;
+    PidAxisConfig pid_y;
     double deadband_x = 0.04; // normalized half-frame error, or radians with FOV
     double deadband_y = 0.04;
     double fov_x_deg = 0.0; // both zero selects normalized pixel errors
     double fov_y_deg = 0.0;
     double min_confidence = 0.5;
     int speed_min = 1;
-    int speed_max = 30;
+    int speed_max = 100;
     double speed_rate = 60.0; // SPD units/second; safety STOP bypasses this
     int period_ms = 25;
     int input_timeout_ms = 250;

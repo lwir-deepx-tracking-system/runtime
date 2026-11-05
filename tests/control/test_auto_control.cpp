@@ -57,7 +57,7 @@ class RecordingDevice final : public IGimbalDevice {
     std::shared_ptr<Recording> log_;
 public:
     explicit RecordingDevice(std::shared_ptr<Recording> log) : log_(std::move(log)) {}
-    void move(int x, int y) override { move_with_speed(x, y, 30); }
+    void move(int x, int y) override { move_with_speed(x, y, 50); }
     void move_with_speed(int x, int y, int speed) override {
         if (log_->fail.load()) throw std::runtime_error("explicit serial failure fixture");
         log_->record({x, y, speed, false});
@@ -71,21 +71,26 @@ ControlConfig config() {
     c.automatic.reacquire_timeout_ms = 180;
     return c;
 }
+FrameMetadata next_metadata() {
+    static std::uint64_t id = 0;
+    ++id;
+    return {id, std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1000 + id * 25)};
+}
 void calculations() {
-    AutoControlConfig c; c.kp = 100; c.deadband_x = .25; c.deadband_y = .05;
+    AutoControlConfig c; c.speed_max = 30; c.pid_x.kp = c.pid_y.kp = 100; c.deadband_x = .25; c.deadband_y = .05;
     AutoTrackingController controller(c);
-    auto d = controller.calculate(track(384, 264), 640, 480); // .20 inside x, .10 outside y
+    auto d = controller.calculate(track(384, 264), 640, 480, next_metadata()); // .20 inside x, .10 outside y
     check(d.x == 0 && d.y == -1 && std::abs(d.speed - 10) < .001, "Inactive axis inflated common SPD");
-    check(controller.calculate(track(320, 240), 640, 480).stop(), "center did not STOP");
-    d = controller.calculate(track(160, 120), 640, 480);
+    check(controller.calculate(track(320, 240), 640, 480, next_metadata()).stop(), "center did not STOP");
+    d = controller.calculate(track(160, 120), 640, 480, next_metadata());
     check(d.x == -1 && d.y == 1 && d.speed == c.speed_max, "direction/saturation");
     // PC ManualInputHandler defines +X=Right and +Y=Up. AUTO must match that
     // contract; checking sign(error_y) alone would reproduce the original bug.
     AutoTrackingController directions(AutoControlConfig{});
-    check(directions.calculate(track(320,120),640,480).y == 1, "above-center target must command UP (+Y)");
-    check(directions.calculate(track(320,360),640,480).y == -1, "below-center target must command DOWN (-Y)");
-    check(directions.calculate(track(160,240),640,480).x == -1, "left target must command LEFT");
-    check(directions.calculate(track(480,240),640,480).x == 1, "right target must command RIGHT");
+    check(directions.calculate(track(320,120), 640, 480, next_metadata()).y == 1, "above-center target must command UP (+Y)");
+    check(directions.calculate(track(320,360), 640, 480, next_metadata()).y == -1, "below-center target must command DOWN (-Y)");
+    check(directions.calculate(track(160,240), 640, 480, next_metadata()).x == -1, "left target must command LEFT");
+    check(directions.calculate(track(480,240), 640, 480, next_metadata()).x == 1, "right target must command RIGHT");
     auto bad = track(); bad.width = 0;
     check(!controller.valid(bad,640,480), "zero width");
     bad = track(); bad.x = std::numeric_limits<float>::quiet_NaN();
@@ -96,14 +101,14 @@ void calculations() {
     check(!controller.valid(bad,640,480), "low confidence");
     check(!controller.valid(track(650),640,480), "off-frame center");
     c.fov_x_deg = c.fov_y_deg = 90; c.deadband_x = c.deadband_y = 0;
-    d = AutoTrackingController(c).calculate(track(480),640,480);
+    d = AutoTrackingController(c).calculate(track(480), 640, 480, next_metadata());
     check(std::abs(d.error_x - std::atan(.5)) < 1e-6, "FOV radians");
-    c.kp = .01;
-    check(AutoTrackingController(c).calculate(track(480),640,480).speed == c.speed_min, "moving minimum speed");
+    c.pid_x.kp = c.pid_y.kp = .01;
+    check(AutoTrackingController(c).calculate(track(480), 640, 480, next_metadata()).speed == c.speed_min, "moving minimum speed");
     GimbalConfig g; g.x_sign = -1; g.speed = 30;
     check(WaveshareCommands::move(g, 1, 0, 12) == "{\"T\":141,\"X\":-1,\"Y\":0,\"SPD\":12}", "variable SPD/sign encoding");
     bool rejected = false;
-    try { WaveshareCommands::move(g,1,0,31); } catch (const std::invalid_argument&) { rejected = true; }
+    try { WaveshareCommands::move(g,1,0,g.speed_limit + 1); } catch (const std::invalid_argument&) { rejected = true; }
     check(rejected, "out of range SPD accepted");
 }
 void yaml_contract() {
@@ -113,8 +118,14 @@ void yaml_contract() {
         try { config_parser::load_control_config(yaml); return false; }
         catch (const std::runtime_error&) { return true; }
     };
-    yaml["auto"]["speed_max"] = 11; check(rejects(), "SPD cap config");
+    yaml["auto"]["speed_max"] = 100;
+    check(config_parser::load_control_config(yaml).automatic.speed_max == 100, "AUTO must be independent of manual speed");
+    yaml["auto"]["speed_max"] = 101; check(rejects(), "shared SPD ceiling config");
     yaml["auto"]["speed_max"] = 10;
+    yaml["gimbal"]["speed"] = 101; check(rejects(), "manual speed above shared ceiling accepted");
+    yaml["gimbal"]["speed"] = 10;
+    yaml["gimbal"]["speed_limit"] = 9; check(rejects(), "AUTO above configured shared ceiling accepted");
+    yaml["gimbal"]["speed_limit"] = 100;
     yaml["auto"]["kp"] = std::numeric_limits<double>::quiet_NaN(); check(rejects(), "nonfinite gain");
     yaml["auto"]["kp"] = 30;
     yaml["auto"]["fov_x_deg"] = 45; check(rejects(), "partial FOV accepted");
@@ -193,7 +204,7 @@ void ramp_reversal_and_bypass() {
     auto c = config(); c.automatic.period_ms = 20;
     c.automatic.input_timeout_ms = 1000; c.automatic.reacquire_timeout_ms = 1500;
     c.automatic.speed_min = 2; c.automatic.speed_rate = 100;
-    c.automatic.kp = 60;
+    c.automatic.pid_x.kp = c.automatic.pid_y.kp = 60;
     RuntimeControl runtime; auto log = std::make_shared<Recording>();
     GimbalCommandExecutor e(c, std::make_unique<RecordingDevice>(log), runtime);
     e.connected(); e.publish(frame(1)); check(e.select(7) == ControlResult::Ok, "ramp selection");
