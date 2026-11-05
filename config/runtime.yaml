@@ -101,48 +101,20 @@ tracking:
 # ============================================================
 
 control:
-  # AUTO와 수동 조작 모두 handler=tracking에서 처리. 실제 구동은 enabled=true 필요.
   enabled: true
-  heartbeat_timeout_ms: 1500  # 마지막 유효 PING 이후 수동 이동을 정지할 시간
-  poll_interval_ms: 25       # 프레임과 독립적인 명령·heartbeat 확인 주기
-  # 실기 튜닝 전 임시값. SPD는 장치 명령 단위이며 각속도가 아니다.
+
   auto:
-    controller: p           # p / pi / pd / pid: 이름으로 사용 항 선택
-    pid_x:
-      kp: 30.0
-      ki: 0.0              # PI/PID에서만 사용. 실기 튜닝 후 설정
-      kd: 0.0              # PD/PID에서만 사용. 실기 튜닝 후 설정
-      integral_limit: 10.0  # I항 출력 절댓값 제한 (SPD 명령 단위)
-      derivative_filter_ms: 100.0
-    pid_y:
-      kp: 30.0
-      ki: 0.0
-      kd: 0.0
-      integral_limit: 10.0
-      derivative_filter_ms: 100.0
+    controller: p          # p / pi / pd / pid
+    pid_x: {kp: 30.0, ki: 0.0, kd: 0.0}
+    pid_y: {kp: 30.0, ki: 0.0, kd: 0.0}
     deadband_x: 0.04
     deadband_y: 0.04
-    fov_x_deg: 0.0           # 두 값이 0이면 정규화 픽셀 오차; FOV 사용 시 Deadband 단위 rad
-    fov_y_deg: 0.0
-    min_confidence: 0.5
-    speed_min: 1
-    speed_max: 100          # AUTO 상한. 수동 speed와 독립; gimbal.speed_limit 이하
+    speed_max: 100
     speed_rate: 60.0        # SPD/초. 안전 STOP은 제한 우회
-    period_ms: 25
-    input_timeout_ms: 250   # 캡처 시각 기준; 프레임 중단 시에도 STOP
-    reacquire_timeout_ms: 1000 # 상실 대기 시작 후 제한 시간. 만료 시 MANUAL/선택 해제
-  gimbal:
-    device: /dev/ttyUSB0     # 실기에서는 /dev/serial/by-id/... 고정 경로 권장
-    baud_rate: 115200
-    write_timeout_ms: 100
-    speed: 50              # 수동 방향키 고정 속도
-    speed_limit: 100        # 장치로 전송할 SPD의 소프트웨어 상한
-    acceleration: 50
-    home_x_deg: 0            # HOME 실행·완료 피드백은 이번 범위에서 제외
-    home_y_deg: 0
-    x_sign: 1               # 축 방향 반전이 필요하면 -1
-    y_sign: 1
 
+  gimbal:
+    device: /dev/ttyUSB0
+    speed: 50              # 수동 방향키 고정 속도
 
 # ============================================================
 # 6. GUI Communication

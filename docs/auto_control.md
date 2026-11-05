@@ -32,48 +32,43 @@ HOME과 키 해제는 T=135 STOP을 사용한다. HOME은 정지 요청 후 NOT_
 ```yaml
 control:
   enabled: true
-  heartbeat_timeout_ms: 1500
-  poll_interval_ms: 25
+
   auto:
-    controller: p  # p / pi / pd / pid
-    pid_x:
-      kp: 30.0
-      ki: 0.0
-      kd: 0.0
-      integral_limit: 10.0
-      derivative_filter_ms: 100.0
-    pid_y:
-      kp: 30.0
-      ki: 0.0
-      kd: 0.0
-      integral_limit: 10.0
-      derivative_filter_ms: 100.0
+    controller: p          # p / pi / pd / pid
+    pid_x: {kp: 30.0, ki: 0.0, kd: 0.0}
+    pid_y: {kp: 30.0, ki: 0.0, kd: 0.0}
     deadband_x: 0.04
     deadband_y: 0.04
-    fov_x_deg: 0.0
-    fov_y_deg: 0.0
-    min_confidence: 0.5
-    speed_min: 1
     speed_max: 100
-    speed_rate: 60.0
-    period_ms: 25
-    input_timeout_ms: 250
-    reacquire_timeout_ms: 1000
+    speed_rate: 60.0        # SPD/초. 안전 STOP은 제한 우회
+
   gimbal:
     device: /dev/ttyUSB0
-    baud_rate: 115200
-    write_timeout_ms: 100
-    speed: 50
-    speed_limit: 100
-    acceleration: 50
-    x_sign: 1
-    y_sign: 1
+    speed: 50              # 수동 방향키 고정 속도
 
 gui:
   command:
     enabled: true
     handler: tracking
 ```
+
+기본 YAML에는 운용·튜닝 항목만 노출한다. 장치별 고정값과 세부 항목은 생략하며,
+AppConfig가 코드 기본값으로 채운다. 기존 설정 키는 계속 지원하므로 필요할 때만 추가하면 된다.
+
+| 생략한 항목 | 기본값 |
+| --- | --- |
+| `control.heartbeat_timeout_ms` / `poll_interval_ms` | 1500 / 25 ms |
+| `auto.period_ms` / `input_timeout_ms` / `reacquire_timeout_ms` | 25 / 250 / 1000 ms |
+| `auto.speed_min` / `min_confidence` | 1 / 0.5 |
+| `auto.fov_x_deg` / `fov_y_deg` | 0 / 0 (정규화 오차) |
+| 각 축 `integral_limit` / `derivative_filter_ms` | 10 / 100 ms |
+| `gimbal.baud_rate` / `write_timeout_ms` | 115200 / 100 ms |
+| `gimbal.speed_limit` / `acceleration` | 100 / 50 |
+| `gimbal.home_x_deg` / `home_y_deg` | 0 / 0 |
+| `gimbal.x_sign` / `y_sign` | 1 / 1 |
+
+미분 필터·적분 제한 등도 튜닝할 수 있다. 조정 시 해당 축의 inline map에 키를 추가하거나
+일반 YAML map 형태로 풀어서 작성한다.
 
 숫자는 실기 튜닝 전 임시값이다. 기본 수동 속도 `gimbal.speed`는 50,
 AUTO 상한 `auto.speed_max`는 100으로 서로 독립적이다.
