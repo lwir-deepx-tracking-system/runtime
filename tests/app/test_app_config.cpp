@@ -196,5 +196,12 @@ int main()
     runtime = YAML::Clone(yaml);
     runtime["tracking"]["track_threshold"] = 0.9;
     if (!invalid_combination()) return 48;
+    runtime = YAML::Clone(yaml);
+    runtime["model_catalog"][1]["id"] = 3;
+    if (!invalid_combination()) return 49;
+    runtime = YAML::Clone(yaml);
+    runtime["tracking_catalog"][0]["id"] = 2;
+    runtime["tracking"]["id"] = 2;
+    if (!invalid_combination()) return 50;
     return 0;
 }

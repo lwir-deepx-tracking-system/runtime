@@ -13,6 +13,7 @@
 
 #include "camera/camera.hpp"
 #include "gui/gui_receiver.hpp"
+#include "gui/pipeline_requests.hpp"
 #include "gui/gui_sender.hpp"
 #include "tracking/tracker.hpp"
 
@@ -56,7 +57,7 @@ void handle_sigint(int)
 
 // Runtime 구성 요소를 소유하고 실행 중 모델·트래커 교체 요청을 받는다.
 // Pipeline 실행을 관리하는 최상위 Application 클래스
-class RuntimeApplication
+class RuntimeApplication : public IPipelineRequests
 {
 private:
     RuntimeConfig config_;
@@ -81,7 +82,15 @@ private:
     std::uint64_t next_model_request_id_ = 1;
     ThreadSafeQueue<ModelChangeRequest> model_change_requests_;
     ThreadSafeQueue<ModelChangeResult> model_change_results_;
-    ThreadSafeQueue<int> tracker_change_requests_;
+    struct TrackerRequest {
+        int id;
+        std::shared_ptr<std::promise<GuiPipelineResult>> completion;
+    };
+    ThreadSafeQueue<TrackerRequest> tracker_change_requests_;
+    std::map<std::uint64_t, std::shared_ptr<std::promise<GuiPipelineResult>>> model_completions_;
+    bool tracker_request_pending_ = false;
+    std::atomic<bool> pipeline_ready_{false};
+    std::atomic<bool> suspend_for_model_{false};
 /************************************************************************/
     // Camera 객체
     std::unique_ptr<Camera> camera_;
@@ -119,9 +128,11 @@ public:
     RuntimeApplication& operator=(const RuntimeApplication&) = delete;
 
     // Pipeline Worker 실행
-    bool request_model_change(int model_id);
+    std::uint32_t model_count() const override { return config_.model_catalog.size(); }
+    std::uint32_t tracker_count() const override { return config_.tracking_catalog.size(); }
+    PipelineChangeTicket request_model_change(std::uint32_t model_id) override;
     // 카탈로그 ID를 검증하고 runtime 루프에 트래커 변경을 요청한다.
-    bool request_tracker_change(int tracker_id);
+    PipelineChangeTicket request_tracker_change(std::uint32_t tracker_id) override;
     void run();
 };
 
@@ -233,7 +244,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
         if (config_.gui.command.enabled)
         {
             gui_receiver_ = std::make_unique<GuiReceiver>(config_.gui.command,
-                GuiCommandHandlerFactory::create(config_.gui.command.handler, config_.control, gimbal_executor_.get()));
+                GuiCommandHandlerFactory::create(config_.gui.command.handler, config_.control, gimbal_executor_.get(), this));
             gui_receiver_thread_ = std::make_unique<GuiReceiverThread>(
                 *gui_receiver_);
         }
@@ -245,53 +256,50 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path)
         gui_sender_thread_.get(), gui_receiver_thread_.get());
 }
 
-// Pipeline Worker를 실행한다.
-bool RuntimeApplication::request_model_change(int model_id)
+// GUI 수신 스레드에서 요청을 접수하고 모델 매니저의 완료 결과와 future를 연결한다.
+PipelineChangeTicket RuntimeApplication::request_model_change(std::uint32_t model_id)
 {
-    const auto model = config_.model_catalog.find(model_id);
-    if (model == config_.model_catalog.end())
-    {
-        Logger::error("[Runtime] rejected unknown model id=" +
-            std::to_string(model_id));
-        return false;
-    }
-
+    if (model_id == 0 || model_id > model_count()) return {GuiPipelineResult::InvalidId, {}};
     std::lock_guard<std::mutex> lock(model_change_mutex_);
-    const RuntimeState state = runtime_control_.state.load();
-    if (state != RuntimeState::Running &&
-        state != RuntimeState::SwitchFailed)
-        return false;
-    if (state == RuntimeState::Running &&
-        model_manager_thread_ &&
-        model_manager_thread_->active_model_id() == model_id)
-        return true;
-
-    ModelChangeRequest request;
-    request.request_id = next_model_request_id_++;
-    request.entry = model->second;
-
+    if (!pipeline_ready_.load() || runtime_control_.stop_requested.load())
+        return {GuiPipelineResult::NotReady, {}};
+    const auto state = runtime_control_.state.load();
+    if (!model_completions_.empty() || (state != RuntimeState::Running && state != RuntimeState::SwitchFailed))
+        return {GuiPipelineResult::Busy, {}};
+    auto completion = std::make_shared<std::promise<GuiPipelineResult>>();
+    auto future = completion->get_future().share();
+    if (state == RuntimeState::Running && model_manager_thread_->active_model_id() == static_cast<int>(model_id)) {
+        completion->set_value(GuiPipelineResult::Ok);
+        return {GuiPipelineResult::Ok, std::move(future)};
+    }
+    const auto request_id = next_model_request_id_++;
+    model_completions_.emplace(request_id, completion);
     runtime_control_.set_detection_quiesced(false);
     runtime_control_.state.store(RuntimeState::Switching);
     frame_queue_.interrupt_waiters();
-    if (gimbal_executor_) gimbal_executor_->suspend();
-    if (!model_change_requests_.push(std::move(request)))
-    {
+    suspend_for_model_.store(true);
+    if (!model_change_requests_.push({request_id, config_.model_catalog.at(static_cast<int>(model_id))})) {
+        model_completions_.erase(request_id);
         runtime_control_.state.store(state);
-        return false;
+        return {GuiPipelineResult::NotReady, {}};
     }
-
-    Logger::info("[Runtime] model change requested id=" +
-        std::to_string(model_id));
-    return true;
+    return {GuiPipelineResult::Ok, std::move(future)};
 }
 
-// 유효한 트래커 변경 요청만 큐에 넣고 실제 생성·교체는 runtime 루프에 맡긴다.
-bool RuntimeApplication::request_tracker_change(int tracker_id)
+// 트래커 생성은 runtime 루프에 맡기고, GUI에는 접수 결과와 완료 future만 반환한다.
+PipelineChangeTicket RuntimeApplication::request_tracker_change(std::uint32_t tracker_id)
 {
-    if (runtime_control_.stop_requested.load() ||
-        config_.tracking_catalog.find(tracker_id) == config_.tracking_catalog.end())
-        return false;
-    return tracker_change_requests_.push(tracker_id);
+    if (tracker_id == 0 || tracker_id > tracker_count()) return {GuiPipelineResult::InvalidId, {}};
+    std::lock_guard<std::mutex> lock(model_change_mutex_);
+    if (!pipeline_ready_.load() || runtime_control_.stop_requested.load())
+        return {GuiPipelineResult::NotReady, {}};
+    if (tracker_request_pending_) return {GuiPipelineResult::Busy, {}};
+    auto completion = std::make_shared<std::promise<GuiPipelineResult>>();
+    auto future = completion->get_future().share();
+    if (!tracker_change_requests_.push({static_cast<int>(tracker_id), completion}))
+        return {GuiPipelineResult::NotReady, {}};
+    tracker_request_pending_ = true;
+    return {GuiPipelineResult::Ok, std::move(future)};
 }
 
 void RuntimeApplication::run()
@@ -304,22 +312,28 @@ void RuntimeApplication::run()
 
     // 요청된 트래커를 먼저 생성한 뒤 교체하며 생성 실패는 기존 인스턴스에 영향을 주지 않는다.
     auto process_tracker_changes = [this]() {
-        int tracker_id = 0;
+        TrackerRequest request;
         while (!runtime_control_.stop_requested.load() &&
-               tracker_change_requests_.try_pop(tracker_id))
+               tracker_change_requests_.try_pop(request))
         {
+            auto outcome = GuiPipelineResult::Ok;
             try
             {
-                tracker_manager_->activate(tracker_id, [this] {
+                tracker_manager_->activate(request.id, [this] {
                     if (gimbal_executor_) gimbal_executor_->suspend();
                 });
-                Logger::info("[Runtime] active tracker id=" + std::to_string(tracker_id));
+                Logger::info("[Runtime] active tracker id=" + std::to_string(request.id));
             }
             catch (const std::exception& error)
             {
+                outcome = GuiPipelineResult::CreationFailed;
                 Logger::error("[Runtime] tracker change failed id=" +
-                    std::to_string(tracker_id) + ": " + error.what());
+                    std::to_string(request.id) + ": " + error.what());
             }
+            catch (...) { outcome = GuiPipelineResult::CreationFailed; }
+            std::lock_guard<std::mutex> lock(model_change_mutex_);
+            request.completion->set_value(outcome);
+            tracker_request_pending_ = false;
         }
     };
 
@@ -327,6 +341,15 @@ void RuntimeApplication::run()
         ModelChangeResult result;
         while (model_change_results_.try_pop(result))
         {
+            {
+                std::lock_guard<std::mutex> lock(model_change_mutex_);
+                const auto pending = model_completions_.find(result.request_id);
+                if (pending != model_completions_.end()) {
+                    pending->second->set_value(result.outcome == ModelChangeOutcome::Activated ? GuiPipelineResult::Ok :
+                        result.outcome == ModelChangeOutcome::Restored ? GuiPipelineResult::Restored : GuiPipelineResult::RestoreFailed);
+                    model_completions_.erase(pending);
+                }
+            }
             const char* outcome = result.outcome == ModelChangeOutcome::Activated ?
                 "activated" : result.outcome == ModelChangeOutcome::Restored ?
                 "restored" : "failed";
@@ -363,10 +386,12 @@ void RuntimeApplication::run()
         }
 
         workers_->start();
+        pipeline_ready_.store(true);
 
         bool stop_logged = false;
         while (!camera_thread_->finished())
         {
+            if (suspend_for_model_.exchange(false) && gimbal_executor_) gimbal_executor_->suspend();
             report_model_changes();
             process_tracker_changes();
             const bool worker_failed = detection_thread_->failed() ||
@@ -396,6 +421,7 @@ void RuntimeApplication::run()
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
+        pipeline_ready_.store(false);
         tracker_change_requests_.close();
         workers_->join();
         report_model_changes();
@@ -432,6 +458,7 @@ void RuntimeApplication::run()
     }
     catch (...)
     {
+        pipeline_ready_.store(false);
         tracker_change_requests_.close();
         workers_->stop();
         workers_->join();

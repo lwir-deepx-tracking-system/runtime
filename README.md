@@ -166,7 +166,9 @@ Benchmark의 `tracking_catalog`가 트래커 ID와 설정 파일을 연결합니
 Runtime과 Benchmark는 같은 `config/tracking/bytetrack.yaml`을 참조합니다.
 runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고 실행 루프가 처리합니다.
 새 인스턴스를 먼저 만든 뒤 활성 트래커를 교체하며, 진행 중이던 프레임이 끝나면 이전
-인스턴스가 소멸합니다. PC GUI 프로토콜에는 트래커 변경 명령이 아직 정의되어 있지 않습니다.
+인스턴스가 소멸합니다. TCP 5002의 Pipeline(category=4) 명령으로 모델·트래커 개수를
+조회하고 전환을 요청할 수 있습니다. 카탈로그 ID는 각각 1부터 연속이어야 합니다.
+패킷과 접수·완료 응답 형식은 [PC 통신 계약](docs/pc_communication.md)에 정의되어 있습니다.
 
 - Runtime 측정 결과 root: `measurement.output_root`
 - Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`

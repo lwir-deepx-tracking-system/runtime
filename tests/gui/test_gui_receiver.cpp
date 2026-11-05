@@ -11,8 +11,26 @@
 #include <unistd.h>
 
 #include "gui/gui_receiver.hpp"
+#include "gui/pipeline_requests.hpp"
+#include <atomic>
 
 namespace {
+// 실제 TCP 세션에서 요청 전달과 지연 완료 응답을 관찰한다.
+class PipelineRequests final : public IPipelineRequests {
+public:
+    std::promise<GuiPipelineResult> completion;
+    std::shared_future<GuiPipelineResult> future = completion.get_future().share();
+    std::atomic<std::uint32_t> requested{0};
+    std::uint32_t model_count() const override { return 2; }
+    std::uint32_t tracker_count() const override { return 1; }
+    PipelineChangeTicket request_model_change(std::uint32_t id) override {
+        requested.store(id);
+        return {GuiPipelineResult::Ok, future};
+    }
+    PipelineChangeTicket request_tracker_change(std::uint32_t) override {
+        return {GuiPipelineResult::Busy, {}};
+    }
+};
 std::vector<std::uint8_t> hex(const std::string& text)
 {
     std::vector<std::uint8_t> result;
@@ -137,6 +155,29 @@ int main()
     worker.stop();
     if (std::chrono::steady_clock::now() - before > std::chrono::seconds(1)) return 14;
     if (worker.commands.size() != 6 || worker.commands[0].payload != hex("ffffffff")) return 15;
+
+    config.port = available_port();
+    PipelineRequests pipeline;
+    GuiReceiver pipeline_receiver(config, GuiCommandHandlerFactory::create(
+        GuiCommandHandlerType::Deferred, {}, nullptr, &pipeline));
+    Worker pipeline_worker(pipeline_receiver);
+    client.reset(connect_client(config.port));
+    if (client.fd < 0 || !expect(client.fd, status)) return 17;
+    if (!send_bytes(client.fd, hex("4c5749520401000400000001" "4c5749520402000400000002")) ||
+        !expect(client.fd, hex("4c574952048100080000000100000002" "4c574952048200080000000200000001"))) return 18;
+    // 분할 수신한 전환 요청도 동일한 runtime 연관 객체에 전달한다.
+    for (auto byte : hex("4c574952040300080102030400000002"))
+        if (!send_bytes(client.fd, {byte})) return 19;
+    if (!expect(client.fd, hex("4c57495204830006010203040100")) || pipeline.requested.load() != 2) return 20;
+    if (!send_bytes(client.fd, hex("4c57495201040000")) ||
+        !expect(client.fd, hex("4c57495201010003010400"))) return 21;
+    pipeline.completion.set_value(GuiPipelineResult::Ok);
+    // 추가 입력 없이도 timer tick이 최종 결과를 송신한다.
+    if (!expect(client.fd, hex("4c57495204830006010203040200"))) return 22;
+    if (!send_bytes(client.fd, hex("4c574952040400080000000500000001")) ||
+        !expect(client.fd, hex("4c57495204840006000000050202"))) return 23;
+    if (!send_bytes(client.fd, hex("4c574952048100080000000100000002")) || !disconnected(client.fd)) return 24;
+    pipeline_worker.stop();
 
     config.port = available_port();
     if (!config.port) return 16;

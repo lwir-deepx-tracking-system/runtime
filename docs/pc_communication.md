@@ -142,6 +142,64 @@ see [AUTO control](auto_control.md) for readiness, STATUS, disconnect, and heart
 rules. The deferred handler has no moving state and therefore implements no motion
 watchdog.
 
+## Pipeline extension — TCP 5002
+
+This runtime adds category **Pipeline (4)** to the existing 8-byte header.
+PC software must implement this extension; older PC applications remain usable
+with the existing commands. All integers below are unsigned and big endian.
+Only counts and switch results are sent; no names, paths, model lists, or tracker
+configuration records are transmitted. AppConfig requires both catalogs to use
+consecutive IDs `1..count`. Request IDs retain all 32 bits, including zero.
+
+| Direction | Command | Payload |
+|---|---|---|
+| PC → board | Model count `0x01` | request_id:u32 (4 bytes) |
+| PC → board | Tracker count `0x02` | request_id:u32 (4 bytes) |
+| PC → board | Change model `0x03` | request_id:u32, model_id:u32 (8 bytes) |
+| PC → board | Change tracker `0x04` | request_id:u32, tracker_id:u32 (8 bytes) |
+| Board → PC | Model count `0x81` | request_id:u32, count:u32 (8 bytes) |
+| Board → PC | Tracker count `0x82` | request_id:u32, count:u32 (8 bytes) |
+| Board → PC | Model result `0x83` | request_id:u32, phase:u8, result:u8 (6 bytes) |
+| Board → PC | Tracker result `0x84` | request_id:u32, phase:u8, result:u8 (6 bytes) |
+
+Phase is `1=Accepted`, `2=Completed`. Results are `0=OK`, `1=InvalidId`,
+`2=Busy`, `3=CreationFailed`, `4=Restored` (previous model),
+`5=RestoreFailed`, `6=NotReady` (startup/shutdown or unavailable request service).
+These results are separate from the existing System ACK result enum. Pipeline
+commands do not also emit System ACK. Rejected requests receive Completed only;
+accepted requests receive Accepted/OK followed by their actual Completed result.
+An already-active ID succeeds without recreating the instance and follows the
+same two-response contract. A tracker creation failure preserves its previous
+instance. A failed model load reports Restored only after rollback succeeds.
+
+For example, request 10 changes to model 2:
+
+```text
+PC:       4c574952 04 03 0008 0000000a 00000002
+Accepted: 4c574952 04 83 0006 0000000a 01 00
+Complete: 4c574952 04 83 0006 0000000a 02 00
+```
+
+`PipelineCommandHandler` wraps the configured deferred/tracking handler and
+associates with `IPipelineRequests`, implemented by the cpp-private runtime.
+The TCP receiver worker validates and dispatches requests, sends acceptance,
+and polls completion futures at most every 25 ms while continuing PING and
+partial-packet reception. The model manager performs model teardown/load/rollback;
+the runtime loop performs tracker create/swap. These workers never write the TCP
+socket; the receiver worker sends every control reply. Video/metadata sender
+workers keep their existing responsibilities and the wire metadata is unchanged.
+
+At most one model change and one tracker change may be outstanding globally.
+The handler additionally limits a session to two pending changes and rejects a
+duplicate pending change request_id as Busy. Clients should not reuse outstanding
+IDs. Disconnect drops that session's response subscriptions but does not cancel
+an accepted operation. Its result is never delivered to a replacement session;
+a reconnecting client may query counts again and receives Busy until the actual
+outstanding operation completes. Count queries and PING do not wait for switching.
+Without an associated runtime request service, count queries return zero and
+switches return NotReady. Board-only Pipeline responses sent by a PC, unsupported
+commands, and incorrect declared payload lengths disconnect that client as before.
+
 ## Verification scope
 
 Tests use PC source fixtures for exact metadata and control bytes, TCP loopback

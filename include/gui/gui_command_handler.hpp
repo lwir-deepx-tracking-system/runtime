@@ -21,10 +21,12 @@ public:
 };
 
 class GimbalCommandExecutor;
+class IPipelineRequests;
 
 class GuiCommandHandlerFactory {
 public:
     static std::unique_ptr<IGuiCommandHandler> create(
         GuiCommandHandlerType type, const ControlConfig& control = {},
-        GimbalCommandExecutor* executor = nullptr);
+        GimbalCommandExecutor* executor = nullptr,
+        IPipelineRequests* pipeline_requests = nullptr);
 };

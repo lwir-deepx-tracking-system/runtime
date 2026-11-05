@@ -11,6 +11,16 @@
 namespace fs = std::filesystem;
 
 namespace {
+// 개수만 제공하는 PC 계약을 위해 카탈로그 ID를 1..count로 제한한다.
+template<class Entry>
+void validate_catalog_ids(const std::map<int, Entry>& catalog, const char* name)
+{
+    int expected = 1;
+    for (const auto& item : catalog)
+        if (item.first != expected++)
+            throw std::runtime_error(std::string(name) + " IDs must be consecutive from 1");
+}
+
 // 필수 키가 없거나 요청한 타입으로 변환되지 않으면 경로가 포함된 오류를 만든다.
 template <typename T>
 T required(const YAML::Node& node, const char* key, const std::string& path)
@@ -540,6 +550,7 @@ std::map<int, TrackingCatalogEntry> config_parser::load_tracking_catalog(
         if (!catalog.emplace(entry.id, std::move(entry)).second)
             throw std::runtime_error("Duplicate tracking_catalog id");
     }
+    validate_catalog_ids(catalog, "tracking_catalog");
     return catalog;
 }
 
@@ -603,6 +614,7 @@ RuntimeConfig load_runtime_config(const std::string& path)
         c.model_catalog.emplace(entry.id, std::move(entry));
     }
 
+    validate_catalog_ids(c.model_catalog, "model_catalog");
     const std::string active_config =
         fs::path(c.model_config_path).lexically_normal().string();
     for (const auto& item : c.model_catalog)

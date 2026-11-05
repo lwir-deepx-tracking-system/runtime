@@ -411,6 +411,10 @@ if(BUILD_TESTING)
     target_link_libraries(test_gui_receiver PRIVATE lwir_runtime_core)
     add_test(NAME gui_receiver COMMAND test_gui_receiver)
 
+    add_executable(test_gui_pipeline_commands tests/gui/test_gui_pipeline_commands.cpp)
+    target_link_libraries(test_gui_pipeline_commands PRIVATE lwir_runtime_core)
+    add_test(NAME gui_pipeline_commands COMMAND test_gui_pipeline_commands)
+
     add_executable(
         test_gui_sender
         tests/gui/test_gui_sender.cpp
