@@ -2,7 +2,7 @@
 #include <stdexcept>
 #include <string>
 #include "gui/gui_command_handler.hpp"
-#include "gui/pipeline_requests.hpp"
+#include "app/pipeline_requests.hpp"
 
 namespace {
 std::vector<std::uint8_t> hex(const std::string& s) {

@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include "gui/gui_receiver.hpp"
-#include "gui/pipeline_requests.hpp"
+#include "app/pipeline_requests.hpp"
 #include <atomic>
 
 namespace {

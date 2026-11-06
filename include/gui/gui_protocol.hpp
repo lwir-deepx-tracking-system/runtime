@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/pipeline_result.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -20,10 +22,8 @@ enum class GuiPipelineCommand : std::uint8_t {
     ModelCount = 1, TrackerCount = 2, ChangeModel = 3, ChangeTracker = 4
 };
 enum class GuiPipelinePhase : std::uint8_t { Accepted = 1, Completed = 2 };
-enum class GuiPipelineResult : std::uint8_t {
-    Ok = 0, InvalidId = 1, Busy = 2, CreationFailed = 3,
-    Restored = 4, RestoreFailed = 5, NotReady = 6
-};
+// 기존 PC 프로토콜의 결과 코드 값을 공용 요청 결과와 동일하게 유지한다.
+using GuiPipelineResult = PipelineResult;
 enum class GuiSystem : std::uint8_t { Ack = 1, Init = 2, Status = 3, Ping = 4 };
 enum class GuiModeCommand : std::uint8_t { Auto = 1, Manual = 2 };
 enum class GuiGimbalCommand : std::uint8_t { Move = 1, Home = 3 };

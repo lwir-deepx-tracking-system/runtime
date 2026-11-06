@@ -1,5 +1,6 @@
 #include "benchmark.hpp"
 #include "result_writer.hpp"
+#include "app/run_directory.hpp"
 
 #include "common/detection.hpp"
 #include "common/frame.hpp"
@@ -66,53 +67,16 @@ static fs::path create_run_directory(
     const std::string& model_name,
     const std::string& tracker_name)
 {
-    const fs::path model_tracker_dir =
-        output_root / (model_name + "_" + tracker_name);
-    fs::create_directories(model_tracker_dir);
-
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
-    std::tm local_time{};
-
-    if (localtime_r(&now_time, &local_time) == nullptr)
-        throw std::runtime_error("Benchmark timestamp 생성에 실패했습니다");
-
-    std::ostringstream timestamp_stream;
-    timestamp_stream << std::put_time(&local_time, "%Y%m%d_%H%M%S");
-
-    if (!timestamp_stream)
-        throw std::runtime_error("Benchmark timestamp 생성에 실패했습니다");
-
-    const std::string timestamp = timestamp_stream.str();
-
-    // 같은 초의 실행 결과가 있으면 _1, _2 순서로 충돌을 피한다.
-    for (std::uint64_t suffix = 0;; ++suffix)
-    {
-        const std::string directory_name = timestamp +
-            (suffix == 0 ? "" : "_" + std::to_string(suffix));
-        const fs::path run_dir = model_tracker_dir / directory_name;
-
-        if (fs::create_directory(run_dir))
-        {
-            try
-            {
-                if (!fs::create_directory(run_dir / "detections") ||
-                    !fs::create_directory(run_dir / "tracks") ||
-                    !fs::create_directory(run_dir / "timing"))
-                {
-                    throw std::runtime_error(
-                        "Benchmark 결과 디렉터리를 생성하지 못했습니다: " +
-                        run_dir.string());
-                }
-                return run_dir;
-            }
-            catch (...)
-            {
-                std::error_code cleanup_error;
-                fs::remove_all(run_dir, cleanup_error);
-                throw;
-            }
-        }
+    const auto run_dir = ::create_run_directory(output_root / (model_name + "_" + tracker_name));
+    try {
+        fs::create_directory(run_dir / "detections");
+        fs::create_directory(run_dir / "tracks");
+        fs::create_directory(run_dir / "timing");
+        return run_dir;
+    } catch (...) {
+        std::error_code cleanup_error;
+        fs::remove_all(run_dir, cleanup_error);
+        throw;
     }
 }
 

@@ -1,4 +1,4 @@
-#include "runtime/runtime_metrics.hpp"
+#include "app/metrics_writer.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -25,17 +25,12 @@ int main() {
     struct Cleanup { fs::path root; ~Cleanup() { std::error_code ec; fs::remove_all(root, ec); } } cleanup{root};
     const auto config_file = root / "input.yaml";
     { std::ofstream file(config_file); file << "snapshot: true\n"; }
-    RuntimeConfig config;
-    config.measurement.enabled = true;
-    config.measurement.output_root = (root / "results").string();
-    for (int id : {1, 2}) {
-        ModelCatalogEntry entry; entry.id = id; entry.config_path = config_file.string();
-        config.model_catalog.emplace(id, entry);
-    }
-    TrackingCatalogEntry tracking; tracking.id = 1; tracking.config_path = config_file.string();
-    config.tracking_catalog.emplace(1, tracking);
+    MetricsWriterOptions options;
+    options.output_root = root / "results" / "core";
+    options.model_configs = {{1, config_file}, {2, config_file}};
+    options.snapshots = {{config_file, "runtime.yaml"}, {config_file, "tracking/1.yaml"}};
     const auto started = std::chrono::steady_clock::now();
-    RuntimeMetricsWriter writer(config, config_file.string(), "core");
+    MetricsWriter writer(options);
     writer.activate(0, 1);
     for (unsigned frame = 1; frame <= 10050; ++frame) {
         StageMetric metric; metric.frame_id = frame; metric.processing_ms = 1.5;
@@ -69,7 +64,7 @@ int main() {
     if (writer.failed()) return 5;
     std::cout << "10050 rows + model switches: " <<
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() << " ms\n";
-    RuntimeMetricsWriter invalid(config, config_file.string(), "core");
+    MetricsWriter invalid(options);
     if (invalid.directory() == directory) return 6;
     invalid.activate(0, 999);
     try { invalid.flush(); return 7; } catch (const std::exception&) {}
@@ -77,7 +72,7 @@ int main() {
     if (!invalid.failed() || invalid.error_message().empty()) return 8;
     if (!fs::exists(directory / "models/1/metrics.csv")) return 9;
     // SIGQUIT 경로는 이미 flush한 현재 실행 파일도 지우고 이전 실행은 보존한다.
-    RuntimeMetricsWriter discarded(config, config_file.string(), "core");
+    MetricsWriter discarded(options);
     discarded.activate(0, 1);
     discarded.record(0, MetricStage::Detection, metric);
     discarded.flush();

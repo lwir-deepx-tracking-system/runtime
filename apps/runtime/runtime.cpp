@@ -1,7 +1,7 @@
 #include "runtime.hpp"
-#include "runtime_console.hpp"
-#include "runtime_metrics.hpp"
-#include "runtime_shutdown.hpp"
+#include "app/pipeline_console.hpp"
+#include "app/metrics_writer.hpp"
+#include "app/shutdown.hpp"
 #include "runtime_workers.hpp"
 #include "common/logger.hpp"
 #include "common/frame.hpp"
@@ -15,7 +15,7 @@
 
 #include "camera/camera.hpp"
 #include "gui/gui_receiver.hpp"
-#include "gui/pipeline_requests.hpp"
+#include "app/pipeline_requests.hpp"
 #include "gui/gui_sender.hpp"
 #include "tracking/tracker.hpp"
 
@@ -53,7 +53,7 @@ class RuntimeApplication : public IPipelineRequests
 {
 private:
     RuntimeConfig config_;
-    std::unique_ptr<RuntimeMetricsWriter> metrics_writer_;
+    std::unique_ptr<MetricsWriter> metrics_writer_;
 
     // Camera의 shared FrameContext를 Detection으로 전달
     ThreadSafeQueue<FrameMessage> frame_queue_;
@@ -170,7 +170,15 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
     );
 
     if (measurement_enabled_) {
-        metrics_writer_ = std::make_unique<RuntimeMetricsWriter>(config_, config_path_, runtime_mode_);
+        MetricsWriterOptions options;
+        options.output_root = std::filesystem::path(config_.measurement.output_root) / runtime_mode_;
+        options.snapshots.emplace_back(config_path_, "runtime.yaml");
+        for (const auto& [id, entry] : config_.model_catalog)
+            options.model_configs.emplace(id, entry.config_path);
+        for (const auto& [id, entry] : config_.tracking_catalog)
+            options.snapshots.emplace_back(entry.config_path,
+                std::filesystem::path("tracking") / (std::to_string(id) + ".yaml"));
+        metrics_writer_ = std::make_unique<MetricsWriter>(options);
         Logger::info("[Measurement] 결과 경로: " + metrics_writer_->directory().string());
     }
     camera_ = std::make_unique<Camera>();
@@ -305,16 +313,12 @@ PipelineChangeTicket RuntimeApplication::request_tracker_change(std::uint32_t tr
 
 void RuntimeApplication::run()
 {
-    runtime_shutdown::reset();
-    if (std::signal(SIGINT, runtime_shutdown::handle_signal) == SIG_ERR ||
-        std::signal(SIGTERM, runtime_shutdown::handle_signal) == SIG_ERR ||
-        std::signal(SIGQUIT, runtime_shutdown::handle_signal) == SIG_ERR)
-        throw std::runtime_error("Runtime signal handler 등록에 실패했습니다");
+    app_shutdown::SignalScope signals;
 
     bool results_discarded = false;
     // SIGQUIT은 이전 실행을 보존하고 현재 실행의 큐와 저장 결과만 폐기한다.
     auto discard_if_requested = [this, &results_discarded]() {
-        if (runtime_shutdown::discard_results && !results_discarded) {
+        if (app_shutdown::discard_results && !results_discarded) {
             if (metrics_writer_) metrics_writer_->discard();
             results_discarded = true;
         }
@@ -351,7 +355,7 @@ void RuntimeApplication::run()
         ModelChangeResult result;
         while (model_change_results_.try_pop(result))
         {
-            if (metrics_writer_ && !runtime_shutdown::discard_results) metrics_writer_->flush();
+            if (metrics_writer_ && !app_shutdown::discard_results) metrics_writer_->flush();
             {
                 std::lock_guard<std::mutex> lock(model_change_mutex_);
                 const auto pending = model_completions_.find(result.request_id);
@@ -376,16 +380,16 @@ void RuntimeApplication::run()
     {
         workers_->start();
         pipeline_ready_.store(true);
-        std::unique_ptr<RuntimeConsole> console;
-        if (console_enabled_) console = std::make_unique<RuntimeConsole>(*this, std::cout);
+        std::unique_ptr<PipelineConsole> console;
+        if (console_enabled_) console = std::make_unique<PipelineConsole>(*this, std::cout);
 
         while (!camera_thread_->finished())
         {
-            if (console && !console->poll()) runtime_shutdown::request_stop();
-            if (runtime_shutdown::requested) {
+            if (console && !console->poll()) app_shutdown::request_stop();
+            if (app_shutdown::requested) {
                 pipeline_ready_.store(false);
                 discard_if_requested();
-                Logger::info(runtime_shutdown::discard_results ?
+                Logger::info(app_shutdown::discard_results ?
                     "[Runtime] SIGQUIT: 이번 실행 결과 폐기 후 종료" :
                     "[Runtime] 측정 결과 저장 후 종료 요청");
                 workers_->stop();

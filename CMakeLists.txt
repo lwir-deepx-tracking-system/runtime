@@ -66,9 +66,7 @@ if(LWIR_OPENCV_COMPONENTS)
     find_package(OpenCV REQUIRED COMPONENTS ${LWIR_OPENCV_COMPONENTS})
 endif()
 
-if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
-    find_package(Threads REQUIRED)
-endif()
+find_package(Threads REQUIRED)
 
 if(LWIR_NEEDS_RUNTIME_CORE)
     find_package(PkgConfig REQUIRED)
@@ -109,6 +107,15 @@ target_link_libraries(lwir_common
         yaml-cpp
 )
 
+
+# 콘솔·측정·종료·실행 폴더는 특정 실행 파일이나 GUI 구현에 의존하지 않는다.
+add_library(lwir_app_support
+    src/app/pipeline_console.cpp
+    src/app/metrics_writer.cpp
+    src/app/shutdown.cpp
+    src/app/run_directory.cpp
+)
+target_link_libraries(lwir_app_support PUBLIC lwir_common Threads::Threads)
 
 # ==============================================================================
 # 카메라 라이브러리
@@ -254,13 +261,12 @@ if(LWIR_BUILD_RUNTIME)
     add_executable(lwir_runtime
         apps/runtime/main.cpp
         apps/runtime/runtime.cpp
-        apps/runtime/runtime_console.cpp
-        apps/runtime/runtime_metrics.cpp
         apps/runtime/runtime_workers.cpp
     )
 
     target_link_libraries(lwir_runtime
         PRIVATE
+            lwir_app_support
             lwir_common
             lwir_camera
             lwir_vision
@@ -282,6 +288,7 @@ if(LWIR_BUILD_BENCHMARK)
 
     target_link_libraries(lwir_benchmark
         PRIVATE
+            lwir_app_support
             lwir_common
             lwir_vision
     )
@@ -343,14 +350,13 @@ if(BUILD_TESTING)
         test_app_config
         tests/app/test_app_config.cpp
         apps/runtime/runtime.cpp
-        apps/runtime/runtime_console.cpp
-        apps/runtime/runtime_metrics.cpp
         apps/runtime/runtime_workers.cpp
     )
     target_include_directories(test_app_config PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/apps
     )
     target_link_libraries(test_app_config PRIVATE
+        lwir_app_support
         lwir_common
         lwir_camera
         lwir_vision
@@ -359,19 +365,20 @@ if(BUILD_TESTING)
     add_test(NAME app_config COMMAND test_app_config)
 
     add_executable(test_runtime_metrics_writer
-        tests/app/test_runtime_metrics_writer.cpp apps/runtime/runtime_metrics.cpp)
+        tests/app/test_runtime_metrics_writer.cpp)
     target_include_directories(test_runtime_metrics_writer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
-    target_link_libraries(test_runtime_metrics_writer PRIVATE lwir_common Threads::Threads)
+    target_link_libraries(test_runtime_metrics_writer PRIVATE lwir_app_support)
     add_test(NAME runtime_metrics_writer COMMAND test_runtime_metrics_writer)
 
     add_executable(test_runtime_shutdown tests/app/test_runtime_shutdown.cpp)
     target_include_directories(test_runtime_shutdown PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_runtime_shutdown PRIVATE lwir_app_support)
     add_test(NAME runtime_shutdown COMMAND test_runtime_shutdown)
 
     add_executable(test_runtime_console
-        tests/app/test_runtime_console.cpp apps/runtime/runtime_console.cpp)
+        tests/app/test_runtime_console.cpp)
     target_include_directories(test_runtime_console PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
-    target_link_libraries(test_runtime_console PRIVATE lwir_common)
+    target_link_libraries(test_runtime_console PRIVATE lwir_app_support)
     add_test(NAME runtime_console COMMAND test_runtime_console)
 
     add_executable(test_benchmark_config
@@ -380,7 +387,7 @@ if(BUILD_TESTING)
         apps/benchmark/result_writer.cpp)
     target_include_directories(test_benchmark_config PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/apps)
-    target_link_libraries(test_benchmark_config PRIVATE lwir_vision)
+    target_link_libraries(test_benchmark_config PRIVATE lwir_vision lwir_app_support)
     add_test(NAME benchmark_config COMMAND test_benchmark_config)
 
     add_executable(

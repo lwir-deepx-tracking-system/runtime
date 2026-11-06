@@ -1,6 +1,6 @@
 #include "gui/gui_command_handler.hpp"
 #include "control/tracking_command_handler.hpp"
-#include "gui/pipeline_requests.hpp"
+#include "app/pipeline_requests.hpp"
 
 #include <algorithm>
 #include <chrono>
