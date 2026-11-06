@@ -113,6 +113,7 @@ const Track* GimbalCommandExecutor::target(std::uint32_t id) const
 void GimbalCommandExecutor::failure(const std::exception& e)
 {
     Logger::error(std::string("[Control] device error: ") + e.what());
+    controller_.reset();
     state_.error = true;
     state_.automatic = false; state_.selected_id = 0; state_.lost = false;
     ++state_.command_generation;
@@ -126,6 +127,7 @@ void GimbalCommandExecutor::stop(const char* reason)
     // No ramp: safety/Deadband STOP is immediate command submission.
     try {
         device_->stop();
+        controller_.set_applied_output(0, 0);
         Logger::debug(std::string("[Control] STOP reason=") + reason);
         state_.moving = false; x_ = y_ = sent_speed_ = 0; limited_speed_ = 0;
         last_output_ = Clock::now();
@@ -133,6 +135,7 @@ void GimbalCommandExecutor::stop(const char* reason)
 }
 void GimbalCommandExecutor::invalidate(const char* reason)
 {
+    controller_.reset();
     ++state_.command_generation;
     state_.automatic = false; state_.selected_id = 0; state_.lost = false;
     lost_since_ = {}; next_auto_ = {};
@@ -166,12 +169,13 @@ void GimbalCommandExecutor::tick()
         invalidate("reacquire timeout"); return;
     }
     if (!t) {
-        if (!state_.lost) { state_.lost = true; lost_since_ = now; ++state_.command_generation; }
+        if (!state_.lost) { controller_.reset(); state_.lost = true; lost_since_ = now; ++state_.command_generation; }
         if (state_.moving) stop("target lost/stale");
         return;
     }
     state_.lost = false; lost_since_ = {};
-    const auto demand = controller_.calculate(*t, latest_->frame->image.cols, latest_->frame->image.rows);
+    const auto demand = controller_.calculate(*t, latest_->frame->image.cols, latest_->frame->image.rows,
+        latest_->frame->metadata, latest_->model_generation);
     if (demand.stop()) { if (state_.moving) stop("deadband"); return; }
     if (now < next_auto_) return;
     next_auto_ = now + std::chrono::milliseconds(config_.automatic.period_ms);
@@ -191,9 +195,13 @@ void GimbalCommandExecutor::tick()
     if (!ready()) { invalidate("control authority"); return; }
     send(demand.x, demand.y, std::clamp(int(std::lround(limited_speed_)),
          config_.automatic.speed_min, config_.automatic.speed_max), true);
+    controller_.set_applied_output(x_ * sent_speed_, -y_ * sent_speed_);
     Logger::debug("[Control] frame=" + std::to_string(latest_->frame->metadata.frame_id) +
         " target=" + std::to_string(state_.selected_id) + " ex=" + std::to_string(demand.error_x) +
         " ey=" + std::to_string(demand.error_y) + " SPD=" + std::to_string(sent_speed_) +
+        " ux=" + std::to_string(demand.pid_x.value) + " uy=" + std::to_string(demand.pid_y.value) +
+        " ix=" + std::to_string(demand.pid_x.i) + " iy=" + std::to_string(demand.pid_y.i) +
+        " dx=" + std::to_string(demand.pid_x.d) + " dy=" + std::to_string(demand.pid_y.d) +
         " x=" + std::to_string(x_) + " y=" + std::to_string(y_) +
         " model_generation=" + std::to_string(model_generation_) + " generation=" + std::to_string(state_.command_generation));
 }

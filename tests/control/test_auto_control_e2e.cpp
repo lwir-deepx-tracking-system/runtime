@@ -161,7 +161,7 @@ void tcp_auto_serial() {
     serial_line(master.value,"{\"T\":141,\"X\":-1,\"Y\":1,\"SPD\":10}");
     send_command(client.value,{GuiCategory::Gimbal,1,{0,1}});
     serial_line(master.value,"{\"T\":135}");
-    serial_line(master.value,"{\"T\":141,\"X\":0,\"Y\":1,\"SPD\":30}");
+    serial_line(master.value,"{\"T\":141,\"X\":0,\"Y\":1,\"SPD\":50}");
     response(client.value, [](const GuiCommand& m) { return m.command == 3 && m.payload[0] == 0 && m.payload[2] == 1 && m.payload[7] == 0; });
     // New tracking data must not revive AUTO after keyboard override.
     queue.push(target_frame(3));

@@ -209,6 +209,7 @@ if(LWIR_NEEDS_RUNTIME_CORE)
     add_library(lwir_runtime_core
         src/target/target_selector.cpp
         src/control/gimbal_device.cpp
+        src/control/pid_controller.cpp
         src/control/auto_tracking_controller.cpp
         src/control/gimbal_command_executor.cpp
         src/control/tracking_command_handler.cpp
@@ -411,6 +412,10 @@ if(BUILD_TESTING)
     target_link_libraries(test_auto_control_e2e PRIVATE lwir_runtime_core)
     add_test(NAME auto_control_e2e COMMAND test_auto_control_e2e)
     set_tests_properties(auto_control_e2e PROPERTIES TIMEOUT 15)
+
+    add_executable(test_pid_controller tests/control/test_pid_controller.cpp)
+    target_link_libraries(test_pid_controller PRIVATE lwir_runtime_core)
+    add_test(NAME pid_controller COMMAND test_pid_controller)
 
     add_executable(test_auto_control tests/control/test_auto_control.cpp)
     target_link_libraries(test_auto_control PRIVATE lwir_runtime_core)

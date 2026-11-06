@@ -67,6 +67,12 @@ void serial_commands() {
     serial_line(master.value, "{\"T\":141,\"X\":1,\"Y\":1,\"SPD\":37}");
     device->move_with_speed(1,0,12);
     serial_line(master.value, "{\"T\":141,\"X\":-1,\"Y\":0,\"SPD\":12}");
+    device->move_with_speed(1,0,100); // AUTO may exceed the manual speed of 37.
+    serial_line(master.value, "{\"T\":141,\"X\":-1,\"Y\":0,\"SPD\":100}");
+    bool rejected = false;
+    try { device->move_with_speed(1,0,101); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected, "shared command speed ceiling was ignored");
     device->stop();
     serial_line(master.value, "{\"T\":135}");
     device->home(); // encoder contract only; no physical HOME completion assertion
