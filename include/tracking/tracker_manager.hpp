@@ -31,6 +31,8 @@ public:
     void activate(int id, const std::function<void()>& before_commit = {});
     Snapshot snapshot() const;
     int active_id() const;
+    // 생성 시 확정된 불변 카탈로그에서 요청 ID의 존재 여부를 확인한다.
+    bool contains(int id) const { return catalog_.count(id) != 0; }
     std::uint64_t active_epoch() const;
 
     // 결과 게시와 인스턴스 교체의 순서를 고정해 교체 뒤 이전 결과가 나오지 않게 한다.

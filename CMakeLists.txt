@@ -218,6 +218,7 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         src/gui/gui_sender.cpp
         src/gui/gui_receiver.cpp
         src/pipeline/camera_thread.cpp
+        src/pipeline/tracker_change_service.cpp
         src/pipeline/model_manager_thread.cpp
         src/pipeline/detection_thread.cpp
         src/pipeline/tracking_thread.cpp
@@ -528,6 +529,11 @@ if(BUILD_TESTING)
         tests/pipeline/test_model_switch_wakeup.cpp)
     target_link_libraries(test_model_switch_wakeup PRIVATE lwir_runtime_core)
     add_test(NAME model_switch_wakeup COMMAND test_model_switch_wakeup)
+
+    add_executable(test_tracker_change_service tests/pipeline/test_tracker_change_service.cpp)
+    target_link_libraries(test_tracker_change_service PRIVATE lwir_runtime_core)
+    add_test(NAME tracker_change_service COMMAND test_tracker_change_service)
+    set_tests_properties(tracker_change_service PROPERTIES TIMEOUT 10)
 
     add_executable(test_tracker_hotswap tests/pipeline/test_tracker_hotswap.cpp)
     target_link_libraries(test_tracker_hotswap PRIVATE lwir_runtime_core)
