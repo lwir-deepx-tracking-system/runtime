@@ -61,6 +61,18 @@ void DetectionThread::run()
     auto last_bypass_sent = std::chrono::steady_clock::time_point{};
     bool has_sent_bypass = false;
     std::uint64_t observed_interrupt = 0;
+    // 활성 슬롯이 모델 매니저로 이동해도 자신이 제출한 파이프라인을 기다릴 수 있다.
+    std::shared_ptr<IDetectionPipeline> submitted_pipeline;
+    // 정지 확인은 콜백 반환과 탐지 스레드의 참조 해제가 모두 끝난 뒤에만 게시한다.
+    const auto quiesce = [&]
+    {
+        if(submitted_pipeline)
+        {
+            submitted_pipeline->wait_idle();
+            submitted_pipeline.reset();
+        }
+        runtime_control_.set_detection_quiesced(true);
+    };
 
     try
     {
@@ -75,7 +87,7 @@ void DetectionThread::run()
                 if (runtime_control_.state.load() == RuntimeState::Stopping)
                     break;
                 if (runtime_control_.state.load() != RuntimeState::Running)
-                    runtime_control_.set_detection_quiesced(true);
+                    quiesce();
                 continue;
             }
             if (!input.frame)
@@ -87,7 +99,7 @@ void DetectionThread::run()
 
             if (state != RuntimeState::Running)
             {
-                runtime_control_.set_detection_quiesced(true);
+                quiesce();
 
                 const auto now = std::chrono::steady_clock::now();
                 if (gui_enabled_ && (!has_sent_bypass ||
@@ -110,9 +122,10 @@ void DetectionThread::run()
             if (!pipeline)
             {
                 runtime_control_.state.store(RuntimeState::SwitchFailed);
-                runtime_control_.set_detection_quiesced(true);
+                quiesce();
                 continue;
             }
+            submitted_pipeline = pipeline;
 
             const auto queue_started_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
@@ -220,23 +233,18 @@ void DetectionThread::run()
         input_queue_.close();
     }
 
-    if (auto pipeline = active_pipeline_.snapshot())
+    try
     {
-        try
-        {
-            pipeline->wait_idle();
-        }
-        catch (const std::exception& e)
-        {
-            set_error(e.what());
-        }
-        catch (...)
-        {
-            set_error("Unknown error while draining inference requests");
-        }
+        quiesce();
     }
-
-    runtime_control_.set_detection_quiesced(true);
+    catch (const std::exception& e)
+    {
+        set_error(e.what());
+    }
+    catch (...)
+    {
+        set_error("Unknown error while draining inference requests");
+    }
     output_queue_.close();
     Logger::info("[DetectionThread] 종료");
 }

@@ -26,6 +26,7 @@ public:
     std::atomic<std::uint64_t> tracker_epoch{0};
     std::atomic<bool> stop_requested{false};
 
+    // true는 제출 중단·콜백 반환·탐지 스레드의 파이프라인 참조 해제가 끝났음을 뜻한다.
     void set_detection_quiesced(bool value);
     bool wait_detection_quiesced();
     void request_stop();

@@ -525,6 +525,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_model_manager_recovery PRIVATE lwir_runtime_core)
     add_test(NAME model_manager_recovery COMMAND test_model_manager_recovery)
 
+    add_executable(test_detection_quiescence tests/pipeline/test_detection_quiescence.cpp)
+    target_link_libraries(test_detection_quiescence PRIVATE lwir_runtime_core)
+    add_test(NAME detection_quiescence COMMAND test_detection_quiescence)
+    set_tests_properties(detection_quiescence PROPERTIES TIMEOUT 10)
+
     add_executable(test_model_switch_wakeup
         tests/pipeline/test_model_switch_wakeup.cpp)
     target_link_libraries(test_model_switch_wakeup PRIVATE lwir_runtime_core)
