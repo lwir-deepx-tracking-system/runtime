@@ -181,6 +181,14 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         node, "buffer_small_size", "tracking", c.buffer_small_size);
     c.buffer_snap = optional_value<bool>(
         node, "buffer_snap", "tracking", c.buffer_snap);
+    c.oru = optional_value<bool>(
+        node, "oru", "tracking", c.oru);
+    c.ocm_weight = optional_value<float>(
+        node, "ocm_weight", "tracking", c.ocm_weight);
+    c.ocm_delta_t = optional_value<int>(
+        node, "ocm_delta_t", "tracking", c.ocm_delta_t);
+    c.ocr = optional_value<bool>(
+        node, "ocr", "tracking", c.ocr);
 
     if (c.track_threshold <= 0.0F || c.track_threshold > 1.0F)
         throw std::runtime_error("tracking.track_threshold must be in (0, 1]");
@@ -208,6 +216,10 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         throw std::runtime_error("tracking.buffer_max_px must not be negative");
     if (c.buffer_small_size < 0.0F)
         throw std::runtime_error("tracking.buffer_small_size must not be negative");
+    if (!std::isfinite(c.ocm_weight) || c.ocm_weight < 0.0F || c.ocm_weight > 1.0F)
+        throw std::runtime_error("tracking.ocm_weight must be in [0, 1]");
+    if (c.ocm_delta_t < 1 || c.ocm_delta_t > 30)
+        throw std::runtime_error("tracking.ocm_delta_t must be in [1, 30]");
     return c;
 }
 

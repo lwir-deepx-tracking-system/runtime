@@ -44,3 +44,10 @@ tracking:
   buffer_max_px: 0        # 한 변을 넓히는 최대 px (0: 제한 없음)
   buffer_small_size: 0    # Track 박스의 짧은 변이 이 px 이하일 때만 적용 (0: 크기 무관)
   buffer_snap: false      # 넓힌 박스로 맞은 Track의 위치를 검출 박스로 맞춤
+
+  # ByteTrack에 적용하는 관측 기반 확장. 별도 OC-SORT 트래커 선택이 아니다.
+  # feature/bytetrack 실행 설정의 활성화 값을 유지한다.
+  oru: true          # 다시 찾은 Lost Track의 누락 구간을 보간해 Kalman 상태 재계산
+  ocm_weight: 0.2    # 이동 방향 일치도를 1차 매칭 비용에 반영 (0: 끔)
+  ocm_delta_t: 3     # 방향 계산에 사용하는 관측 간격 (프레임)
+  ocr: true          # 마지막 관측 박스로 남은 high 검출과 재매칭

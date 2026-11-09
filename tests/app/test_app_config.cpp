@@ -22,6 +22,8 @@ int main()
         config.tracking.type != TrackerType::ByteTrack ||
         config.tracking.match_threshold != 0.8F ||
         config.tracking.track_buffer != 30 ||
+        !config.tracking.oru || config.tracking.ocm_weight != 0.2F ||
+        config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
         config.tracking_catalog.size() != 1 ||
         config.tracking_catalog.at(1).config_path !=
             "config/tracking/bytetrack.yaml" ||
