@@ -43,7 +43,7 @@ detection:
   buffer_count: 6
 
   # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
-  use_ort: true
+  use_ort: false
 
 
 # ============================================================
@@ -66,15 +66,14 @@ control:
   enabled: true
 
   auto:
-    # 정규화 오차 기준 초기 튜닝값. 가장자리에서 P 출력이 SPD 상한에 도달한다.
-    # 실제 장치에서 추종 지연·진동을 확인해 축별로 조정한다.
-    controller: pid        # p / pi / pd / pid
-    pid_x: {kp: 70.0, ki: 5.0, kd: 2.0, integral_limit: 10.0, derivative_filter_ms: 100.0}
-    pid_y: {kp: 70.0, ki: 5.0, kd: 2.0, integral_limit: 10.0, derivative_filter_ms: 100.0}
-    deadband_x: 0.04
-    deadband_y: 0.04
+    # 흔들림 완화를 위해 P 제어로 기준을 잡고 실기에서 축별 kp를 조정한다.
+    controller: p          # p / pi / pd / pid
+    pid_x: {kp: 35.0, ki: 0.0, kd: 0.0}
+    pid_y: {kp: 35.0, ki: 0.0, kd: 0.0}
+    deadband_x: 0.06
+    deadband_y: 0.06
     speed_max: 70          # AUTO 전용 상한
-    speed_rate: 200.0       # SPD/초. 1→70 ramp 약 0.35초, STOP은 제한 우회
+    speed_rate: 100.0       # SPD/초. STOP은 제한 우회
 
   gimbal:
     device: /dev/ttyUSB0
