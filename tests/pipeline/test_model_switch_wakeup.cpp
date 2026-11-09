@@ -9,6 +9,9 @@ namespace {
 // 실제 추론 없이 모델 전환 대기 동작만 검증하는 파이프라인이다.
 class IdlePipeline final : public IDetectionPipeline {
 public:
+    // 비동기 미완료 작업이 없는 테스트 구현의 명시적 합류 계약.
+    void wait_idle() noexcept override {}
+
     void submit_async(const FrameContextPtr&, Completion) override {}
 };
 }

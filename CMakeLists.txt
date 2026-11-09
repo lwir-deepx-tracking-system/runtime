@@ -525,6 +525,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_model_manager_recovery PRIVATE lwir_runtime_core)
     add_test(NAME model_manager_recovery COMMAND test_model_manager_recovery)
 
+    add_executable(test_tracking_failure_shutdown tests/pipeline/test_tracking_failure_shutdown.cpp)
+    target_link_libraries(test_tracking_failure_shutdown PRIVATE lwir_runtime_core)
+    add_test(NAME tracking_failure_shutdown COMMAND test_tracking_failure_shutdown)
+    set_tests_properties(tracking_failure_shutdown PROPERTIES TIMEOUT 10)
+
     add_executable(test_detection_quiescence tests/pipeline/test_detection_quiescence.cpp)
     target_link_libraries(test_detection_quiescence PRIVATE lwir_runtime_core)
     add_test(NAME detection_quiescence COMMAND test_detection_quiescence)

@@ -35,6 +35,9 @@ public:
 class FakeDetectionPipeline : public IDetectionPipeline
 {
 public:
+    // 비동기 미완료 작업이 없는 테스트 구현의 명시적 합류 계약.
+    void wait_idle() noexcept override {}
+
     void submit_async(
         const FrameContextPtr& frame,
         Completion completion) override

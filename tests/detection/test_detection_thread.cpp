@@ -22,7 +22,7 @@ public:
     }
 
     // 실제 비동기 callback처럼 제출 순서와 반대로 완료한다.
-    void wait_idle() override
+    void wait_idle() noexcept override
     {
         for (auto pending = pending_.rbegin(); pending != pending_.rend(); ++pending)
         {
