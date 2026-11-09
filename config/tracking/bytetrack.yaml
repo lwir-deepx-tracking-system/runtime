@@ -1,4 +1,8 @@
 # Runtime과 Benchmark가 공유하는 ByteTrack 추적 설정.
+# 11/05~11/06 실데이터 평가의 12번(Biou 0.5 + OCR)을 기준으로 옵션을 선택한다.
+# Kalman 형식은 별도 선택한 XYWH를 사용한다.
+# 원본 평가의 전체 임계값은 문서에 없으므로 아래 pipeline 임계값은 유지한다.
+# https://app.notion.com/p/4109de3f14a28064997ad50226e5714d
 tracking:
   type: bytetrack
   # Detection confidence 기준
@@ -32,7 +36,7 @@ tracking:
   nsa_kalman: false
 
   # Kalman 상태 형식: xyah (공식 ByteTrack, 가로세로비 거의 고정) / xywh (BoT-SORT, 폭·높이 따로 추정)
-  kalman_format: xyah
+  kalman_format: xywh
 
   # 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함)
   # 출력된 박스는 검출이 아니라 예측이다
@@ -40,14 +44,14 @@ tracking:
 
   # Buffered IoU: 1차 매칭 뒤 남은 Track과 검출을 박스를 넓혀 한 번 더 매칭한다
   # 빠르거나 작은 표적용이다. 넓힌 박스는 매칭 판단에만 쓰고 출력 박스에는 쓰지 않는다
-  buffer_scale: 0.0       # 각 변을 폭·높이의 이 비율만큼 넓힘 (0: 끔, 0 이상 2 이하)
+  buffer_scale: 0.5       # 각 변을 폭·높이의 이 비율만큼 넓힘 (0: 끔, 0 이상 2 이하)
   buffer_max_px: 0        # 한 변을 넓히는 최대 px (0: 제한 없음)
   buffer_small_size: 0    # Track 박스의 짧은 변이 이 px 이하일 때만 적용 (0: 크기 무관)
   buffer_snap: false      # 넓힌 박스로 맞은 Track의 위치를 검출 박스로 맞춤
 
   # ByteTrack에 적용하는 관측 기반 확장. 별도 OC-SORT 트래커 선택이 아니다.
-  # feature/bytetrack 실행 설정의 활성화 값을 유지한다.
-  oru: true          # 다시 찾은 Lost Track의 누락 구간을 보간해 Kalman 상태 재계산
-  ocm_weight: 0.2    # 이동 방향 일치도를 1차 매칭 비용에 반영 (0: 끔)
+  # ID 유지 지표가 좋았던 Biou + OCR 조합을 사용한다.
+  oru: false         # 다시 찾은 Lost Track의 누락 구간을 보간해 Kalman 상태 재계산
+  ocm_weight: 0.0    # 이동 방향 일치도를 1차 매칭 비용에 반영 (0: 끔)
   ocm_delta_t: 3     # 방향 계산에 사용하는 관측 간격 (프레임)
   ocr: true          # 마지막 관측 박스로 남은 high 검출과 재매칭

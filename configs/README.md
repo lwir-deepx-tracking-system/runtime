@@ -14,10 +14,17 @@ OC-SORT tracker.
 
 Runtime and Benchmark keep the pipeline configuration contract:
 `tracking.id` selects a `tracking_catalog` entry whose file has a `tracking:`
-mapping and `type: bytetrack`. The shared `config/tracking/bytetrack.yaml` keeps
-the pipeline thresholds and the enabled ORU/OCM/OCR values from
-`feature/bytetrack`. Set `oru: false`, `ocm_weight: 0`, and `ocr: false` there
-to disable the extensions. Missing extension keys also default to disabled.
+mapping and `type: bytetrack`. The shared `config/tracking/bytetrack.yaml` uses
+Buffered IoU (`buffer_scale: 0.5`) and OCR, with ORU, OCM, score fusion, NSA,
+and buffer snap disabled. It uses `xywh`, no predicted output, and the
+pipeline thresholds. Buffered IoU and OCR follow experiment 12 in the
+[November 6 real-data evaluation](https://app.notion.com/p/4109de3f14a28064997ad50226e5714d),
+which reported the highest aggregate IDF1 and MOTA among its tested settings.
+XYWH is an additional selection for the current runtime. The evaluation does not
+record all baseline thresholds, so this is not an exact reproduction. Its GT was
+model-generated without human verification, CMC was
+disabled, and current-model/hardware accuracy still needs verification.
+Set `buffer_scale: 0` and `ocr: false` to disable these extensions.
 
 To use an experiment preset in Runtime or Benchmark, wrap its parameters in
 `tracking:`, add `type: bytetrack`, save it under `config/tracking/`, and reference

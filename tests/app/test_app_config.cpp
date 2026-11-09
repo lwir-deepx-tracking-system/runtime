@@ -15,14 +15,17 @@ int main()
     if (config.model_config_path != "config/model/yolov8n.yaml" ||
         config.detection.max_inflight != 4 ||
         config.detection.buffer_count != 6 ||
-        config.detection.use_ort) return 1;
+        config.detection.use_ort != yaml["detection"]["use_ort"].as<bool>()) return 1;
 
     // runtime 카탈로그가 ByteTrack YAML을 선택하고 실행 설정으로 합치는지 확인한다.
     if (config.tracking.track_threshold != 0.5F ||
         config.tracking.type != TrackerType::ByteTrack ||
         config.tracking.match_threshold != 0.8F ||
         config.tracking.track_buffer != 30 ||
-        !config.tracking.oru || config.tracking.ocm_weight != 0.2F ||
+        config.tracking.buffer_scale != 0.5F || config.tracking.buffer_snap ||
+        config.tracking.fuse_score || config.tracking.nsa_kalman ||
+        config.tracking.kalman_format != "xywh" || config.tracking.lost_output_frames != 0 ||
+        config.tracking.oru || config.tracking.ocm_weight != 0.0F ||
         config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
         config.tracking_catalog.size() != 1 ||
         config.tracking_catalog.at(1).config_path !=
