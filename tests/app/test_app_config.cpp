@@ -1,4 +1,5 @@
 #include "runtime/runtime.hpp"
+#include "config/app_config.hpp"
 #include <yaml-cpp/yaml.h>
 #include <stdexcept>
 #include <fstream>
@@ -14,16 +15,35 @@ int main()
     if (config.model_config_path != "config/model/yolov8n.yaml" ||
         config.detection.max_inflight != 4 ||
         config.detection.buffer_count != 6 ||
-        config.detection.use_ort) return 1;
+        config.detection.use_ort != yaml["detection"]["use_ort"].as<bool>()) return 1;
 
-    // ByteTrack, Control, Measurement 설정도 runtime.yaml에서 직접 읽는다.
+    // runtime 카탈로그가 ByteTrack YAML을 선택하고 실행 설정으로 합치는지 확인한다.
     if (config.tracking.track_threshold != 0.5F ||
+        config.tracking.type != TrackerType::ByteTrack ||
         config.tracking.match_threshold != 0.8F ||
         config.tracking.track_buffer != 30 ||
-        config.control.enabled ||
+        config.tracking.buffer_scale != 0.5F || config.tracking.buffer_snap ||
+        config.tracking.fuse_score || config.tracking.nsa_kalman ||
+        config.tracking.kalman_format != "xywh" || config.tracking.lost_output_frames != 0 ||
+        config.tracking.oru || config.tracking.ocm_weight != 0.0F ||
+        config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
+        config.tracking_catalog.size() != 1 ||
+        config.tracking_catalog.at(1).config_path !=
+            "config/tracking/bytetrack.yaml" ||
+        config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
         !config.measurement.enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")
         return 2;
+
+    auto tracking = YAML::LoadFile("config/tracking/bytetrack.yaml")["tracking"];
+    tracking["type"] = "unsupported";
+    try {
+        config_parser::load_tracking_config(tracking);
+        return 41;
+    } catch (const std::runtime_error&) {}
+    tracking.remove("type");
+    if (config_parser::load_tracking_config(tracking).type != TrackerType::ByteTrack)
+        return 42;
 
     // 연결된 모델 YAML의 Camera와 모델 입력 계약 검증.
     if (config.model.camera_input.opencv_type != "CV_16UC1") return 3;
@@ -31,7 +51,9 @@ int main()
     if (config.model.input.width != 640 || config.model.input.height != 640) return 5;
 
     // 모델 YAML의 전처리와 output tensor 계약이 typed 설정으로 전달되는지 확인한다.
-    if (config.model.preprocess.pad_value != 114 ||
+    if (config.model.preprocess.type != "lwir_letterbox" ||
+        config.model.postprocess.type != "yolov8" ||
+        config.model.preprocess.pad_value != 114 ||
         config.model.postprocess.output_format != PostprocessOutputFormat::Auto ||
         config.model.postprocess.split_output_levels != 3 ||
         config.model.postprocess.split_regression_bins != 16 ||
@@ -45,6 +67,8 @@ int main()
     // YOLO26은 같은 parser를 사용하되 DFL-free split-head와 NMS auto 계약을 갖는다.
     const ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
     if (yolo26.name != "yolo26s" ||
+        yolo26.preprocess.type != "lwir_letterbox" ||
+        yolo26.postprocess.type != "yolo26" ||
         yolo26.postprocess.output_format != PostprocessOutputFormat::Auto ||
         yolo26.postprocess.split_output_levels != 3 ||
         yolo26.postprocess.split_regression_bins != 1 ||
@@ -54,6 +78,11 @@ int main()
         !yolo26.postprocess.class_agnostic_nms ||
         yolo26.postprocess.num_classes != 16)
         return 7;
+    if (config.model_catalog.at(2).model.postprocess.type != "yolo26")
+        return 44;
+    if (!YAML::LoadFile("config/model/yolov8n.yaml")["postprocess"] ||
+        !YAML::LoadFile("config/model/yolo26s.yaml")["postprocess"])
+        return 47;
 
     // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
     if (config.gui.enabled != yaml["gui"]["enabled"].as<bool>() ||
@@ -100,13 +129,15 @@ int main()
     gui["command"].remove("handler");
     if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Deferred) return 18;
     gui["command"]["handler"] = "manual";
-    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Manual) return 19;
+    if (!rejects()) return 19; // removed standalone manual handler must fail explicitly
+    gui["command"]["handler"] = "tracking";
+    if (config_parser::load_gui_config(gui).command.handler != GuiCommandHandlerType::Tracking) return 40;
     auto control = YAML::Load("enabled: true\nheartbeat_timeout_ms: 800\npoll_interval_ms: 20\ngimbal: {device: /dev/test, baud_rate: 57600, speed: 37, acceleration: 61, home_x_deg: 12, home_y_deg: -5, x_sign: -1, y_sign: 1, write_timeout_ms: 50}\n");
-    auto manual = config_parser::load_control_config(control);
-    if (manual.gimbal.device != "/dev/test" || manual.gimbal.speed != 37 ||
-        manual.gimbal.acceleration != 61 || manual.gimbal.home_x_deg != 12 ||
-        manual.gimbal.home_y_deg != -5 || manual.gimbal.x_sign != -1 ||
-        manual.gimbal.baud_rate != 57600 || manual.heartbeat_timeout_ms != 800) return 20;
+    auto control_config = config_parser::load_control_config(control);
+    if (control_config.gimbal.device != "/dev/test" || control_config.gimbal.speed != 37 ||
+        control_config.gimbal.acceleration != 61 || control_config.gimbal.home_x_deg != 12 ||
+        control_config.gimbal.home_y_deg != -5 || control_config.gimbal.x_sign != -1 ||
+        control_config.gimbal.baud_rate != 57600 || control_config.heartbeat_timeout_ms != 800) return 20;
     const auto invalid_control = [&] {
         try { config_parser::load_control_config(control); } catch (const std::runtime_error&) { return true; }
         return false;
@@ -123,7 +154,7 @@ int main()
     control["poll_interval_ms"] = 900;
     if (!invalid_control()) return 24;
     // Enabling actual I/O must require the matching handler and TCP channel.
-    char filename[] = "/tmp/lwir-manual-config-XXXXXX";
+    char filename[] = "/tmp/lwir-control-config-XXXXXX";
     const int fd = ::mkstemp(filename);
     if (fd < 0) return 25;
     ::close(fd);
@@ -132,10 +163,11 @@ int main()
     runtime["control"]["enabled"] = true;
     runtime["gui"]["enabled"] = true;
     runtime["gui"]["command"]["enabled"] = true;
-    runtime["gui"]["command"]["handler"] = "manual";
+    runtime["gui"]["command"]["handler"] = "tracking";
     const auto write_config = [&] { std::ofstream out(filename); out << runtime; };
     write_config();
     if (!load_runtime_config(filename).control.enabled) return 26;
+    if (load_runtime_config(filename).gui.command.handler != GuiCommandHandlerType::Tracking) return 41;
     const auto invalid_combination = [&] {
         write_config();
         try { load_runtime_config(filename); } catch (const std::runtime_error&) { return true; }
@@ -143,11 +175,79 @@ int main()
     };
     runtime["gui"]["command"]["handler"] = "deferred";
     if (!invalid_combination()) return 27;
-    runtime["gui"]["command"]["handler"] = "manual";
+    runtime["gui"]["command"]["handler"] = "tracking";
     runtime["gui"]["command"]["enabled"] = false;
     if (!invalid_combination()) return 28;
     runtime["gui"]["command"]["enabled"] = true;
     runtime["control"]["enabled"] = false;
     if (!invalid_combination()) return 29;
+    // 상위 GUI/명령이 꺼지면 tracking 선택을 유지해도 실행 가능해야 한다.
+    // 반대로 제어가 켜졌다면 GUI·명령·tracking 핸들러가 모두 필요하다.
+    for (const auto* handler : {"deferred", "tracking"}) {
+        for (unsigned flags = 0; flags < 8; ++flags) {
+            runtime = YAML::Clone(yaml);
+            const bool gui_on = flags & 1;
+            const bool command_on = flags & 2;
+            const bool control_on = flags & 4;
+            const bool tracking = std::string(handler) == "tracking";
+            runtime["gui"]["enabled"] = gui_on;
+            runtime["gui"]["command"]["enabled"] = command_on;
+            runtime["gui"]["command"]["handler"] = handler;
+            runtime["gui"]["metadata"]["enabled"] = false;
+            runtime["control"]["enabled"] = control_on;
+            runtime["measurement"]["enabled"] = false;
+            const bool expected = control_on ? (gui_on && command_on && tracking) :
+                !(gui_on && command_on && tracking);
+            if ((!invalid_combination()) != expected) return 51;
+        }
+    }
+    runtime = YAML::Clone(yaml);
+    runtime["control"]["enabled"] = false;
+    runtime["gui"]["enabled"] = true;
+    runtime["gui"]["command"]["handler"] = "tracking";
+    // 비활성 명령의 tracking 선택값이 core/video-only 실행을 막지 않아야 한다.
+    runtime["gui"]["command"]["enabled"] = false;
+    write_config();
+    if (load_runtime_config(filename).control.enabled) return 51;
+    runtime["gui"]["enabled"] = false;
+    runtime["gui"]["metadata"]["enabled"] = false;
+    write_config();
+    const auto core = load_runtime_config(filename);
+    if (core.gui.enabled || core.control.enabled || core.gui.command.enabled ||
+        core.gui.metadata.enabled || core.gui.command.handler != GuiCommandHandlerType::Tracking)
+        return 52;
+    // 상위 GUI가 꺼져 있으면 하위 command 플래그도 실행되지 않는다.
+    runtime["gui"]["command"]["enabled"] = true;
+    write_config();
+    if (load_runtime_config(filename).gui.enabled) return 53;
+    runtime = YAML::Clone(yaml);
+    runtime["control"]["enabled"] = false;
+    char model_filename[] = "/tmp/lwir-model-config-XXXXXX";
+    const int model_fd = ::mkstemp(model_filename);
+    if (model_fd < 0) return 42;
+    ::close(model_fd);
+    RemoveConfig model_cleanup{model_filename};
+    auto alternate = YAML::LoadFile("config/model/yolo26s.yaml");
+    alternate["camera_input"]["clip_max"] = 32000;
+    { std::ofstream out(model_filename); out << alternate; }
+    runtime["gui"]["command"]["handler"] = "deferred";
+    runtime["model_catalog"][1]["config"] = model_filename;
+    if (!invalid_combination()) return 43;
+    runtime = YAML::Clone(yaml);
+    runtime["tracking"]["id"] = 99;
+    if (!invalid_combination()) return 45;
+    runtime = YAML::Clone(yaml);
+    runtime["tracking_catalog"].push_back(runtime["tracking_catalog"][0]);
+    if (!invalid_combination()) return 46;
+    runtime = YAML::Clone(yaml);
+    runtime["tracking"]["track_threshold"] = 0.9;
+    if (!invalid_combination()) return 48;
+    runtime = YAML::Clone(yaml);
+    runtime["model_catalog"][1]["id"] = 3;
+    if (!invalid_combination()) return 49;
+    runtime = YAML::Clone(yaml);
+    runtime["tracking_catalog"][0]["id"] = 2;
+    runtime["tracking"]["id"] = 2;
+    if (!invalid_combination()) return 50;
     return 0;
 }

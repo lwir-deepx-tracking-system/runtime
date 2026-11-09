@@ -1,5 +1,6 @@
 #include "benchmark.hpp"
 #include "result_writer.hpp"
+#include "app/run_directory.hpp"
 
 #include "common/detection.hpp"
 #include "common/frame.hpp"
@@ -7,7 +8,7 @@
 #include "common/track.hpp"
 
 #include "detection/detector_factory.hpp"
-#include "tracking/bytetrack_tracker.hpp"
+#include "tracking/tracker_factory.hpp"
 #include "tracking/tracker.hpp"
 
 #include <algorithm>
@@ -32,13 +33,6 @@
 
 namespace fs = std::filesystem;
 
-namespace {
-// 현재 직접 생성하는 ByteTrack 구현의 결과 이름이다.
-// tracker 선택 기능이 생기면 선택값으로 교체한다.
-constexpr const char* kTrackerName = "bytetrack";
-}  // namespace
-
-
 // benchmark.yaml과 model YAML을 읽어 Benchmark 설정을 구성한다.
 BenchmarkConfig load_benchmark_config(const std::string& path)
 {
@@ -56,7 +50,9 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
 
     c.model = load_model_config(c.model_config_path);
     c.detection = config_parser::load_detection_config(root["detection"]);
-    c.tracking = config_parser::load_tracking_config(root["tracking"]);
+    c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
+    c.tracking = config_parser::select_tracking_config(
+        root["tracking"], c.tracking_catalog);
     c.sequence = config_parser::load_benchmark_sequence_config(root["sequence"]);
     c.path = config_parser::load_benchmark_path_config(root["path"]);
 
@@ -71,53 +67,16 @@ static fs::path create_run_directory(
     const std::string& model_name,
     const std::string& tracker_name)
 {
-    const fs::path model_tracker_dir =
-        output_root / (model_name + "_" + tracker_name);
-    fs::create_directories(model_tracker_dir);
-
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
-    std::tm local_time{};
-
-    if (localtime_r(&now_time, &local_time) == nullptr)
-        throw std::runtime_error("Benchmark timestamp 생성에 실패했습니다");
-
-    std::ostringstream timestamp_stream;
-    timestamp_stream << std::put_time(&local_time, "%Y%m%d_%H%M%S");
-
-    if (!timestamp_stream)
-        throw std::runtime_error("Benchmark timestamp 생성에 실패했습니다");
-
-    const std::string timestamp = timestamp_stream.str();
-
-    // 같은 초의 실행 결과가 있으면 _1, _2 순서로 충돌을 피한다.
-    for (std::uint64_t suffix = 0;; ++suffix)
-    {
-        const std::string directory_name = timestamp +
-            (suffix == 0 ? "" : "_" + std::to_string(suffix));
-        const fs::path run_dir = model_tracker_dir / directory_name;
-
-        if (fs::create_directory(run_dir))
-        {
-            try
-            {
-                if (!fs::create_directory(run_dir / "detections") ||
-                    !fs::create_directory(run_dir / "tracks") ||
-                    !fs::create_directory(run_dir / "timing"))
-                {
-                    throw std::runtime_error(
-                        "Benchmark 결과 디렉터리를 생성하지 못했습니다: " +
-                        run_dir.string());
-                }
-                return run_dir;
-            }
-            catch (...)
-            {
-                std::error_code cleanup_error;
-                fs::remove_all(run_dir, cleanup_error);
-                throw;
-            }
-        }
+    const auto run_dir = ::create_run_directory(output_root / (model_name + "_" + tracker_name));
+    try {
+        fs::create_directory(run_dir / "detections");
+        fs::create_directory(run_dir / "tracks");
+        fs::create_directory(run_dir / "timing");
+        return run_dir;
+    } catch (...) {
+        std::error_code cleanup_error;
+        fs::remove_all(run_dir, cleanup_error);
+        throw;
     }
 }
 
@@ -208,6 +167,7 @@ class BenchmarkApplication
 private:
     BenchmarkConfig config_;
     std::string config_path_;
+    std::string tracker_name_;
 
     std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<Tracker> tracker_;
@@ -222,10 +182,13 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
     : config_(load_benchmark_config(config_path)),
       config_path_(config_path)
 {
-    detection_pipeline_ = DetectorFactory::create(config_.model, config_.detection);
+    auto detector_factory = DetectorFactory::for_model(config_.model);
+    detection_pipeline_ = detector_factory->create(
+        config_.model, config_.detection);
 
-    tracker_ = std::make_unique<ByteTrackTracker>(
-        config_.tracking);
+    auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
+    tracker_name_ = tracker_factory->name();
+    tracker_ = tracker_factory->create(config_.tracking);
 }
 
 
@@ -273,7 +236,7 @@ void BenchmarkApplication::run()
     }
 
     const fs::path run_dir = create_run_directory(
-        output_root, config_.model.name, kTrackerName);
+        output_root, config_.model.name, tracker_name_);
 
     // run 디렉터리 생성 이후의 모든 실패는 불완전한 결과를 통째로 정리한다.
     try
@@ -283,6 +246,12 @@ void BenchmarkApplication::run()
         fs::copy_file(
             config_.model_config_path,
             run_dir / fs::path(config_.model_config_path).filename());
+        const fs::path tracking_dir = run_dir / "tracking";
+        fs::create_directory(tracking_dir);
+        for (const auto& [id, entry] : config_.tracking_catalog)
+            fs::copy_file(entry.config_path,
+                tracking_dir / (std::to_string(id) + "_" +
+                    fs::path(entry.config_path).filename().string()));
 
         Logger::info("[Benchmark] Sequence 수: " + std::to_string(sequence_dirs.size()));
         if (config_.sequence.range_enabled)

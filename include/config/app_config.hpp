@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -21,7 +22,10 @@ struct DetectionConfig {
     bool use_ort = false;
 };
 
+enum class TrackerType { ByteTrack };
+
 struct TrackingConfig {
+    TrackerType type = TrackerType::ByteTrack;
     float track_threshold = 0.5F;
     float match_threshold = 0.8F;
     int track_buffer = 30;
@@ -57,13 +61,29 @@ struct TrackingConfig {
     float buffer_small_size = 0.0F;
     // Buffered IoU로만 맞은 Track의 위치를 검출 박스로 맞춘다 (프레임 누락에 유리, 흔들리는 작은 표적에 불리)
     bool buffer_snap = false;
+
+    // ---- OC-SORT (Observation-Centric SORT, Cao et al., CVPR 2023) ----
+    // 세 기능은 서로 독립이며 모두 기본 꺼짐이다. 과거 관측 박스는 CMC를 적용해 현재 화면 좌표로 유지한다.
+    // ORU: Lost였던 Track을 다시 찾으면 놓치기 직전 Kalman 상태로 되돌리고, 마지막 관측 → 새 관측을
+    //      직선 보간한 가상 관측으로 놓친 구간을 다시 predict/update 한다 (Lost 동안 틀어진 속도를 바로잡음).
+    //      다시 찾은 Track에는 buffer_snap을 적용하지 않는다.
+    bool oru = false;
+    // OCM: 1차 매칭 비용에서 이동 방향 일치도 × 검출 점수 × 이 가중치를 뺀다 (0: 끔, OC-SORT 기본 0.2).
+    //      매칭 허용 여부는 지금처럼 IoU 비용(match_threshold)으로만 판단하고, 방향 항은 후보 사이 순위에만 쓴다.
+    float ocm_weight = 0.0F;
+    // OCM 방향을 계산할 관측 간격(프레임). OC-SORT 기본 3
+    int ocm_delta_t = 3;
+    // OCR: 2차 매칭 뒤 남은 Track을 Kalman 예측 대신 마지막 관측 박스로 남은 high 검출과 한 번 더 매칭한다
+    //      (match_threshold 사용). 멈춘 물체·짧은 가림 뒤 예측이 빗나간 Track을 복구한다.
+    bool ocr = false;
 };
 
 struct GimbalConfig {
     std::string device = "/dev/ttyUSB0";
     int baud_rate = 115200;
     int write_timeout_ms = 100;
-    int speed = 30;
+    int speed = 50; // manual/HOME command speed
+    int speed_limit = 100; // shared software command ceiling, independent of manual speed
     int acceleration = 50;
     int home_x_deg = 0;
     int home_y_deg = 0;
@@ -71,11 +91,40 @@ struct GimbalConfig {
     int y_sign = 1;
 };
 
+enum class AutoControllerType { P, PI, PD, PID };
+
+struct PidAxisConfig {
+    double kp = 30.0;
+    double ki = 0.0;
+    double kd = 0.0;
+    double integral_limit = 10.0; // absolute I contribution, in SPD command units
+    double derivative_filter_ms = 100.0;
+};
+
+// SPD values are vendor command units, not degrees/second.
+struct AutoControlConfig {
+    AutoControllerType controller = AutoControllerType::P;
+    PidAxisConfig pid_x;
+    PidAxisConfig pid_y;
+    double deadband_x = 0.04; // normalized half-frame error, or radians with FOV
+    double deadband_y = 0.04;
+    double fov_x_deg = 0.0; // both zero selects normalized pixel errors
+    double fov_y_deg = 0.0;
+    double min_confidence = 0.5;
+    int speed_min = 1;
+    int speed_max = 100;
+    double speed_rate = 60.0; // SPD units/second; safety STOP bypasses this
+    int period_ms = 25;
+    int input_timeout_ms = 250;
+    int reacquire_timeout_ms = 1000;
+};
+
 struct ControlConfig {
     bool enabled = false;
     int heartbeat_timeout_ms = 1500;
     int poll_interval_ms = 25;
     GimbalConfig gimbal;
+    AutoControlConfig automatic;
 };
 
 struct MeasurementConfig {
@@ -107,7 +156,7 @@ struct GuiVideoConfig
     int rtp_mtu = 0;
 };
 
-enum class GuiCommandHandlerType { Deferred, Manual };
+enum class GuiCommandHandlerType { Deferred, Tracking };
 
 struct GuiMetadataConfig
 {
@@ -254,7 +303,44 @@ struct CaptureConditionConfig
 };
 
 
+// 모델 ID에 모델 YAML 경로와 파싱된 설정을 연결한다.
+struct ModelCatalogEntry
+{
+    int id = 0;
+    std::string config_path;
+    ModelConfig model;
+};
+
+// 트래커 ID에 설정 YAML 경로와 검증된 typed 설정을 연결한다.
+struct TrackingCatalogEntry
+{
+    int id = 0;
+    std::string config_path;
+    TrackingConfig config;
+};
+
+// runtime YAML과 참조된 모델·트래커 YAML을 합친 실행 설정이다.
+struct RuntimeConfig
+{
+    LoggingConfig logging;
+    std::string model_config_path;
+    int initial_model_id = 0;
+    std::map<int, ModelCatalogEntry> model_catalog;
+    std::map<int, TrackingCatalogEntry> tracking_catalog;
+    int initial_tracker_id = 0;
+    ModelConfig model;
+    DetectionConfig detection;
+    TrackingConfig tracking;
+    ControlConfig control;
+    MeasurementConfig measurement;
+    GuiConfig gui;
+};
+
+RuntimeConfig load_runtime_config(const std::string& path);
+
 ModelConfig load_model_config(const std::string& config_path);
+// 트래커 전용 YAML을 읽고 종류별 설정을 검증한다.
+TrackingConfig load_tracker_config(const std::string& config_path);
 
 namespace config_parser
 {
@@ -267,6 +353,14 @@ std::string required_string(
 LoggingConfig load_logging_config(const YAML::Node& node);
 DetectionConfig load_detection_config(const YAML::Node& node);
 TrackingConfig load_tracking_config(const YAML::Node& node);
+// 트래커 카탈로그의 ID·경로를 검증하고 각 YAML을 typed 설정으로 읽는다.
+std::map<int, TrackingCatalogEntry> load_tracking_catalog(const YAML::Node& node);
+// 실행 YAML의 tracking.id가 카탈로그에 존재하는지 확인한다.
+int select_tracking_id(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog);
+// 실행 YAML의 tracking.id에 해당하는 검증된 추적 설정을 선택한다.
+TrackingConfig select_tracking_config(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog);
 ControlConfig load_control_config(const YAML::Node& node);
 MeasurementConfig load_measurement_config(const YAML::Node& node);
 GuiConfig load_gui_config(const YAML::Node& node);

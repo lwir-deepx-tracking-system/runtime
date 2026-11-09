@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <deque>
 #include <memory>
 #include <vector>
 
@@ -35,6 +36,20 @@ struct STrack
     int frame_id = 0;       // 마지막으로 검출과 매칭된 프레임
     int start_frame = 0;
     int tracklet_len = 0;
+
+    // ---- OC-SORT용 (oru / ocm_weight / ocr 중 하나라도 켜면 기록) ----
+    // 매칭된 실제 검출 박스 기록. 카메라 움직임(CMC)을 적용해 항상 현재 화면 좌표로 유지한다.
+    // (det_tlwh는 화면 밖 판정용으로 검출 당시 좌표 그대로 둔다)
+    struct Observation
+    {
+        int frame_id = 0;
+        std::array<float, 4> tlwh{};  // x, y, width, height
+    };
+    std::deque<Observation> observations;  // 마지막 관측과 그 이전 ocm_delta_t 프레임 안의 관측만 남긴다
+
+    // ORU: Tracked → Lost로 바뀐 순간의 Kalman 상태 (놓친 첫 프레임의 예측·CMC까지 적용, update 전)
+    KalmanState lost_kf{};
+    bool has_lost_kf = false;
 };
 
 using STrackPtr = std::shared_ptr<STrack>;
@@ -63,6 +78,12 @@ private:
 
     void activate(bytetrack::STrack& track);
     void apply_detection(bytetrack::STrack& track, const bytetrack::STrack& det);
+    // OC-SORT 기능 중 하나라도 켜져 있는지 (관측 기록 여부)
+    bool observation_centric() const { return config_.oru || config_.ocm_weight > 0.0F || config_.ocr; }
+    // 관측 기록에 박스를 추가하고 오래된 기록을 정리한다.
+    void record_observation(bytetrack::STrack& track, const std::array<float, 4>& tlwh) const;
+    // ORU: 저장한 Lost 직전 상태에서 가상 관측으로 놓친 구간을 다시 계산한다 (새 검출 update 직전 상태까지).
+    void re_update(bytetrack::STrack& track, const bytetrack::STrack& det) const;
     // Kalman update의 측정 노이즈 배율 (nsa_kalman이 꺼져 있으면 1)
     double measurement_noise_scale(float score) const;
 

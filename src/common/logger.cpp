@@ -5,10 +5,7 @@
 
 // 기본 로그 레벨은 INFO
 LogLevel Logger::current_level_ = LogLevel::INFO;
-
-// 여러 Thread의 로그 출력 동기화
-pthread_mutex_t Logger::mutex_ = PTHREAD_MUTEX_INITIALIZER;
-
+std::mutex Logger::mutex_;
 
 // 현재 로그 레벨을 설정한다.
 void Logger::set_level(LogLevel level)
@@ -78,11 +75,8 @@ void Logger::log(
             break;
     }
 
-    pthread_mutex_lock(&mutex_);
-
+    std::lock_guard<std::mutex> lock(mutex_);
     std::cout << prefix << message << '\n';
-
-    pthread_mutex_unlock(&mutex_);
 }
 
 

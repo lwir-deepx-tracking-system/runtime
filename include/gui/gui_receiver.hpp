@@ -2,8 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-
-#include <pthread.h>
+#include <mutex>
 
 #include "config/app_config.hpp"
 #include "gui/gui_protocol.hpp"
@@ -21,7 +20,7 @@ private:
     // receive()를 실행하는 worker가 socket을 사용하고, 다른 thread의 stop()이
     // 이를 닫아 blocking poll/recv를 깨운다. mutex는 FD 소유권 인계와
     // double-close를 방지한다.
-    pthread_mutex_t socket_mutex_{};
+    std::mutex socket_mutex_;
     int listen_fd_ = -1;
     int client_fd_ = -1;
 

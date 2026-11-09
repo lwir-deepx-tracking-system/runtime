@@ -23,6 +23,13 @@ measurement:
 model:
   config: config/model/yolov8n.yaml
 
+# Internal model catalog. The PC wire protocol does not define model selection.
+model_catalog:
+  - id: 1
+    config: config/model/yolov8n.yaml
+  - id: 2
+    config: config/model/yolo26s.yaml
+
 
 # ============================================================
 # 3. Detection
@@ -40,53 +47,15 @@ detection:
 
 
 # ============================================================
-# 4. Tracking - ByteTrack
+# 4. Tracking
 # ============================================================
 
 tracking:
-  # Detection confidence 기준
-  track_threshold: 0.5
+  id: 1
 
-  # 1차 매칭 허용 거리 (1 - IoU)
-  # 0.8이면 IoU 0.2 이상이어야 같은 객체로 매칭 가능
-  match_threshold: 0.8
-
-  # Detection이 일시적으로 사라져도 Track을 유지하는 프레임 수
-  # 30 FPS 기준 30이면 약 1초
-  track_buffer: 30
-
-  # ByteTrack 세부 임계값 (생략하면 공식 ByteTrack 값)
-  low_threshold: 0.1                # 이 점수 이하 검출은 버림. 초과 ~ track_threshold 미만은 2차 매칭에만 사용
-  #                                 #  (detection 후처리 confidence_threshold가 이 값 이하여야 2차 매칭이 동작함)
-  new_track_threshold: 0            # 새 ID를 만드는 최소 점수 (0: track_threshold + 0.1)
-  low_match_threshold: 0.5          # 2차 매칭 허용 거리 (1 - IoU). 0.5면 IoU 0.5 이상
-  unconfirmed_match_threshold: 0.7  # 미확정 Track 매칭 허용 거리 (1 - IoU). 0.7이면 IoU 0.3 이상
-
-  # ----------------------------------------------------------
-  # 선택 설정
-  # 아래 키는 생략할 수 있으며, 생략하면 기능이 꺼진다 (괄호 안이 기본값).
-  # ----------------------------------------------------------
-
-  # 1차 매칭과 미확정 Track 매칭 비용에 검출 점수를 곱한다 (비용 = 1 - IoU × 점수)
-  fuse_score: false
-  
-  # NSA Kalman: Kalman 보정 때 측정 노이즈를 (1 - 검출 점수)배 한다 (StrongSORT)
-  # 점수가 높은 검출은 더 믿고, 낮은 검출(가려짐 등)은 Track 위치를 덜 흔든다
-  nsa_kalman: false
-
-  # Kalman 상태 형식: xyah (공식 ByteTrack, 가로세로비 거의 고정) / xywh (BoT-SORT, 폭·높이 따로 추정)
-  kalman_format: xyah
-
-  # 놓친 Track을 Kalman 예측 위치로 이 프레임 수만큼 더 출력한다 (0: 출력 안 함)
-  # 출력된 박스는 검출이 아니라 예측이다
-  lost_output_frames: 0
-
-  # Buffered IoU: 1차 매칭 뒤 남은 Track과 검출을 박스를 넓혀 한 번 더 매칭한다
-  # 빠르거나 작은 표적용이다. 넓힌 박스는 매칭 판단에만 쓰고 출력 박스에는 쓰지 않는다
-  buffer_scale: 0.0       # 각 변을 폭·높이의 이 비율만큼 넓힘 (0: 끔, 0 이상 2 이하)
-  buffer_max_px: 0        # 한 변을 넓히는 최대 px (0: 제한 없음)
-  buffer_small_size: 0    # Track 박스의 짧은 변이 이 px 이하일 때만 적용 (0: 크기 무관)
-  buffer_snap: false      # 넓힌 박스로 맞은 Track의 위치를 검출 박스로 맞춤
+tracking_catalog:
+  - id: 1
+    config: config/tracking/bytetrack.yaml
 
 
 # ============================================================
@@ -94,21 +63,21 @@ tracking:
 # ============================================================
 
 control:
-  # 실제 수동 제어 시 enabled: true와 gui.command.handler: manual을 함께 설정한다.
-  enabled: false
-  heartbeat_timeout_ms: 1500  # 마지막 유효 PING 이후 수동 이동을 정지할 시간
-  poll_interval_ms: 25       # 프레임과 독립적인 명령·heartbeat 확인 주기
-  gimbal:
-    device: /dev/ttyUSB0     # 실기에서는 /dev/serial/by-id/... 고정 경로 권장
-    baud_rate: 115200
-    write_timeout_ms: 100
-    speed: 30
-    acceleration: 50
-    home_x_deg: 0            # HOME 실행·완료 피드백은 이번 범위에서 제외
-    home_y_deg: 0
-    x_sign: 1               # 축 방향 반전이 필요하면 -1
-    y_sign: 1
+  enabled: true
 
+  auto:
+    # 흔들림 완화를 위해 P 제어로 기준을 잡고 실기에서 축별 kp를 조정한다.
+    controller: p          # p / pi / pd / pid
+    pid_x: {kp: 35.0, ki: 0.0, kd: 0.0}
+    pid_y: {kp: 35.0, ki: 0.0, kd: 0.0}
+    deadband_x: 0.06
+    deadband_y: 0.06
+    speed_max: 70          # AUTO 전용 상한
+    speed_rate: 100.0       # SPD/초. STOP은 제한 우회
+
+  gimbal:
+    device: /dev/ttyUSB0
+    speed: 30              # 수동 방향키 고정 속도. AUTO 상한과 독립
 
 # ============================================================
 # 6. GUI Communication
@@ -156,11 +125,11 @@ gui:
   # ----------------------------------------------------------
   # 6-3. GUI Command
   # GUI -> Orange Pi
-  # PC 명령 수신 및 ACK/STATUS 응답 (ID 기반 추적은 추후 구현)
+  # PC 명령 수신 및 ACK/STATUS 응답
   # ----------------------------------------------------------
 
   command:
-    handler: deferred  # manual: 실제 수동 방향 제어 / deferred: 통신 시험만
+    handler: tracking  # tracking: AUTO+수동 / deferred: 통신 시험만
     enabled: true
 
     bind_address: 192.168.50.2

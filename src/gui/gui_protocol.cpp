@@ -49,6 +49,12 @@ int payload_size(GuiCategory category, std::uint8_t command)
         if (command == static_cast<std::uint8_t>(GuiGimbalCommand::Move)) return 2;
         if (command == static_cast<std::uint8_t>(GuiGimbalCommand::Home)) return 0;
         break;
+    case GuiCategory::Pipeline:
+        if (command == 1 || command == 2) return 4;
+        if (command == 3 || command == 4) return 8;
+        if (command == 0x81 || command == 0x82) return 8;
+        if (command == 0x83 || command == 0x84) return 6;
+        break;
     }
     return -1;
 }
@@ -70,7 +76,7 @@ bool PcGuiProtocol::decode_command(const std::uint8_t* p, std::size_t n, GuiComm
 std::vector<std::uint8_t> PcGuiProtocol::encode_command(const GuiCommand& command) const
 { return encode_gui_command(command); }
 bool PcGuiProtocol::accepts_frame(std::uint32_t width, std::uint32_t height) const
-{ return width == 640 && height == 480; }
+{ return width == kGuiFrameWidth && height == kGuiFrameHeight; }
 bool PcGuiProtocol::encode_metadata(const GuiTrackingMetadata& metadata, std::size_t limit,
                                     std::vector<std::uint8_t>& out) const
 { return encode_tracking_metadata(metadata, limit, out); }

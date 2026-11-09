@@ -7,8 +7,8 @@ LWIR 카메라 영상에서 객체를 검출하고 추적한 뒤, 같은 프레�
 - 입력: `CV_16UC1` LWIR 영상
 - Detection: 모델 YAML 기반 YOLOv8/YOLO26 + DEEPX `dx_app` 구조
 - Tracking: ByteTrack
-- 실행 구조: POSIX pthread + `ThreadSafeQueue`
-- 동기화/통신: POSIX pthread mutex와 POSIX socket API
+- 실행 구조: std::thread + `ThreadSafeQueue`
+- 동기화/통신: std::mutex와 POSIX socket API
 
 worker thread와 queue 동기화, socket은 POSIX API를 사용합니다. 프레임과 처리 결과는
 `shared_ptr`로 전달하고, 종료 및 실패 상태는 atomic flag로 관리합니다. GStreamer는
@@ -37,8 +37,8 @@ Detection은 `DxAppDetectionPipeline` 한 객체가 전처리, 추론, 후처리
 | `full` | 활성 | 활성 |
 
 GUI 없이 Control만 활성화하는 설정은 허용하지 않습니다. 현재 `deferred` 명령 처리기는
-TCP 입력 ID를 TargetSelector에 적용하지 않습니다. `manual` 처리기는 GUI 키보드의
-수동 방향 제어를 지원하며, ID 기반 추종과 HOME 완료 판정은 추후 구현합니다.
+TCP 입력 ID를 제어에 적용하지 않습니다. `tracking` 처리기는 [AUTO 표적 중심 정렬](docs/auto_control.md)과
+수동 override를 지원하며 HOME 완료 판정은 미구현입니다. 실제 짐벌/NPU 동작은 별도 검증 대상입니다.
 실행 중 `Ctrl+C`를 입력하면 프레임 생산을 멈추고 queue를 순서대로 닫은 뒤 worker를
 join하고 측정 결과를 저장합니다.
 
@@ -66,8 +66,11 @@ LWIR 카메라 프레임을 Benchmark용 데이터셋으로 저장합니다.
 ./scripts/build_runtime.sh
 ./build/runtime/lwir_runtime
 
-# Test
-./scripts/test.sh
+# CPU/unit tests
+./scripts/build_test.sh
+
+# Runtime output integration check (requires LWIR camera and DEEPX NPU)
+./scripts/test_runtime_output.sh
 ```
 
 Runtime과 Benchmark는 DEEPX 환경을 사용합니다. Capture와 Runtime은 실제 LWIR
@@ -134,28 +137,59 @@ Benchmark 결과는 model과 tracker 조합 아래에서 실행 시각별로 저
         └── timing/
 ```
 
-Runtime 결과는 같은 조합 아래에서 `core`, `gui`, `full` 모드와 실행 시각으로 구분합니다.
+Runtime 결과는 실행 모드와 실행 시각으로 구분하고, 모델별 하위 디렉터리에 기록합니다.
 
 ```text
 /mnt/lwir_data/results/runtime/
-└── yolov8n_bytetrack/
-    ├── core/20261007_193015/
-    ├── gui/20261007_194230/
-    └── full/20261007_195105/
+└── full/20261007_195105/
         ├── runtime.yaml
-        ├── yolov8n.yaml
-        ├── metrics.csv
-        └── detection_timing.csv
+        ├── tracking/1.yaml
+        └── models/
+            ├── 1/
+            │   ├── model.yaml
+            │   ├── metrics.csv
+            │   └── detection_timing.csv
+            └── 2/
+                ├── model.yaml
+                ├── metrics.csv
+                └── detection_timing.csv
 ```
 
 실행 디렉터리는 `YYYYMMDD_HHMMSS` 형식을 사용하며 같은 초에 충돌하면 `_1`, `_2` suffix를
-붙입니다. 실행 중 오류가 발생하면 해당 timestamp 디렉터리를 삭제하여 완료된 결과만 남깁니다.
+붙입니다. Benchmark는 실패한 실행 디렉터리를 정리합니다. Runtime은 오류 종료에서도
+이미 기록한 측정값과 설정 사본을 보존합니다.
+
+Runtime worker는 측정값을 비동기 저장 큐에 전달하며 전체 실행 결과를 벡터에 누적하지
+않습니다. 저장 스레드는 128개 기록 또는 1초마다 flush하고, 모델 전환 완료 응답 전과
+정상 종료(Ctrl+C/콘솔 quit 포함)에도 flush합니다. A→B→A로 전환하면 A의 기존 파일에
+헤더를 중복 작성하지 않고 이어 붙입니다. 세대로 모델을 구분하므로 이전 모델의 늦은
+결과도 해당 모델 파일로 갑니다. 행 순서는 프레임 번호 정렬이 아니라 도착 순서입니다.
+SIGINT(Ctrl+C), SIGTERM, 콘솔 `quit`는 저장 후 종료합니다. SIGQUIT(`Ctrl+\` 또는
+`kill -QUIT <pid>`)은 저장 큐를 폐기하고 **이번 실행 디렉터리 전체를 삭제**한 뒤
+worker를 종료합니다. 실행 중 이미 기록한 CSV·설정 사본도 삭제하며 이전 실행은 보존합니다.
+SIGQUIT 뒤에 SIGINT나 콘솔 quit가 와도 폐기 종료가 우선합니다.
+카메라 시간은 실제 Detection에 제출된 프레임을 해당 모델에 귀속하며, 큐에서 버려지거나
+모델 전환 대기 중 소비된 프레임은 모델별 기록에서 제외합니다.
+
+파일 쓰기는 처리 스레드와 분리하며, flush는 OS 버퍼로의 전달까지 보장합니다.
+프레임마다 디스크 동기화(fsync)를 수행하지 않으므로 전원 차단 시의 영구 보존은 보장하지
+않습니다. 저장 큐는 16,384개로 제한하며 초과 또는 I/O 오류는 무음 누락 대신 runtime
+오류 종료로 보고합니다. NPU 및 실제 보드 저장장치에서의 성능은 별도 검증이 필요합니다.
 
 ## Configuration
 
 Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yaml`,
 `config/benchmark.yaml` 설정을 사용합니다. 모델 관련 설정은 `config/model/` 아래의
-별도 model configuration으로 관리하며 실행 파라미터는 YAML에서 변경합니다.
+별도 model configuration으로 관리합니다. 모델의 후처리 조건도 해당 모델 YAML에
+포함됩니다. 트래커별 설정은 `config/tracking/` 아래의 YAML로 관리하며 Runtime과
+Benchmark의 `tracking_catalog`가 트래커 ID와 설정 파일을 연결합니다.
+`tracking.id`로 실행에 사용할 트래커 설정을 선택합니다.
+Runtime과 Benchmark는 같은 `config/tracking/bytetrack.yaml`을 참조합니다.
+runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고 실행 루프가 처리합니다.
+새 인스턴스를 먼저 만든 뒤 활성 트래커를 교체하며, 진행 중이던 프레임이 끝나면 이전
+인스턴스가 소멸합니다. TCP 5002의 Pipeline(category=4) 명령으로 모델·트래커 개수를
+조회하고 전환을 요청할 수 있습니다. 카탈로그 ID는 각각 1부터 연속이어야 합니다.
+패킷과 접수·완료 응답 형식은 [PC 통신 계약](docs/pc_communication.md)에 정의되어 있습니다.
 
 - Runtime 측정 결과 root: `measurement.output_root`
 - Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`
@@ -163,8 +197,14 @@ Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yam
 - Benchmark dataset/result root: `path.dataset_root`, `path.output_root`
 - Runtime/Benchmark model 설정: `model.config`
 
+테스트용 터미널 명령은 `lwir_runtime config/runtime.yaml --console`로 활성화합니다.
+`model 2`, `tracker 1`은 기존 전환 경로로 요청을 전달하고 접수·완료 결과를 출력합니다.
+`count`는 모델·트래커 개수, `help`는 사용법, `quit`는 정상 종료를 요청합니다.
+콘솔 ID는 카탈로그의 1부터 시작하는 ID입니다. EOF는 입력만 비활성화하며 runtime은
+계속 동작합니다. 옵션을 생략하면 표준 입력을 읽지 않습니다.
+
 Runtime–PC 통신은 [PC 통신 계약](docs/pc_communication.md)을 따릅니다.
-GUI 키보드 수동 제어는 [수동 제어 설정·시험](docs/manual_control.md)을 참고합니다.
+GUI 키보드 수동 제어와 AUTO는 [통합 제어 설정·시험](docs/auto_control.md)을 참고합니다.
 고정 IP와 직결 LAN·Windows 수신 방화벽 설정은 [네트워크 설정](docs/network_setup.md)을 참고합니다.
 통신 형식은 PC 규격으로 고정합니다. `gui.command.handler`는 AppConfig가 검증하고
 팩토리가 명령 처리 전략을 생성합니다. 기본 `deferred` 처리기는
@@ -188,7 +228,7 @@ PING/상태 응답만 제공합니다. `manual` 처리기는 Waveshare Serial �
 ## Test
 
 ```bash
-./scripts/test.sh
+./scripts/build_test.sh
 ```
 
 필요하면 생성된 `build/test` 디렉터리에서 특정 CTest만 직접 실행할 수 있습니다.

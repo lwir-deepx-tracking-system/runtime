@@ -3,11 +3,10 @@
 Runtime follows `pc-application`'s current `feat/gui-video` wire contract and the
 adopted decisions in [Application 설계](https://app.notion.com/p/3f29de3f14a280829f90dc2dfd666d04).
 The [1103 roadmap](https://app.notion.com/p/40c9de3f14a28074905bd2239d6e9fdb)
-describes wider state/control/gimbal work; this change implements communication
-with deferred AUTO/HOME actuation, not that whole roadmap. The optional
-[manual control handler](manual_control.md) connects keyboard MOVE to Waveshare
-Serial independently of tracking frames. Its older branch/commit baseline
-is superseded for this task by the user's `main` / `185df16` baseline.
+describes wider state/control/gimbal work. The [tracking handler](auto_control.md)
+connects AUTO(ID) and keyboard MOVE to one Waveshare Serial executor, independently
+of tracking frame arrival for manual motion and watchdog checks. The default
+`deferred` handler remains communication-only; HOME completion is unimplemented.
 The wire contract has no version field or YAML protocol selector.
 The PC repository is not modified by this change.
 
@@ -50,10 +49,10 @@ fallback is performed.
 implementation, `PcGuiProtocol`, is constructed directly; no protocol enum,
 factory or YAML selector is needed. `GuiCommandHandlerFactory` creates the
 `IGuiCommandHandler` application strategy selected by `command.handler`.
+The `tracking` handler adds AUTO(ID) following through a shared executor; see [AUTO control](auto_control.md).
 Unknown handler settings fail during configuration; an omitted handler defaults
-to `deferred`; `manual` enables the manual device strategy when control is enabled.
-Future target-following behavior can replace that strategy without
-reconnecting the worker directly to target selection.
+to `deferred`; `tracking` requires control to be enabled and handles both AUTO
+and manual commands. The removed `manual` setting is rejected during configuration.
 
 `GuiSender` owns video/metadata transport. `GuiReceiver` owns the TCP session,
 validates framing before allocating/reading the body, and delegates replies to
@@ -133,14 +132,73 @@ The codec also supports INIT (System command 2), with the same state payload.
 The deferred handler has no reinitialization event or state transition to report;
 it does not invent periodic STATUS, AUTO success or HOME completion.
 
-**Input-ID target following and HOME completion remain unimplemented.**
-For keyboard motion, select the [manual handler](manual_control.md); the behavior
-below describes the default deferred handler. Received
-AUTO IDs retain all 32 bits, but are not forwarded to `TargetSelector` or
-`ControlThread`. The existing ByteTrack detector-output tracking is unchanged.
-A future handler must own real state transitions/target validation and integrate
-actual control readiness, disconnect and heartbeat policies. The deferred
-handler has no moving state and therefore implements no motion watchdog.
+**The default deferred strategy does not follow targets or complete HOME.**
+Select the [tracking handler](auto_control.md) for AUTO(ID) following and manual override.
+It preserves the wire format and uses a single device executor; HOME remains NOT_READY.
+The behavior in the deferred table applies only to `handler: deferred`. Received
+AUTO IDs retain all 32 bits in both strategies. The tracking handler validates IDs
+against fresh tracker output and owns real transitions through the shared executor;
+see [AUTO control](auto_control.md) for readiness, STATUS, disconnect, and heartbeat
+rules. The deferred handler has no moving state and therefore implements no motion
+watchdog.
+
+## Pipeline extension — TCP 5002
+
+This runtime adds category **Pipeline (4)** to the existing 8-byte header.
+PC software must implement this extension; older PC applications remain usable
+with the existing commands. All integers below are unsigned and big endian.
+Only counts and switch results are sent; no names, paths, model lists, or tracker
+configuration records are transmitted. AppConfig requires both catalogs to use
+consecutive IDs `1..count`. Request IDs retain all 32 bits, including zero.
+
+| Direction | Command | Payload |
+|---|---|---|
+| PC → board | Model count `0x01` | request_id:u32 (4 bytes) |
+| PC → board | Tracker count `0x02` | request_id:u32 (4 bytes) |
+| PC → board | Change model `0x03` | request_id:u32, model_id:u32 (8 bytes) |
+| PC → board | Change tracker `0x04` | request_id:u32, tracker_id:u32 (8 bytes) |
+| Board → PC | Model count `0x81` | request_id:u32, count:u32 (8 bytes) |
+| Board → PC | Tracker count `0x82` | request_id:u32, count:u32 (8 bytes) |
+| Board → PC | Model result `0x83` | request_id:u32, phase:u8, result:u8 (6 bytes) |
+| Board → PC | Tracker result `0x84` | request_id:u32, phase:u8, result:u8 (6 bytes) |
+
+Phase is `1=Accepted`, `2=Completed`. Results are `0=OK`, `1=InvalidId`,
+`2=Busy`, `3=CreationFailed`, `4=Restored` (previous model),
+`5=RestoreFailed`, `6=NotReady` (startup/shutdown or unavailable request service).
+These results are separate from the existing System ACK result enum. Pipeline
+commands do not also emit System ACK. Rejected requests receive Completed only;
+accepted requests receive Accepted/OK followed by their actual Completed result.
+An already-active ID succeeds without recreating the instance and follows the
+same two-response contract. A tracker creation failure preserves its previous
+instance. A failed model load reports Restored only after rollback succeeds.
+
+For example, request 10 changes to model 2:
+
+```text
+PC:       4c574952 04 03 0008 0000000a 00000002
+Accepted: 4c574952 04 83 0006 0000000a 01 00
+Complete: 4c574952 04 83 0006 0000000a 02 00
+```
+
+`PipelineCommandHandler` wraps the configured deferred/tracking handler and
+associates with `IPipelineRequests`, implemented by the cpp-private runtime.
+The TCP receiver worker validates and dispatches requests, sends acceptance,
+and polls completion futures at most every 25 ms while continuing PING and
+partial-packet reception. The model manager performs model teardown/load/rollback;
+the runtime loop performs tracker create/swap. These workers never write the TCP
+socket; the receiver worker sends every control reply. Video/metadata sender
+workers keep their existing responsibilities and the wire metadata is unchanged.
+
+At most one model change and one tracker change may be outstanding globally.
+The handler additionally limits a session to two pending changes and rejects a
+duplicate pending change request_id as Busy. Clients should not reuse outstanding
+IDs. Disconnect drops that session's response subscriptions but does not cancel
+an accepted operation. Its result is never delivered to a replacement session;
+a reconnecting client may query counts again and receives Busy until the actual
+outstanding operation completes. Count queries and PING do not wait for switching.
+Without an associated runtime request service, count queries return zero and
+switches return NotReady. Board-only Pipeline responses sent by a PC, unsupported
+commands, and incorrect declared payload lengths disconnect that client as before.
 
 ## Verification scope
 

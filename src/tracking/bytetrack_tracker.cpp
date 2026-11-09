@@ -177,8 +177,10 @@ struct MatchResult
     std::vector<size_t> unmatched_cols;
 };
 
-// cost가 thresh 이하인 쌍만 매칭으로 인정한다.
-MatchResult linear_assignment(
+// 헝가리안은 assign_cost로 짝을 정하고, gate_cost가 thresh 이하인 쌍만 매칭으로 인정한다.
+// (OCM처럼 순위용 비용과 허용 판단용 비용이 다를 때 쓴다. 둘이 같으면 linear_assignment와 같다)
+MatchResult linear_assignment_gated(
+    const std::vector<std::vector<float>>& assign_cost,
     const std::vector<std::vector<float>>& cost,
     size_t rows, size_t cols, float thresh)
 {
@@ -196,8 +198,9 @@ MatchResult linear_assignment(
         for (size_t i = 0; i < n; ++i)
             for (size_t j = 0; j < m; ++j)
             {
-                const float c = transpose ? cost[j][i] : cost[i][j];
-                a[i][j] = c > thresh ? kInvalid : c;
+                const float g = transpose ? cost[j][i] : cost[i][j];
+                const float c = transpose ? assign_cost[j][i] : assign_cost[i][j];
+                a[i][j] = g > thresh ? kInvalid : c;
             }
 
         const auto assign = hungarian(a);
@@ -223,6 +226,72 @@ MatchResult linear_assignment(
         if (!col_used[c])
             result.unmatched_cols.push_back(c);
     return result;
+}
+
+// cost가 thresh 이하인 쌍만 매칭으로 인정한다.
+MatchResult linear_assignment(
+    const std::vector<std::vector<float>>& cost,
+    size_t rows, size_t cols, float thresh)
+{
+    return linear_assignment_gated(cost, cost, rows, cols, thresh);
+}
+
+// ---- OC-SORT 보조 함수 ----
+
+using Observation = STrack::Observation;
+
+// 박스에 카메라 움직임을 적용한다: 중심은 회전·확대 후 평행이동, 크기는 확대 비율만큼.
+Box warp_box(const Box& b, const CameraMotion& m)
+{
+    const double cx = b[0] + b[2] / 2.0, cy = b[1] + b[3] / 2.0;
+    const double k = m.scale();
+    const double nx = m.a * cx + m.b * cy + m.tx, ny = m.c * cx + m.d * cy + m.ty;
+    const float w = static_cast<float>(b[2] * k), h = static_cast<float>(b[3] * k);
+    return {static_cast<float>(nx) - w / 2.0f, static_cast<float>(ny) - h / 2.0f, w, h};
+}
+
+// 단위 방향 벡터 (from 중심 → to 중심). 거의 움직이지 않았으면 false
+bool direction(const Box& from, const Box& to, double& ux, double& uy)
+{
+    const double dx = (to[0] + to[2] / 2.0) - (from[0] + from[2] / 2.0);
+    const double dy = (to[1] + to[3] / 2.0) - (from[1] + from[3] / 2.0);
+    const double n = std::sqrt(dx * dx + dy * dy);
+    if (n < 1e-6)
+        return false;
+    ux = dx / n;
+    uy = dy / n;
+    return true;
+}
+
+// frame 이상인 관측 중 가장 이른 것 (before 미만으로 한정). 없으면 nullptr
+const Observation* earliest_since(const std::deque<Observation>& obs, int frame, int before)
+{
+    for (const auto& o : obs)
+        if (o.frame_id >= frame && o.frame_id < before)
+            return &o;
+    return nullptr;
+}
+
+// Track의 이동 방향: 마지막 관측 기준 delta_t 프레임 전 관측(없으면 그 사이 가장 이른 관측,
+// 그것도 없으면 바로 앞 관측) → 마지막 관측. 관측이 하나뿐이면 false
+bool track_direction(const STrack& t, int delta_t, double& ux, double& uy)
+{
+    const auto& obs = t.observations;
+    if (obs.size() < 2)
+        return false;
+    const Observation& last = obs.back();
+    const Observation* prev = earliest_since(obs, last.frame_id - delta_t, last.frame_id);
+    if (!prev)
+        prev = &obs[obs.size() - 2];
+    return direction(prev->tlwh, last.tlwh, ux, uy);
+}
+
+// OCM 방향 일치도: (π/2 - 두 방향 사이 각) / π  → 같은 방향 +0.5, 수직 0, 반대 -0.5
+double direction_consistency(double ux, double uy, double vx, double vy)
+{
+    constexpr double kPi = 3.14159265358979323846;
+    const double cos_angle = std::clamp(ux * vx + uy * vy, -1.0, 1.0);
+    return (kPi / 2.0 - std::acos(cos_angle)) / kPi;
 }
 
 // 두 목록을 track_id 기준으로 합친다.
@@ -333,6 +402,12 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
                << ", buffer_max_px=" << config_.buffer_max_px
                << ", buffer_small_size=" << config_.buffer_small_size
                << ", buffer_snap=" << (config_.buffer_snap ? "true" : "false");
+    if (config_.oru)
+        values << ", oru=true";
+    if (config_.ocm_weight > 0.0F)
+        values << ", ocm_weight=" << config_.ocm_weight << ", ocm_delta_t=" << config_.ocm_delta_t;
+    if (config_.ocr)
+        values << ", ocr=true";
     Logger::debug(
         "[Tracking] ByteTrack 설정 값: " + values.str()
     );
@@ -349,6 +424,46 @@ void ByteTrackTracker::activate(STrack& t)
     t.tracklet_len = 0;
     t.frame_id = frame_id_;
     t.start_frame = frame_id_;
+    if (observation_centric())
+        record_observation(t, t.det_tlwh);
+}
+
+
+void ByteTrackTracker::record_observation(STrack& t, const std::array<float, 4>& tlwh) const
+{
+    t.observations.push_back({frame_id_, tlwh});
+    // OCM 방향 계산에 필요한 범위(마지막 관측 기준 ocm_delta_t 프레임)만 남긴다. 바로 앞 관측 하나는 항상 둔다.
+    const int oldest = frame_id_ - config_.ocm_delta_t;
+    while (t.observations.size() > 2 && t.observations.front().frame_id < oldest)
+        t.observations.pop_front();
+}
+
+
+// ORU (Observation-centric Re-Update)
+// 저장한 상태 = 마지막 관측 프레임(t.frame_id)의 다음 프레임까지 예측한 상태(update 전)다.
+// 놓친 프레임마다 마지막 관측 → 새 검출을 직선 보간한 가상 관측으로 update하고 한 프레임씩 예측해,
+// 현재 프레임의 예측 상태까지 다시 만든다. 이어서 apply_detection이 실제 검출로 update한다.
+// 관측과 저장 상태는 매 프레임 CMC를 적용해 두었으므로 모두 현재 화면 좌표에서 계산한다.
+void ByteTrackTracker::re_update(STrack& t, const STrack& det) const
+{
+    const int gap = frame_id_ - t.frame_id;  // Lost였으므로 2 이상
+    if (gap < 2 || t.observations.empty())
+        return;
+    const Box from = t.observations.back().tlwh;
+    const Box& to = det.det_tlwh;
+
+    KalmanState s = t.lost_kf;
+    for (int k = 1; k < gap; ++k)
+    {
+        if (k > 1)
+            kalman_.predict(s);
+        const float r = static_cast<float>(k) / static_cast<float>(gap);
+        const Box v = {from[0] + (to[0] - from[0]) * r, from[1] + (to[1] - from[1]) * r,
+                       from[2] + (to[2] - from[2]) * r, from[3] + (to[3] - from[3]) * r};
+        kalman_.update(s, to_measurement(v, kalman_.format()));
+    }
+    kalman_.predict(s);
+    t.kf = s;
 }
 
 
@@ -356,6 +471,9 @@ void ByteTrackTracker::activate(STrack& t)
 void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
 {
     t.tracklet_len = (t.state == TrackState::Tracked) ? t.tracklet_len + 1 : 0;
+    if (config_.oru && t.state == TrackState::Lost && t.has_lost_kf)
+        re_update(t, det);
+    t.has_lost_kf = false;
     kalman_.update(t.kf, to_measurement(det.det_tlwh, kalman_.format()), measurement_noise_scale(det.score));
     t.state = TrackState::Tracked;
     t.is_activated = true;
@@ -363,6 +481,8 @@ void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
     t.class_id = det.class_id;
     t.frame_id = frame_id_;
     t.det_tlwh = det.det_tlwh;  // 마지막으로 매칭된 검출 박스 (화면 밖 판정에 사용)
+    if (observation_centric())
+        record_observation(t, det.det_tlwh);
 }
 
 
@@ -415,6 +535,16 @@ std::vector<Track> ByteTrackTracker::track(
             apply_camera_motion(t->kf, camera_motion_);
         for (auto& t : unconfirmed)
             apply_camera_motion(t->kf, camera_motion_);
+        // OC-SORT: 과거 관측과 ORU 저장 상태도 현재 화면 좌표로 옮긴다
+        if (observation_centric())
+            for (const auto* list : {&pool, &unconfirmed})
+                for (auto& t : *list)
+                {
+                    for (auto& o : t->observations)
+                        o.tlwh = warp_box(o.tlwh, camera_motion_);
+                    if (t->has_lost_kf)
+                        apply_camera_motion(t->lost_kf, camera_motion_);
+                }
     }
     camera_motion_ = CameraMotion{};
 
@@ -430,8 +560,32 @@ std::vector<Track> ByteTrackTracker::track(
     auto cost1 = iou_distance(pool, high_dets);
     if (config_.fuse_score)
         fuse_score(cost1, high_dets);
-    const auto m1 = linear_assignment(
-        cost1, pool.size(), high_dets.size(), config_.match_threshold);
+    // OCM: 순위용 비용에서 방향 일치도를 뺀다. 허용 판단은 cost1(IoU 기반)로만 한다.
+    //   Track 방향  : delta_t 프레임 전 관측 → 마지막 관측
+    //   후보 방향   : 지금 기준 delta_t 프레임 안의 가장 이른 관측(없으면 마지막 관측) → 검출
+    std::vector<std::vector<float>> assign1 = cost1;
+    if (config_.ocm_weight > 0.0f)
+        for (size_t i = 0; i < pool.size(); ++i)
+        {
+            const STrack& t = *pool[i];
+            double ux = 0.0, uy = 0.0;
+            if (!track_direction(t, config_.ocm_delta_t, ux, uy))
+                continue;
+            const Observation* origin = earliest_since(t.observations, frame_id_ - config_.ocm_delta_t, frame_id_);
+            const Box from = origin ? origin->tlwh : t.observations.back().tlwh;
+            for (size_t j = 0; j < high_dets.size(); ++j)
+            {
+                if (cost1[i][j] > config_.match_threshold)
+                    continue;  // IoU로 이미 탈락한 쌍은 순위를 계산할 필요가 없다
+                double vx = 0.0, vy = 0.0;
+                if (!direction(from, high_dets[j]->det_tlwh, vx, vy))
+                    continue;
+                assign1[i][j] -= static_cast<float>(config_.ocm_weight * high_dets[j]->score *
+                                                    direction_consistency(ux, uy, vx, vy));
+            }
+        }
+    const auto m1 = linear_assignment_gated(
+        assign1, cost1, pool.size(), high_dets.size(), config_.match_threshold);
     for (const auto& [r, c] : m1.matches)
         on_match(pool[r], high_dets[c]);
 
@@ -453,7 +607,10 @@ std::vector<Track> ByteTrackTracker::track(
         const auto mb = linear_assignment(costb, bt.size(), bd.size(), config_.match_threshold);
         for (const auto& [r, c] : mb.matches)
         {
+            const bool re_updated = config_.oru && bt[r]->state == TrackState::Lost && bt[r]->has_lost_kf;
             on_match(bt[r], bd[c]);
+            if (re_updated)
+                continue;  // ORU가 놓친 구간을 다시 계산했으므로 snap하지 않는다
             // 넓힌 박스로만 맞은 쌍은 예측이 크게 빗나간 경우다. Kalman 업데이트는 틀린 예측과 검출의
             // 중간 위치를 내므로, buffer_snap이면 위치(cx, cy, a, h)를 검출 박스로 맞춘다.
             // (프레임 누락에는 유리, 검출이 흔들리는 작은 표적에는 평활이 사라져 불리)
@@ -486,13 +643,58 @@ std::vector<Track> ByteTrackTracker::track(
     for (const auto& [r, c] : m2.matches)
         on_match(remain_tracked[r], low_dets[c]);
 
+    // 3-2b. OCR (켰을 때만): 아직 짝이 없는 Track(이번에 놓칠 Track + 이미 Lost인 Track)을
+    //       Kalman 예측 대신 마지막 관측 박스로 남은 high 검출과 다시 매칭한다.
+    std::unordered_set<const STrack*> recovered;
+    if (config_.ocr && !left_high.empty())
+    {
+        std::vector<STrackPtr> ot, od;
+        for (size_t r : m2.unmatched_rows)
+            ot.push_back(remain_tracked[r]);
+        for (size_t r : left_pool)
+            if (pool[r]->state == TrackState::Lost)
+                ot.push_back(pool[r]);
+        for (size_t c : left_high)
+            od.push_back(high_dets[c]);
+
+        std::vector<std::vector<float>> costr(ot.size(), std::vector<float>(od.size(), 1.0f));
+        for (size_t i = 0; i < ot.size(); ++i)
+        {
+            if (ot[i]->observations.empty())
+                continue;
+            const Box last = ot[i]->observations.back().tlwh;
+            for (size_t j = 0; j < od.size(); ++j)
+                costr[i][j] = 1.0f - iou(last, od[j]->det_tlwh);
+        }
+        const auto mr = linear_assignment(costr, ot.size(), od.size(), config_.match_threshold);
+        std::unordered_set<const STrack*> used_dets;
+        for (const auto& [r, c] : mr.matches)
+        {
+            on_match(ot[r], od[c]);
+            recovered.insert(ot[r].get());
+            used_dets.insert(od[c].get());
+        }
+        std::vector<size_t> next_high;
+        for (size_t c : left_high)
+            if (!used_dets.count(high_dets[c].get()))
+                next_high.push_back(c);
+        left_high = std::move(next_high);
+    }
+
     for (size_t r : m2.unmatched_rows)
     {
         auto& t = remain_tracked[r];
+        if (recovered.count(t.get()))
+            continue;
         if (t->state != TrackState::Lost)
         {
             t->state = TrackState::Lost;
             lost_new.push_back(t);
+            if (config_.oru)
+            {
+                t->lost_kf = t->kf;  // 놓친 첫 프레임의 예측 상태 (ORU에서 여기부터 다시 계산)
+                t->has_lost_kf = true;
+            }
         }
     }
 
@@ -608,6 +810,7 @@ std::vector<Track> ByteTrackTracker::track(
         out.height = b[3];
         out.class_id = t->class_id;
         out.confidence = t->score;
+        out.predicted = true;
         tracks.push_back(out);
     }
     return tracks;

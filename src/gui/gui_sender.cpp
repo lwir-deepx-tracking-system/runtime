@@ -7,7 +7,8 @@
 #include <vector>
 
 #include <netdb.h>
-#include <pthread.h>
+// #include <pthread.h>
+#include <mutex>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -26,20 +27,37 @@ std::uint64_t steady_ns()
 }
 
 // 여러 GuiSender 인스턴스가 생겨도 process 전체의 GStreamer 초기화는 한 번만 한다.
-pthread_once_t g_gstreamer_once = PTHREAD_ONCE_INIT;
+// pthread_once_t g_gstreamer_once = PTHREAD_ONCE_INIT;
+std::once_flag g_gstreamer_once;
 
-void initialize_gstreamer_once()
+// void initialize_gstreamer_once()
+// {
+    // gst_init(nullptr, nullptr);
+// }
+
+GstClockTime frame_presentation_time(std::uint64_t frame_index, int fps)
 {
-    gst_init(nullptr, nullptr);
+    const auto ticks = gst_util_uint64_scale(frame_index, 90000, static_cast<guint64>(fps));
+    return gst_util_uint64_scale_ceil(ticks, GST_SECOND, 90000);
 }
 
 bool initialize_gstreamer()
 {
-    const int result = pthread_once(
-        &g_gstreamer_once, &initialize_gstreamer_once);
-    if (result != 0)
-        Logger::error("[GuiSender] pthread_once GStreamer 초기화 실패");
-    return result == 0;
+    // const int result = pthread_once( &g_gstreamer_once, &initialize_gstreamer_once);
+    // if (result != 0) Logger::error("[GuiSender] pthread_once GStreamer 초기화 실패");
+    try
+    {
+        std::call_once(g_gstreamer_once, []()
+        {
+            gst_init(nullptr, nullptr);
+        });
+    }
+    catch(const std::exception& e)
+    {
+        Logger::error("[GuiSender]" + std::string(e.what()));
+    }
+    
+    return 1;
 }
 
 // 비동기 pipeline에서 발생한 오류를 bus에서 회수해 호출자에게 실패로 알린다.
@@ -219,7 +237,7 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
         1, GST_SECOND, video_config_.fps);
     // Use the same 90kHz ticks as metadata; round up to avoid 2999/3000 drift.
     const auto ticks = gst_util_uint64_scale(frame_index_, 90000, video_config_.fps);
-    GST_BUFFER_PTS(buffer) = gst_util_uint64_scale_ceil(ticks, GST_SECOND, 90000);
+    GST_BUFFER_PTS(buffer) = frame_presentation_time(frame_index_, video_config_.fps);
     GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
     GST_BUFFER_DURATION(buffer) = duration;
     {
@@ -308,8 +326,10 @@ bool GuiSender::send_tracking_metadata(
     metadata.frame_id = result.frame->metadata.frame_id;
     // metadata와 RTP 영상을 같은 frame으로 대응시키기 위한 timestamp이다.
     // GStreamer H.264 RTP clock의 90kHz 기준으로 현재 frame index를 변환한다.
+    const GstClockTime frame_pts =
+        frame_presentation_time(frame_index_, video_config_.fps);
     metadata.rtp_timestamp = static_cast<std::uint32_t>(
-        gst_util_uint64_scale(frame_index_, 90000, video_config_.fps));
+        gst_util_uint64_scale(frame_pts, 90000, GST_SECOND));
     metadata.gui_started_us = gui_started_us;
     metadata.width = static_cast<std::uint32_t>(result.frame->image.cols);
     metadata.height = static_cast<std::uint32_t>(result.frame->image.rows);
@@ -347,7 +367,8 @@ bool GuiSender::send_tracking_metadata(
 // 원본 LWIR frame을 표시 영상으로 변환하고 영상/metadata 두 채널에 전달한다.
 bool GuiSender::send(
     const TrackingResult& result,
-    std::uint64_t gui_started_us)
+    std::uint64_t gui_started_us,
+    bool include_metadata)
 {
     // 잘못된 frame이나 네트워크 설정은 pipeline 일부를 시작하기 전에 거부한다.
     if (!result.frame || result.frame->image.empty() ||
@@ -380,7 +401,9 @@ bool GuiSender::send(
     // 영상과 Tracking metadata는 서로 다른 UDP 채널로 전송한다.
     // Video: BGR -> JPEG/H.264 -> RTP -> UDP
     // Metadata: frame_id / RTP timestamp / bbox / track_id -> custom UDP packet
-    if (!send_tracking_metadata(result, gui_started_us)) return false;
+    if (include_metadata &&
+        !send_tracking_metadata(result, gui_started_us))
+        return false;
     if (!push_frame_to_gstreamer(display)) return false;
     const auto now = steady_ns();
     if (now - last_report_ns_ >= 1000000000ULL)
@@ -394,6 +417,15 @@ bool GuiSender::send(
         last_report_ns_ = now;
     }
     return true;
+}
+
+bool GuiSender::send_bypass(
+    const FrameContextPtr& frame,
+    std::uint64_t gui_started_us)
+{
+    TrackingResult result;
+    result.frame = frame;
+    return send(result, gui_started_us, false);
 }
 
 // 재호출해도 안전하게 GStreamer와 metadata socket 소유권을 정리한다.

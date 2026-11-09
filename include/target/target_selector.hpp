@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pthread.h>
+#include <mutex>
 
 // GUI가 선택한 Track ID를 thread-safe하게 보관한다.
 class TargetSelector
@@ -8,7 +8,7 @@ class TargetSelector
 private:
     // GUI는 set_selected_id()를 통해 선택을 갱신한다. -1은 선택 해제.
     int selected_id_ = -1;
-    mutable pthread_mutex_t selected_id_mutex_{};
+    mutable std::mutex selected_id_mutex_;
 
 public:
     TargetSelector();

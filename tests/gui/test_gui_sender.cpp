@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <cerrno>
 #include <chrono>
@@ -76,6 +77,7 @@ bool drain(int fd, bool video, std::map<std::uint32_t, GuiTrackingMetadata>& met
 int main(int argc, char** argv)
 {
     const std::string encoder = argc > 1 ? argv[1] : "x264enc";
+    const bool test_bypass = argc > 2 && std::string(argv[2]) == "bypass";
     const bool jpeg = encoder == "jpegenc" || encoder == "mppjpegenc";
     std::uint16_t video_port = 0, metadata_port = 0;
     const int video_fd = open_udp_receiver(video_port);
@@ -110,22 +112,39 @@ int main(int argc, char** argv)
         frame->metadata.frame_id = i + 1;
         TrackingResult result;
         result.frame = frame;
-        if (!sender.send(result, 123456)) return 2;
+        // Exercise video-only model-switch bypass between normal PC metadata frames.
+        const bool bypass = test_bypass && i >= 3 && i < 6;
+        if (!(bypass ? sender.send_bypass(frame, 123456) : sender.send(result, 123456))) return 2;
         if (i < 10) std::this_thread::sleep_for(std::chrono::milliseconds(34));
         if (!drain_both()) return 3;
     }
-    if (!sender.finish() || !drain_both()) return 4;
+    if (!sender.finish()) return 4;
     const auto stats = sender.stats();
+    // EOS completes the sender pipeline; the last UDP datagram may still be
+    // queued in the network stack. Wait for receipt without weakening counts.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+        if (!drain_both()) return 4;
+        if (markers.size() >= stats.encoded_frames) break;
+        pollfd descriptors[] = {{video_fd, POLLIN, 0}, {metadata_fd, POLLIN, 0}};
+        ::poll(descriptors, 2, 10);
+    } while (std::chrono::steady_clock::now() < deadline);
     sender.stop();
     ::close(video_fd);
     ::close(metadata_fd);
+    std::cerr << "RTP markers=" << markers.size() << " encoded=" << stats.encoded_frames
+              << " samples=" << stats.processing_samples << " submitted=" << stats.submitted_frames << '\n';
     if (markers.size() < 5 || stats.encoded_frames != markers.size() ||
         stats.processing_samples != stats.encoded_frames || !stats.encode_rtp_ns ||
         !stats.preprocessing_ns || stats.submitted_frames != 45) return 5;
     for (const auto timestamp : markers)
     {
         const auto found = metadata.find(timestamp);
-        if (found == metadata.end()) return 6;
+        if (test_bypass && timestamp >= 9000 && timestamp < 18000) {
+            if (found != metadata.end()) return 8;
+            continue;
+        }
+        if (found == metadata.end()) { std::cerr << "Missing metadata timestamp=" << timestamp << "\n"; return 6; }
         const auto& decoded = found->second;
         if (decoded.rtp_timestamp != (decoded.frame_id - 1) * 3000 || decoded.width != 640 ||
             decoded.height != 480 || decoded.gui_started_us != 123456 || !decoded.tracks.empty()) return 7;

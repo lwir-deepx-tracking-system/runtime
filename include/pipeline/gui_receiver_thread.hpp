@@ -1,7 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <pthread.h>
+#include <thread>
 #include <string>
 
 #include "gui/gui_receiver.hpp"
@@ -11,7 +11,7 @@ class GuiReceiverThread
 {
 private:
     GuiReceiver& receiver_;
-    pthread_t thread_{};
+    std::thread thread_;
     bool started_ = false;
     std::atomic<bool> failed_{false};
     std::string error_message_;

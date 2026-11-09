@@ -3,19 +3,22 @@
 
 #include "common/threadsafequeue.hpp"
 #include "common/track.hpp"
-#include "control/gimbal_controller.hpp"
+#include "control/gimbal_command_executor.hpp"
 #include "pipeline/control_thread.hpp"
-#include "target/target_selector.hpp"
+class NoMotionDevice : public IGimbalDevice {
+    void move(int, int) override {}
+    void stop() override {}
+    void home() override {}
+};
 
 int main()
 {
     ThreadSafeQueue<TrackingResultPtr> input_queue;
-    TargetSelector target_selector;
-    GimbalController controller;
-    ControlThread thread(
-        controller, target_selector, input_queue, true, true);
-
-    target_selector.set_selected_id(7);
+    RuntimeControl runtime;
+    ControlConfig config;
+    config.enabled = true;
+    GimbalCommandExecutor executor(config, std::make_unique<NoMotionDevice>(), runtime);
+    ControlThread thread(input_queue, &executor, true);
     thread.start();
 
     auto matched = std::make_shared<TrackingResult>();
@@ -27,7 +30,7 @@ int main()
     matched->enqueued_at = std::chrono::steady_clock::now();
     input_queue.push(matched);
 
-    // 선택 ID가 현재 frame에 없어도 nullptr target으로 제어 경계를 호출한다.
+    // 선택 객체가 없는 결과도 최신 입력으로 전달해 상실 처리가 가능해야 한다.
     auto missing = std::make_shared<TrackingResult>();
     auto missing_frame = std::make_shared<FrameContext>();
     missing_frame->metadata.frame_id = 2;
