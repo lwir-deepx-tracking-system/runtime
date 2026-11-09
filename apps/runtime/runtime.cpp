@@ -367,7 +367,7 @@ void RuntimeApplication::run()
                 (gui_sender_thread_ && gui_sender_thread_->failed()) ||
                 (gui_receiver_thread_ && gui_receiver_thread_->failed());
 
-            if (worker_failed)
+            if (worker_failed || runtime_control_.stop_requested.load())
             {
                 workers_->stop();
                 break;

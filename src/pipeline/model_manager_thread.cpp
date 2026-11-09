@@ -238,23 +238,9 @@ void ModelManagerThread::run()
 
     std::shared_ptr<IDetectionPipeline> remaining =
         active_pipeline_.take();
+    // 작업 오류는 콜백으로 보고된다. 합류를 건너뛰고 엔진을 소멸시키지 않는다.
     if (remaining)
-    {
-        try
-        {
-            remaining->wait_idle();
-        }
-        catch (const std::exception& e)
-        {
-            Logger::error(
-                "[ModelManagerThread] final inference drain failed: " +
-                std::string(e.what()));
-        }
-        catch (...)
-        {
-            Logger::error("[ModelManagerThread] final inference drain failed");
-        }
-    }
+        remaining->wait_idle();
     remaining.reset();
     Logger::info("[ModelManagerThread] stopped");
 }

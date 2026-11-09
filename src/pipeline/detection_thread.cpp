@@ -53,6 +53,9 @@ void DetectionThread::set_error(const std::string& message)
             error_message_ = message;
     }
     failed_.store(true);
+    // 소비자 실패는 생산자 큐를 닫지 않고 중단과 입력 대기 해제만 요청한다.
+    runtime_control_.request_stop();
+    input_queue_.interrupt_waiters();
 }
 
 void DetectionThread::run()
@@ -170,14 +173,12 @@ void DetectionThread::run()
                         {
                             set_error("Unknown detection callback error");
                         }
-                        input_queue_.close();
                         return;
                     }
 
                     if (detection_timing.frame_id != frame->metadata.frame_id)
                     {
                         set_error("Detection timing frame ID mismatch");
-                        input_queue_.close();
                         return;
                     }
 
@@ -225,26 +226,14 @@ void DetectionThread::run()
     catch (const std::exception& e)
     {
         set_error(e.what());
-        input_queue_.close();
     }
     catch (...)
     {
         set_error("Unknown fatal detection error");
-        input_queue_.close();
     }
 
-    try
-    {
-        quiesce();
-    }
-    catch (const std::exception& e)
-    {
-        set_error(e.what());
-    }
-    catch (...)
-    {
-        set_error("Unknown error while draining inference requests");
-    }
+    // wait_idle의 합류 계약이 충족된 뒤 생산자만 결과 큐를 닫는다.
+    quiesce();
     output_queue_.close();
     Logger::info("[DetectionThread] 종료");
 }

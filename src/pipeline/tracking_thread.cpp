@@ -120,7 +120,7 @@ void TrackingThread::run()
                 });
             if (!published) continue;
             if (!control_push_ok)
-                break;
+                throw std::runtime_error("Tracking control result queue is closed");
         }
     }
     catch (const std::exception& e)
@@ -128,14 +128,16 @@ void TrackingThread::run()
         error_message_ = e.what();
         failed_.store(true);
         Logger::error("[TrackingThread] " + error_message_);
-        input_queue_.close();
+        // 입력 큐는 탐지 생산자가 콜백을 합류시킨 뒤 닫는다.
+        runtime_control_.request_stop();
     }
     catch (...)
     {
         error_message_ = "알 수 없는 치명적 오류";
         failed_.store(true);
         Logger::error("[TrackingThread] " + error_message_);
-        input_queue_.close();
+        // 입력 큐는 탐지 생산자가 콜백을 합류시킨 뒤 닫는다.
+        runtime_control_.request_stop();
     }
 
     control_output_queue_.close();
