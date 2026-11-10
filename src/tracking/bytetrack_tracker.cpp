@@ -810,6 +810,7 @@ std::vector<Track> ByteTrackTracker::track(
         out.height = b[3];
         out.class_id = t->class_id;
         out.confidence = t->score;
+        out.predicted = true;
         tracks.push_back(out);
     }
     return tracks;

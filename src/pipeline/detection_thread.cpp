@@ -8,31 +8,34 @@
 #include "common/logger.hpp"
 
 DetectionThread::DetectionThread(
-    IDetectionPipeline& pipeline,
+    RuntimeControl& runtime_control,
+    ActivePipelineSlot& active_pipeline,
     ThreadSafeQueue<FrameMessage>& input_queue,
     ThreadSafeQueue<DetectionResult>& output_queue,
-    bool measurement_enabled)
-    : pipeline_(pipeline),
+    ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
+    bool gui_enabled,
+    bool measurement_enabled, IMeasurementSink* measurements)
+    : runtime_control_(runtime_control),
+      active_pipeline_(active_pipeline),
       input_queue_(input_queue),
       output_queue_(output_queue),
-      measurement_enabled_(measurement_enabled)
+      gui_output_queue_(gui_output_queue),
+      gui_enabled_(gui_enabled),
+      measurement_enabled_(measurement_enabled), measurements_(measurements)
 {
 }
 
 void DetectionThread::start()
 {
     if (started_) return;
-    const int result = pthread_create(
-        &thread_, nullptr, &DetectionThread::thread_func, this);
-    if (result != 0)
-        throw std::runtime_error("DetectionThread start failed");
+    thread_ = std::thread(&DetectionThread::thread_func, this);
     started_ = true;
 }
 
 void DetectionThread::join()
 {
     if (!started_) return;
-    pthread_join(thread_, nullptr);
+    if(thread_.joinable())thread_.join();
     started_ = false;
 }
 
@@ -50,33 +53,103 @@ void DetectionThread::set_error(const std::string& message)
             error_message_ = message;
     }
     failed_.store(true);
+    // 소비자 실패는 생산자 큐를 닫지 않고 중단과 입력 대기 해제만 요청한다.
+    runtime_control_.request_stop();
+    input_queue_.interrupt_waiters();
 }
 
 void DetectionThread::run()
 {
-    Logger::info("[DetectionThread] started");
+    Logger::info("[DetectionThread] 시작");
+    auto last_bypass_sent = std::chrono::steady_clock::time_point{};
+    bool has_sent_bypass = false;
+    std::uint64_t observed_interrupt = 0;
+    // 활성 슬롯이 모델 매니저로 이동해도 자신이 제출한 파이프라인을 기다릴 수 있다.
+    std::shared_ptr<IDetectionPipeline> submitted_pipeline;
+    // 정지 확인은 콜백 반환과 탐지 스레드의 참조 해제가 모두 끝난 뒤에만 게시한다.
+    const auto quiesce = [&]
+    {
+        if(submitted_pipeline)
+        {
+            submitted_pipeline->wait_idle();
+            submitted_pipeline.reset();
+        }
+        runtime_control_.set_detection_quiesced(true);
+    };
 
     try
     {
         FrameMessage input;
-        while (!failed_.load() && input_queue_.pop(input))
+        while (!failed_.load())
         {
-            const auto queue_started_at = measurement_enabled_ ?
-                std::chrono::steady_clock::now() :
-                std::chrono::steady_clock::time_point{};
+            const auto popped = input_queue_.pop_interruptible(input, observed_interrupt);
+            if (popped == ThreadSafeQueue<FrameMessage>::PopResult::Closed)
+                break;
+            if (popped == ThreadSafeQueue<FrameMessage>::PopResult::Interrupted)
+            {
+                if (runtime_control_.state.load() == RuntimeState::Stopping)
+                    break;
+                if (runtime_control_.state.load() != RuntimeState::Running)
+                    quiesce();
+                continue;
+            }
             if (!input.frame)
                 continue;
 
+            const RuntimeState state = runtime_control_.state.load();
+            if (state == RuntimeState::Stopping)
+                break;
+
+            if (state != RuntimeState::Running)
+            {
+                quiesce();
+
+                const auto now = std::chrono::steady_clock::now();
+                if (gui_enabled_ && (!has_sent_bypass ||
+                    now - last_bypass_sent >= std::chrono::milliseconds(33)))
+                {
+                    auto bypass = std::make_shared<TrackingResult>();
+                    bypass->frame = input.frame;
+                    bypass->model_generation = runtime_control_.generation.load();  // 어떤 추론 모델인지 모델 인덱스 전달
+                    bypass->bypass = true;
+                    gui_output_queue_.push_latest(std::move(bypass), 2);
+                    last_bypass_sent = now;
+                    has_sent_bypass = true;
+                }
+                continue;
+            }
+
+            runtime_control_.set_detection_quiesced(false);
+            std::shared_ptr<IDetectionPipeline> pipeline =
+                active_pipeline_.snapshot();
+            if (!pipeline)
+            {
+                runtime_control_.state.store(RuntimeState::SwitchFailed);
+                quiesce();
+                continue;
+            }
+            submitted_pipeline = pipeline;
+
+            const auto queue_started_at = measurement_enabled_ ?
+                std::chrono::steady_clock::now() :
+                std::chrono::steady_clock::time_point{};
             const auto submitted_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};
             auto frame = input.frame;
             const auto enqueued_at = input.enqueued_at;
             const std::uint64_t sequence = next_submit_sequence_++;
+            const std::uint64_t generation = runtime_control_.generation.load();
+            if (measurements_ && frame->metadata.capture_processing_ms) {
+                StageMetric camera_metric;
+                camera_metric.frame_id = frame->metadata.frame_id;
+                camera_metric.processing_ms = *frame->metadata.capture_processing_ms;
+                measurements_->record(generation, MetricStage::Camera, camera_metric);
+            }
 
-            pipeline_.submit_async(
+            pipeline->submit_async(
                 frame,
-                [this, frame, enqueued_at, sequence,
+                [this, frame, enqueued_at, sequence, generation,
                     queue_started_at, submitted_at]
                     (std::vector<Detection> detections,
                      std::exception_ptr error,
@@ -100,29 +173,35 @@ void DetectionThread::run()
                         {
                             set_error("Unknown detection callback error");
                         }
-                        input_queue_.close();
                         return;
                     }
 
                     if (detection_timing.frame_id != frame->metadata.frame_id)
                     {
                         set_error("Detection timing frame ID mismatch");
-                        input_queue_.close();
                         return;
                     }
 
                     DetectionResult result;
                     result.frame = frame;
                     result.detections = std::move(detections);
+                    result.model_generation = generation;
 
                     if (measurement_enabled_)
                     {
-                        std::lock_guard<std::mutex> lock(metrics_mutex_);
-                        record_stage_metric(
+                        if (measurements_) {
+                            measurements_->record(generation, MetricStage::Detection,
+                                make_stage_metric(frame->metadata, enqueued_at,
+                                    queue_started_at, submitted_at, completed_at));
+                            measurements_->record_detection(generation, detection_timing);
+                        } else {
+                            std::lock_guard<std::mutex> lock(metrics_mutex_);
+                            record_stage_metric(
                             metrics_, frame->metadata, enqueued_at,
                             queue_started_at, submitted_at, completed_at);
-                        if (detection_timings_.size() < kMaxStageMetrics)
-                            detection_timings_.push_back(detection_timing);
+                            if (detection_timings_.size() < kMaxStageMetrics)
+                                detection_timings_.push_back(detection_timing);
+                        }
                         result.enqueued_at = completed_at;
                     }
 
@@ -142,32 +221,19 @@ void DetectionThread::run()
                         ++next_output_sequence_;
                     }
                 });
-        }
+        }   // end of while(!failed_.load() && input_queue_.pop(input))
     }
     catch (const std::exception& e)
     {
         set_error(e.what());
-        input_queue_.close();
     }
     catch (...)
     {
         set_error("Unknown fatal detection error");
-        input_queue_.close();
     }
 
-    try
-    {
-        pipeline_.wait_idle();
-    }
-    catch (const std::exception& e)
-    {
-        set_error(e.what());
-    }
-    catch (...)
-    {
-        set_error("Unknown error while draining inference requests");
-    }
-
+    // wait_idle의 합류 계약이 충족된 뒤 생산자만 결과 큐를 닫는다.
+    quiesce();
     output_queue_.close();
-    Logger::info("[DetectionThread] stopped");
+    Logger::info("[DetectionThread] 종료");
 }

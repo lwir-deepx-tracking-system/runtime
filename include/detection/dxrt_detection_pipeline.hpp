@@ -19,7 +19,7 @@ public:
     void submit_async(
         const FrameContextPtr& frame,
         Completion completion) override;
-    void wait_idle() override;
+    void wait_idle() noexcept override;
 
 private:
     struct NpuState;

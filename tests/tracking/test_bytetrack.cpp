@@ -130,6 +130,7 @@ int check_tracking_config()
     failures += !rejects("bad_kalman_format", base + "kalman_format: xyz\n");
     failures += !rejects("negative_ocm_weight", base + "ocm_weight: -0.1\n");
     failures += !rejects("huge_ocm_weight", base + "ocm_weight: 1.5\n");
+    failures += !rejects("nan_ocm_weight", base + "ocm_weight: .nan\n");
     failures += !rejects("zero_ocm_delta_t", base + "ocm_delta_t: 0\n");
     failures += !rejects("huge_ocm_delta_t", base + "ocm_delta_t: 31\n");
     failures += !rejects("oru_not_bool", base + "oru: maybe\n");

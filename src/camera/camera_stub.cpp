@@ -5,7 +5,7 @@
 
 Camera::~Camera() = default;
 
-bool Camera::open()
+bool Camera::open(const std::function<bool()>&)
 {
     Logger::error(
         "[Camera] i3system SDK가 비활성화되어 있습니다 "

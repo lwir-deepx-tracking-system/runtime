@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -21,7 +22,29 @@ struct DetectionConfig {
     bool use_ort = false;
 };
 
+enum class TrackerType { ByteTrack, OCSort };
+
+// 단독 OC-SORT Tracker 설정 (yaml의 ocsort: 섹션). 모든 키는 생략할 수 있고, 기본값은 공식 OC-SORT
+// (noahcao/OC_SORT, MOT17 실행 인자) 값이다.
+struct OCSortConfig {
+    // 이 점수 초과 검출만 1차 매칭·OCR·새 Track에 쓴다 (공식 track_thresh)
+    float det_threshold = 0.6F;
+    // 매칭으로 인정하는 최소 IoU (공식 iou_thresh). ByteTrack의 match_threshold(1 - IoU)와 의미가 반대다
+    float iou_threshold = 0.3F;
+    // 이 프레임 수보다 오래 매칭되지 않은 Track을 지운다
+    int max_age = 30;
+    // 연속 매칭이 이 횟수 이상인 Track만 출력한다 (처음 min_hits 프레임은 예외)
+    int min_hits = 3;
+    // OCM 방향을 계산할 관측 간격(프레임)
+    int delta_t = 3;
+    // OCM 방향 일치도 가중치 (공식 inertia, vdc_weight)
+    float inertia = 0.2F;
+    // 0.1 < 점수 <= det_threshold 검출로 ByteTrack식 2차 매칭을 한다 (공식 기본 꺼짐)
+    bool use_byte = false;
+};
+
 struct TrackingConfig {
+    TrackerType type = TrackerType::ByteTrack;
     float track_threshold = 0.5F;
     float match_threshold = 0.8F;
     int track_buffer = 30;
@@ -72,29 +95,57 @@ struct TrackingConfig {
     // OCR: 2차 매칭 뒤 남은 Track을 Kalman 예측 대신 마지막 관측 박스로 남은 high 검출과 한 번 더 매칭한다
     //      (match_threshold 사용). 멈춘 물체·짧은 가림 뒤 예측이 빗나간 Track을 복구한다.
     bool ocr = false;
+
+    OCSortConfig ocsort;
 };
 
-// 단독 OC-SORT Tracker 설정 (yaml의 ocsort: 섹션). 모든 키는 생략할 수 있고, 기본값은 공식 OC-SORT
-// (noahcao/OC_SORT, MOT17 실행 인자) 값이다.
-struct OCSortConfig {
-    // 이 점수 초과 검출만 1차 매칭·OCR·새 Track에 쓴다 (공식 track_thresh)
-    float det_threshold = 0.6F;
-    // 매칭으로 인정하는 최소 IoU (공식 iou_thresh). ByteTrack의 match_threshold(1 - IoU)와 의미가 반대다
-    float iou_threshold = 0.3F;
-    // 이 프레임 수보다 오래 매칭되지 않은 Track을 지운다
-    int max_age = 30;
-    // 연속 매칭이 이 횟수 이상인 Track만 출력한다 (처음 min_hits 프레임은 예외)
-    int min_hits = 3;
-    // OCM 방향을 계산할 관측 간격(프레임)
-    int delta_t = 3;
-    // OCM 방향 일치도 가중치 (공식 inertia, vdc_weight)
-    float inertia = 0.2F;
-    // 0.1 < 점수 <= det_threshold 검출로 ByteTrack식 2차 매칭을 한다 (공식 기본 꺼짐)
-    bool use_byte = false;
+struct GimbalConfig {
+    std::string device = "/dev/ttyUSB0";
+    int baud_rate = 115200;
+    int write_timeout_ms = 100;
+    int speed = 50; // manual/HOME command speed
+    int speed_limit = 100; // shared software command ceiling, independent of manual speed
+    int acceleration = 50;
+    int home_x_deg = 0;
+    int home_y_deg = 0;
+    int x_sign = 1;
+    int y_sign = 1;
+};
+
+enum class AutoControllerType { P, PI, PD, PID };
+
+struct PidAxisConfig {
+    double kp = 30.0;
+    double ki = 0.0;
+    double kd = 0.0;
+    double integral_limit = 10.0; // absolute I contribution, in SPD command units
+    double derivative_filter_ms = 100.0;
+};
+
+// SPD values are vendor command units, not degrees/second.
+struct AutoControlConfig {
+    AutoControllerType controller = AutoControllerType::P;
+    PidAxisConfig pid_x;
+    PidAxisConfig pid_y;
+    double deadband_x = 0.04; // normalized half-frame error, or radians with FOV
+    double deadband_y = 0.04;
+    double fov_x_deg = 0.0; // both zero selects normalized pixel errors
+    double fov_y_deg = 0.0;
+    double min_confidence = 0.5;
+    int speed_min = 1;
+    int speed_max = 100;
+    double speed_rate = 60.0; // SPD units/second; safety STOP bypasses this
+    int period_ms = 25;
+    int input_timeout_ms = 250;
+    int reacquire_timeout_ms = 1000;
 };
 
 struct ControlConfig {
     bool enabled = false;
+    int heartbeat_timeout_ms = 1500;
+    int poll_interval_ms = 25;
+    GimbalConfig gimbal;
+    AutoControlConfig automatic;
 };
 
 struct MeasurementConfig {
@@ -103,25 +154,30 @@ struct MeasurementConfig {
 };
 
 // runtime.yaml의 gui 설정은 세 개의 독립적인 통신 경로를 정의한다.
-// Video    : Orange Pi -> PC GUI, H.264/RTP/UDP
+// Video    : Orange Pi -> PC GUI, JPEG or H.264/RTP/UDP
 // Metadata : Orange Pi -> PC GUI, frame/Track 정보 UDP
-// Command  : PC GUI -> Orange Pi, 선택 track_id TCP
+// Command  : PC 명령 및 보드 ACK/상태 응답 TCP
 enum class GuiVideoCodec
 {
-    H264
+    H264,
+    JPEG
 };
 
 struct GuiVideoConfig
 {
-    // H.264/RTP 영상 목적지와 GStreamer encode 조건이다.
+    // JPEG or H.264/RTP 영상 목적지와 GStreamer encode 조건이다.
     std::string host;
     std::uint16_t port = 0;
     GuiVideoCodec codec = GuiVideoCodec::H264;
     std::string encoder;
     int bitrate_kbps = 0;
+    int jpeg_quality = 80;
+    int keyframe_interval = 30;
     int fps = 0;
     int rtp_mtu = 0;
 };
+
+enum class GuiCommandHandlerType { Deferred, Tracking };
 
 struct GuiMetadataConfig
 {
@@ -134,7 +190,8 @@ struct GuiMetadataConfig
 
 struct GuiCommandConfig
 {
-    // GUI 선택 명령을 기다릴 TCP listener 조건이다.
+    GuiCommandHandlerType handler = GuiCommandHandlerType::Deferred;
+    // PC 명령 및 상태 응답을 전달하는 TCP listener 조건이다.
     bool enabled = false;
     std::string bind_address;
     std::uint16_t port = 0;
@@ -267,7 +324,45 @@ struct CaptureConditionConfig
 };
 
 
+// 모델 ID에 모델 YAML 경로와 파싱된 설정을 연결한다.
+struct ModelCatalogEntry
+{
+    int id = 0;
+    std::string config_path;
+    ModelConfig model;
+};
+
+// 트래커 ID에 설정 YAML 경로와 검증된 typed 설정을 연결한다.
+struct TrackingCatalogEntry
+{
+    int id = 0;
+    std::string config_path;
+    TrackingConfig config;
+};
+
+// runtime YAML과 참조된 모델·트래커 YAML을 합친 실행 설정이다.
+struct RuntimeConfig
+{
+    LoggingConfig logging;
+    std::string model_config_path;
+    int initial_model_id = 0;
+    std::map<int, ModelCatalogEntry> model_catalog;
+    std::map<int, TrackingCatalogEntry> tracking_catalog;
+    int initial_tracker_id = 0;
+    ModelConfig model;
+    DetectionConfig detection;
+    TrackingConfig tracking;
+    ControlConfig control;
+    MeasurementConfig measurement;
+    GuiConfig gui;
+};
+
+RuntimeConfig load_runtime_config(const std::string& path);
+
 ModelConfig load_model_config(const std::string& config_path);
+// 트래커 전용 YAML을 읽고 종류별 설정을 검증한다.
+TrackingConfig load_tracker_config(const std::string& config_path);
+
 
 namespace config_parser
 {
@@ -281,6 +376,14 @@ LoggingConfig load_logging_config(const YAML::Node& node);
 DetectionConfig load_detection_config(const YAML::Node& node);
 TrackingConfig load_tracking_config(const YAML::Node& node);
 OCSortConfig load_ocsort_config(const YAML::Node& node);
+// 트래커 카탈로그의 ID·경로를 검증하고 각 YAML을 typed 설정으로 읽는다.
+std::map<int, TrackingCatalogEntry> load_tracking_catalog(const YAML::Node& node);
+// 실행 YAML의 tracking.id가 카탈로그에 존재하는지 확인한다.
+int select_tracking_id(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog);
+// 실행 YAML의 tracking.id에 해당하는 검증된 추적 설정을 선택한다.
+TrackingConfig select_tracking_config(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog);
 ControlConfig load_control_config(const YAML::Node& node);
 MeasurementConfig load_measurement_config(const YAML::Node& node);
 GuiConfig load_gui_config(const YAML::Node& node);

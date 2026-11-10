@@ -1,12 +1,27 @@
 #include "config/app_config.hpp"
 #include "common/logger.hpp"
+#include "gui/gui_protocol.hpp"
 
 #include <cmath>
+#include <filesystem>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
 
+namespace fs = std::filesystem;
+
 namespace {
+// 개수만 제공하는 PC 계약을 위해 카탈로그 ID를 1..count로 제한한다.
+template<class Entry>
+void validate_catalog_ids(const std::map<int, Entry>& catalog, const char* name)
+{
+    int expected = 1;
+    for (const auto& item : catalog)
+        if (item.first != expected++)
+            throw std::runtime_error(std::string(name) + " IDs must be consecutive from 1");
+}
+
 // 필수 키가 없거나 요청한 타입으로 변환되지 않으면 경로가 포함된 오류를 만든다.
 template <typename T>
 T required(const YAML::Node& node, const char* key, const std::string& path)
@@ -85,7 +100,8 @@ std::string required_string(
 GuiVideoCodec parse_gui_video_codec(const std::string& value)
 {
     if (value == "h264") return GuiVideoCodec::H264;
-    throw std::runtime_error("only gui.video.codec=h264 is currently supported");
+    if (value == "jpeg") return GuiVideoCodec::JPEG;
+    throw std::runtime_error("gui.video.codec must be jpeg or h264");
 }
 
 std::uint16_t parse_port(
@@ -128,6 +144,28 @@ DetectionConfig load_detection_config(const YAML::Node& node)
 TrackingConfig load_tracking_config(const YAML::Node& node)
 {
     TrackingConfig c;
+    const std::string type = optional_value<std::string>(
+        node, "type", "tracking", "bytetrack");
+    if (type == "bytetrack")
+        c.type = TrackerType::ByteTrack;
+    else if (type == "ocsort")
+    {
+        // 단독 OC-SORT: ByteTrack 키는 읽지 않는다. 오타를 막기 위해 모르는 키는 오류로 처리한다.
+        static const std::set<std::string> known = {"type", "det_threshold", "iou_threshold", "max_age",
+                                                    "min_hits", "delta_t", "inertia", "use_byte"};
+        for (const auto& kv : node)
+        {
+            const std::string key = kv.first.as<std::string>();
+            if (!known.count(key))
+                throw std::runtime_error("tracking: unknown OC-SORT key '" + key + "'");
+        }
+        c.type = TrackerType::OCSort;
+        c.ocsort = load_ocsort_config(node);
+        return c;
+    }
+    else
+        throw std::runtime_error("tracking.type is unsupported: " + type);
+    
     c.track_threshold = required<float>(
         node, "track_threshold", "tracking");
     c.match_threshold = required<float>(
@@ -195,7 +233,7 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         throw std::runtime_error("tracking.buffer_max_px must not be negative");
     if (c.buffer_small_size < 0.0F)
         throw std::runtime_error("tracking.buffer_small_size must not be negative");
-    if (c.ocm_weight < 0.0F || c.ocm_weight > 1.0F)
+    if (!std::isfinite(c.ocm_weight) || c.ocm_weight < 0.0F || c.ocm_weight > 1.0F)
         throw std::runtime_error("tracking.ocm_weight must be in [0, 1]");
     if (c.ocm_delta_t < 1 || c.ocm_delta_t > 30)
         throw std::runtime_error("tracking.ocm_delta_t must be in [1, 30]");
@@ -235,6 +273,91 @@ ControlConfig load_control_config(const YAML::Node& node)
 {
     ControlConfig c;
     c.enabled = required<bool>(node, "enabled", "control");
+    c.heartbeat_timeout_ms = node["heartbeat_timeout_ms"].as<int>(1500);
+    c.poll_interval_ms = node["poll_interval_ms"].as<int>(25);
+    const auto gimbal = node["gimbal"];
+    if (gimbal) {
+        c.gimbal.device = gimbal["device"].as<std::string>("/dev/ttyUSB0");
+        c.gimbal.baud_rate = gimbal["baud_rate"].as<int>(115200);
+        c.gimbal.write_timeout_ms = gimbal["write_timeout_ms"].as<int>(100);
+        c.gimbal.speed = gimbal["speed"].as<int>(c.gimbal.speed);
+        c.gimbal.speed_limit = gimbal["speed_limit"].as<int>(c.gimbal.speed_limit);
+        c.gimbal.acceleration = gimbal["acceleration"].as<int>(50);
+        c.gimbal.home_x_deg = gimbal["home_x_deg"].as<int>(0);
+        c.gimbal.home_y_deg = gimbal["home_y_deg"].as<int>(0);
+        c.gimbal.x_sign = gimbal["x_sign"].as<int>(1);
+        c.gimbal.y_sign = gimbal["y_sign"].as<int>(1);
+    }
+    const auto automatic = node["auto"];
+    if (automatic) {
+#define AUTO_VALUE(name) c.automatic.name = automatic[#name].as<decltype(c.automatic.name)>(c.automatic.name)
+        AUTO_VALUE(deadband_x); AUTO_VALUE(deadband_y);
+        AUTO_VALUE(fov_x_deg); AUTO_VALUE(fov_y_deg); AUTO_VALUE(min_confidence);
+        AUTO_VALUE(speed_min); AUTO_VALUE(speed_max); AUTO_VALUE(speed_rate);
+        AUTO_VALUE(period_ms); AUTO_VALUE(input_timeout_ms); AUTO_VALUE(reacquire_timeout_ms);
+#undef AUTO_VALUE
+    }
+    if (automatic) {
+        const auto type = automatic["controller"].as<std::string>("p");
+        if (type == "p") c.automatic.controller = AutoControllerType::P;
+        else if (type == "pi") c.automatic.controller = AutoControllerType::PI;
+        else if (type == "pd") c.automatic.controller = AutoControllerType::PD;
+        else if (type == "pid") c.automatic.controller = AutoControllerType::PID;
+        else throw std::runtime_error("control.auto.controller must be p, pi, pd or pid");
+        // Old YAML with a common kp remains valid; axis settings override it.
+        const double common_kp = automatic["kp"].as<double>(30.0);
+        if (!std::isfinite(common_kp) || common_kp <= 0)
+            throw std::runtime_error("control.auto.kp must be finite and positive");
+        const auto load_axis = [common_kp](const YAML::Node& node) {
+            PidAxisConfig axis;
+            axis.kp = common_kp;
+            if (node) {
+                if (!node.IsMap()) throw std::runtime_error("control.auto PID axis must be a map");
+                axis.kp = node["kp"].as<double>(axis.kp);
+                axis.ki = node["ki"].as<double>(axis.ki);
+                axis.kd = node["kd"].as<double>(axis.kd);
+                axis.integral_limit = node["integral_limit"].as<double>(axis.integral_limit);
+                axis.derivative_filter_ms = node["derivative_filter_ms"].as<double>(axis.derivative_filter_ms);
+            }
+            if (!std::isfinite(axis.kp) || axis.kp <= 0 ||
+                !std::isfinite(axis.ki) || axis.ki < 0 ||
+                !std::isfinite(axis.kd) || axis.kd < 0 ||
+                !std::isfinite(axis.integral_limit) || axis.integral_limit < 0 ||
+                !std::isfinite(axis.derivative_filter_ms) || axis.derivative_filter_ms <= 0)
+                throw std::runtime_error("control.auto PID gains/limits/filter are invalid");
+            return axis;
+        };
+        c.automatic.pid_x = load_axis(automatic["pid_x"]);
+        c.automatic.pid_y = load_axis(automatic["pid_y"]);
+    }
+    const auto& a = c.automatic;
+    if (!std::isfinite(a.deadband_x) || a.deadband_x < 0 ||
+        !std::isfinite(a.deadband_y) || a.deadband_y < 0 ||
+        !std::isfinite(a.fov_x_deg) || !std::isfinite(a.fov_y_deg) ||
+        !((a.fov_x_deg == 0 && a.fov_y_deg == 0) ||
+          (a.fov_x_deg > 0 && a.fov_x_deg < 180 && a.fov_y_deg > 0 && a.fov_y_deg < 180)) ||
+        !std::isfinite(a.min_confidence) || a.min_confidence < 0 || a.min_confidence > 1 ||
+        a.speed_min < 1 || a.speed_max < a.speed_min || a.speed_max > c.gimbal.speed_limit ||
+        !std::isfinite(a.speed_rate) || a.speed_rate <= 0 ||
+        a.period_ms < 1 || a.period_ms > 1000 ||
+        a.input_timeout_ms < a.period_ms || a.input_timeout_ms > 60000 ||
+        a.reacquire_timeout_ms < a.input_timeout_ms || a.reacquire_timeout_ms > 60000)
+        throw std::runtime_error("control.auto settings are invalid (speed_max must not exceed gimbal.speed_limit)");
+    if (c.heartbeat_timeout_ms < 100 || c.heartbeat_timeout_ms > 60000 ||
+        c.poll_interval_ms < 1 || c.poll_interval_ms > c.heartbeat_timeout_ms / 2)
+        throw std::runtime_error("control heartbeat/poll interval is invalid");
+    if (c.gimbal.device.empty() || c.gimbal.write_timeout_ms < 1 ||
+        c.gimbal.write_timeout_ms > c.heartbeat_timeout_ms / 2)
+        throw std::runtime_error("control.gimbal device/write timeout is invalid");
+    if (c.gimbal.baud_rate != 9600 && c.gimbal.baud_rate != 57600 && c.gimbal.baud_rate != 115200)
+        throw std::runtime_error("control.gimbal.baud_rate must be 9600, 57600 or 115200");
+    if (c.gimbal.speed_limit < 1 || c.gimbal.speed < 1 ||
+        c.gimbal.speed > c.gimbal.speed_limit || c.gimbal.acceleration < 1 ||
+        c.gimbal.home_x_deg < -180 || c.gimbal.home_x_deg > 180 ||
+        c.gimbal.home_y_deg < -30 || c.gimbal.home_y_deg > 90 ||
+        (c.gimbal.x_sign != 1 && c.gimbal.x_sign != -1) ||
+        (c.gimbal.y_sign != 1 && c.gimbal.y_sign != -1))
+        throw std::runtime_error("control.gimbal speed/acceleration/home/axis setting is invalid");
     return c;
 }
 
@@ -254,7 +377,7 @@ GuiConfig load_gui_config(const YAML::Node& node)
     GuiConfig c{};
     c.enabled = required<bool>(node, "enabled", "gui");
 
-    // 영상 전송 설정: Orange Pi -> GUI 방향의 H.264/RTP/UDP 채널이다.
+    // 영상 전송 설정: Orange Pi -> GUI 방향의 JPEG or H.264/RTP/UDP 채널이다.
     const YAML::Node video = node["video"];
     c.video.host = required<std::string>(video, "host", "gui.video");
     c.video.port = parse_port(video, "port", "gui.video");
@@ -262,15 +385,22 @@ GuiConfig load_gui_config(const YAML::Node& node)
         required<std::string>(video, "codec", "gui.video"));
     c.video.encoder = required<std::string>(video, "encoder", "gui.video");
     c.video.bitrate_kbps = required<int>(video, "bitrate_kbps", "gui.video");
+    c.video.jpeg_quality = video["jpeg_quality"].as<int>(80);
+    c.video.keyframe_interval = video["keyframe_interval"].as<int>(30);
     c.video.fps = required<int>(video, "fps", "gui.video");
     c.video.rtp_mtu = required<int>(video, "rtp_mtu", "gui.video");
     if (c.video.host.empty())
         throw std::runtime_error("gui.video.host must not be empty");
-    if (c.video.encoder != "x264enc")
-        throw std::runtime_error(
-            "only gui.video.encoder=x264enc is currently supported");
-    if (c.video.bitrate_kbps <= 0)
-        throw std::runtime_error("gui.video.bitrate_kbps must be positive");
+    const bool jpeg = c.video.codec == GuiVideoCodec::JPEG;
+    if ((jpeg && c.video.encoder != "mppjpegenc" && c.video.encoder != "jpegenc") ||
+        (!jpeg && c.video.encoder != "mpph264enc" && c.video.encoder != "x264enc"))
+        throw std::runtime_error("gui.video.encoder does not match codec (MPP or explicit software encoder required)");
+    if (c.video.bitrate_kbps <= 0 || c.video.bitrate_kbps > 2147483)
+        throw std::runtime_error("gui.video.bitrate_kbps must be in [1, 2147483]");
+    if (c.video.jpeg_quality < 1 || c.video.jpeg_quality > 99)
+        throw std::runtime_error("gui.video.jpeg_quality must be in [1, 99]");
+    if (c.video.keyframe_interval < 1)
+        throw std::runtime_error("gui.video.keyframe_interval must be positive");
     if (c.video.fps <= 0)
         throw std::runtime_error("gui.video.fps must be positive");
     if (c.video.rtp_mtu < 576 || c.video.rtp_mtu > 65507)
@@ -290,8 +420,12 @@ GuiConfig load_gui_config(const YAML::Node& node)
             "gui.metadata.max_packet_bytes must be in [64, 65507]");
     c.metadata.max_packet_bytes = static_cast<std::size_t>(max_packet_bytes);
 
-    // 명령 설정: GUI -> Orange Pi 방향의 선택 track_id TCP 채널이다.
+    // 명령 설정: PC 명령과 보드 응답을 위한 양방향 TCP 채널이다.
     const YAML::Node command = node["command"];
+    const auto handler = command["handler"].as<std::string>("deferred");
+    if (handler == "deferred") c.command.handler = GuiCommandHandlerType::Deferred;
+    else if (handler == "tracking") c.command.handler = GuiCommandHandlerType::Tracking;
+    else throw std::runtime_error("gui.command.handler must be deferred or tracking");
     c.command.enabled = required<bool>(command, "enabled", "gui.command");
     c.command.bind_address = required<std::string>(
         command, "bind_address", "gui.command");
@@ -405,6 +539,8 @@ CaptureConditionConfig load_capture_condition_config(const YAML::Node& node)
 
 }  // namespace config_parser
 
+static ModelPostprocessConfig parse_postprocess_config(const YAML::Node& post);
+
 // 모델 YAML 전체를 typed config로 변환한다.
 ModelConfig load_model_config(const std::string& path)
 {
@@ -425,26 +561,7 @@ ModelConfig load_model_config(const std::string& path)
     c.preprocess.resize = required<std::string>(root["preprocess"], "resize", "preprocess");
     c.preprocess.normalize = required<bool>(root["preprocess"], "normalize", "preprocess");
     c.preprocess.pad_value = required<int>(root["preprocess"], "pad_value", "preprocess");
-    const YAML::Node post = root["postprocess"];
-    c.postprocess.type = required<std::string>(post, "type", "postprocess");
-    c.postprocess.output_format = parse_postprocess_output_format(
-        required<std::string>(post, "output_format", "postprocess"));
-    c.postprocess.split_output_levels = required<int>(
-        post, "split_output_levels", "postprocess");
-    c.postprocess.split_regression_bins = required<int>(
-        post, "split_regression_bins", "postprocess");
-    c.postprocess.split_class_score_activation =
-        parse_postprocess_score_activation(required<std::string>(
-            post, "split_class_score_activation", "postprocess"));
-    c.postprocess.nms_mode = parse_postprocess_nms_mode(
-        required<std::string>(post, "nms_mode", "postprocess"));
-    c.postprocess.class_agnostic_nms = required<bool>(
-        post, "class_agnostic_nms", "postprocess");
-    c.postprocess.confidence_threshold = required<float>(post, "confidence_threshold", "postprocess");
-    c.postprocess.nms_threshold = required<float>(post, "nms_threshold", "postprocess");
-    c.postprocess.num_classes = required<int>(post, "num_classes", "postprocess");
-    c.postprocess.class_names = required<std::vector<std::string>>(post, "class_names", "postprocess");
-
+    c.postprocess = parse_postprocess_config(root["postprocess"]);
     // 현재 LWIR 전처리 구현이 안전하게 처리할 수 있는 계약만 허용한다.
     if (c.camera_input.opencv_type != "CV_16UC1") throw std::runtime_error("camera_input.opencv_type must be CV_16UC1");
     if (c.camera_input.width <= 0 || c.camera_input.height <= 0 || c.input.width <= 0 || c.input.height <= 0)
@@ -455,29 +572,187 @@ ModelConfig load_model_config(const std::string& path)
     c.camera_input.clip_max = static_cast<std::uint16_t>(clip_max);
     if (c.camera_input.channel_mode != "replicate_gray_to_rgb") throw std::runtime_error("unsupported camera_input.channel_mode");
     if (c.preprocess.type != "lwir_letterbox") throw std::runtime_error("unsupported preprocess.type");
-    if (c.postprocess.type != "yolov8" && c.postprocess.type != "yolo26") throw std::runtime_error("postprocess.type must be yolov8 or yolo26");
     if (c.preprocess.resize != "letterbox" || c.preprocess.normalize)
         throw std::runtime_error("only letterbox with normalize=false is supported");
     if (c.preprocess.pad_value < 0 || c.preprocess.pad_value > 255)
         throw std::runtime_error("preprocess.pad_value must be in [0, 255]");
-    if (c.postprocess.split_output_levels <= 0 ||
-        c.postprocess.split_output_levels > 16)
-        throw std::runtime_error(
-            "postprocess.split_output_levels must be in [1, 16]");
-    if (c.postprocess.split_regression_bins <= 0 ||
-        c.postprocess.split_regression_bins > 256)
-        throw std::runtime_error(
-            "postprocess.split_regression_bins must be in [1, 256]");
-    if (!std::isfinite(c.postprocess.confidence_threshold) ||
-        c.postprocess.confidence_threshold < 0.0F ||
-        c.postprocess.confidence_threshold > 1.0F)
-        throw std::runtime_error(
-            "postprocess.confidence_threshold must be in [0, 1]");
-    if (!std::isfinite(c.postprocess.nms_threshold) ||
-        c.postprocess.nms_threshold < 0.0F ||
-        c.postprocess.nms_threshold > 1.0F)
+    return c;
+}
+
+// 모델 YAML의 후처리 계약을 파싱하고 출력 해석 방식·필터링 조건을 검증한다.
+static ModelPostprocessConfig parse_postprocess_config(const YAML::Node& post)
+{
+    ModelPostprocessConfig c;
+    c.type = required<std::string>(post, "type", "postprocess");
+    c.output_format = parse_postprocess_output_format(
+        required<std::string>(post, "output_format", "postprocess"));
+    c.split_output_levels = required<int>(post, "split_output_levels", "postprocess");
+    c.split_regression_bins = required<int>(post, "split_regression_bins", "postprocess");
+    c.split_class_score_activation = parse_postprocess_score_activation(
+        required<std::string>(post, "split_class_score_activation", "postprocess"));
+    c.nms_mode = parse_postprocess_nms_mode(
+        required<std::string>(post, "nms_mode", "postprocess"));
+    c.class_agnostic_nms = required<bool>(post, "class_agnostic_nms", "postprocess");
+    c.confidence_threshold = required<float>(post, "confidence_threshold", "postprocess");
+    c.nms_threshold = required<float>(post, "nms_threshold", "postprocess");
+    c.num_classes = required<int>(post, "num_classes", "postprocess");
+    c.class_names = required<std::vector<std::string>>(post, "class_names", "postprocess");
+
+    if (c.type != "yolov8" && c.type != "yolo26")
+        throw std::runtime_error("postprocess.type must be yolov8 or yolo26");
+    if (c.split_output_levels <= 0 || c.split_output_levels > 16)
+        throw std::runtime_error("postprocess.split_output_levels must be in [1, 16]");
+    if (c.split_regression_bins <= 0 || c.split_regression_bins > 256)
+        throw std::runtime_error("postprocess.split_regression_bins must be in [1, 256]");
+    if (!std::isfinite(c.confidence_threshold) ||
+        c.confidence_threshold < 0.0F || c.confidence_threshold > 1.0F)
+        throw std::runtime_error("postprocess.confidence_threshold must be in [0, 1]");
+    if (!std::isfinite(c.nms_threshold) ||
+        c.nms_threshold < 0.0F || c.nms_threshold > 1.0F)
         throw std::runtime_error("postprocess.nms_threshold must be in [0, 1]");
-    if (c.postprocess.num_classes <= 0 || static_cast<int>(c.postprocess.class_names.size()) != c.postprocess.num_classes)
+    if (c.num_classes <= 0 || static_cast<int>(c.class_names.size()) != c.num_classes)
         throw std::runtime_error("postprocess.class_names size must equal num_classes");
+    return c;
+}
+
+// 트래커 전용 YAML을 읽어 알고리즘별 설정을 검증한다.
+TrackingConfig load_tracker_config(const std::string& path)
+{
+    const YAML::Node tracking = config_parser::load_yaml(path)["tracking"];
+    (void)config_parser::required_string(tracking, "type", "tracking");
+    return config_parser::load_tracking_config(tracking);
+}
+
+// 카탈로그의 ID 중복과 설정 파일을 검증해 추적 설정을 준비한다.
+std::map<int, TrackingCatalogEntry> config_parser::load_tracking_catalog(
+    const YAML::Node& node)
+{
+    if (!node || !node.IsSequence() || node.size() == 0)
+        throw std::runtime_error("tracking_catalog must be a nonempty sequence");
+    std::map<int, TrackingCatalogEntry> catalog;
+    for (const YAML::Node& item : node)
+    {
+        TrackingCatalogEntry entry;
+        entry.id = required<int>(item, "id", "tracking_catalog");
+        entry.config_path = required_string(item, "config", "tracking_catalog");
+        if (entry.id <= 0 || entry.config_path.empty())
+            throw std::runtime_error("tracking_catalog entries need a positive id and config path");
+        entry.config = load_tracker_config(entry.config_path);
+        if (!catalog.emplace(entry.id, std::move(entry)).second)
+            throw std::runtime_error("Duplicate tracking_catalog id");
+    }
+    validate_catalog_ids(catalog, "tracking_catalog");
+    return catalog;
+}
+
+// 실행 설정의 tracking.id를 카탈로그에서 찾아 검증된 설정을 돌려준다.
+int config_parser::select_tracking_id(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog)
+{
+    if (!node || !node.IsMap() || node.size() != 1)
+        throw std::runtime_error("tracking must contain only the selected id");
+    const int id = required<int>(node, "id", "tracking");
+    const auto it = catalog.find(id);
+    if (it == catalog.end())
+        throw std::runtime_error("Unknown tracking.id=" + std::to_string(id));
+    return id;
+}
+
+TrackingConfig config_parser::select_tracking_config(
+    const YAML::Node& node, const std::map<int, TrackingCatalogEntry>& catalog)
+{
+    return catalog.at(select_tracking_id(node, catalog)).config;
+}
+
+// runtime 설정을 읽고 별도 모델 YAML까지 한 번에 준비한다.
+RuntimeConfig load_runtime_config(const std::string& path)
+{
+    const YAML::Node root = config_parser::load_yaml(path);
+    RuntimeConfig c;
+    c.logging = config_parser::load_logging_config(root["logging"]);
+
+    c.model_config_path = config_parser::required_string(
+        root["model"], "config", "model");
+    if (c.model_config_path.empty())
+        throw std::runtime_error("model.config must not be empty");
+    c.model = load_model_config(c.model_config_path);
+
+    const YAML::Node model_catalog = root["model_catalog"];
+    if (model_catalog && !model_catalog.IsSequence())
+        throw std::runtime_error("model_catalog must be a sequence");
+    if (model_catalog)
+    {
+        for (const YAML::Node& item : model_catalog)
+        {
+            ModelCatalogEntry entry;
+            entry.id = item["id"].as<int>();
+            entry.config_path = config_parser::required_string(
+                item, "config", "model_catalog");
+            if (entry.id <= 0 || entry.config_path.empty())
+                throw std::runtime_error(
+                    "model_catalog entries need a positive id and config path");
+            entry.model = load_model_config(entry.config_path);
+            if (!c.model_catalog.emplace(entry.id, std::move(entry)).second)
+                throw std::runtime_error("Duplicate model_catalog id");
+        }
+    }
+    if (c.model_catalog.empty())
+    {
+        ModelCatalogEntry entry;
+        entry.id = 1;
+        entry.config_path = c.model_config_path;
+        entry.model = c.model;
+        c.model_catalog.emplace(entry.id, std::move(entry));
+    }
+
+    validate_catalog_ids(c.model_catalog, "model_catalog");
+    const std::string active_config =
+        fs::path(c.model_config_path).lexically_normal().string();
+    for (const auto& item : c.model_catalog)
+    {
+        if (fs::path(item.second.config_path).lexically_normal().string() ==
+            active_config)
+            c.initial_model_id = item.first;
+    }
+    if (c.initial_model_id == 0)
+        throw std::runtime_error(
+            "model.config must be listed in model_catalog");
+    c.model = c.model_catalog.at(c.initial_model_id).model;
+
+    c.detection = config_parser::load_detection_config(root["detection"]);
+    c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
+    c.initial_tracker_id = config_parser::select_tracking_id(
+        root["tracking"], c.tracking_catalog);
+    c.tracking = c.tracking_catalog.at(c.initial_tracker_id).config;
+    c.control = config_parser::load_control_config(root["control"]);
+    c.measurement = config_parser::load_measurement_config(root["measurement"]);
+    c.gui = config_parser::load_gui_config(root["gui"]);
+
+    // Camera and display conversion remain active while the inference model changes.
+    for (const auto& [id, entry] : c.model_catalog)
+    {
+        const auto& camera = entry.model.camera_input;
+        const auto& initial = c.model.camera_input;
+        if (camera.width != initial.width || camera.height != initial.height ||
+            camera.opencv_type != initial.opencv_type ||
+            camera.channel_mode != initial.channel_mode ||
+            camera.clip_min != initial.clip_min || camera.clip_max != initial.clip_max)
+            throw std::runtime_error("model_catalog camera input differs for model id=" +
+                std::to_string(id));
+    }
+    if (c.gui.enabled)
+    {
+        if (c.model.camera_input.width != static_cast<int>(kGuiFrameWidth) ||
+            c.model.camera_input.height != static_cast<int>(kGuiFrameHeight))
+            throw std::runtime_error("Camera dimensions do not match the configured GUI protocol");
+    }
+
+    const bool tracking_handler = c.gui.command.handler == GuiCommandHandlerType::Tracking;
+    // 비활성 GUI/명령 구역의 handler 선택은 제어 활성화를 요구하지 않는다.
+    const bool active_tracking_handler = c.gui.enabled && c.gui.command.enabled && tracking_handler;
+    if ((active_tracking_handler && !c.control.enabled) ||
+        (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !tracking_handler)))
+        throw std::runtime_error("Gimbal control requires control.enabled=true, GUI command enabled and handler=tracking");
+
     return c;
 }

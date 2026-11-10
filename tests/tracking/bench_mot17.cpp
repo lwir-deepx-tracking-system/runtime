@@ -244,7 +244,7 @@ TrackingConfig load_config(const std::string& path)
     if (!node.IsMap())
         throw std::runtime_error(path + ": tracking 설정이 key: value 형식이 아닙니다");
     static const std::set<std::string> known = {
-        "track_threshold", "match_threshold", "track_buffer", "fuse_score", "nsa_kalman", "kalman_format", "lost_output_frames",
+        "type", "track_threshold", "match_threshold", "track_buffer", "fuse_score", "nsa_kalman", "kalman_format", "lost_output_frames",
         "buffer_scale", "buffer_max_px", "buffer_small_size", "buffer_snap",
         "low_threshold", "new_track_threshold", "low_match_threshold", "unconfirmed_match_threshold",
         "oru", "ocm_weight", "ocm_delta_t", "ocr"};

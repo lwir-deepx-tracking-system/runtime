@@ -1,6 +1,7 @@
 #include "gui/gui_receiver.hpp"
 
-#include <array>
+#include <mutex>
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
@@ -9,35 +10,12 @@
 
 #include <netdb.h>
 #include <poll.h>
-#include <pthread.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "common/logger.hpp"
 
 namespace {
-// pthread_mutex_t를 빠뜨리지 않고 unlock하기 위한 작은 RAII 보조 객체이다.
-// 실제 동기화 primitive와 lock/unlock 호출은 모두 POSIX pthread API를 쓴다.
-class PthreadLockGuard
-{
-private:
-    pthread_mutex_t* mutex_;
-
-public:
-    explicit PthreadLockGuard(pthread_mutex_t& mutex) : mutex_(&mutex)
-    {
-        pthread_mutex_lock(mutex_);
-    }
-
-    ~PthreadLockGuard()
-    {
-        pthread_mutex_unlock(mutex_);
-    }
-
-    PthreadLockGuard(const PthreadLockGuard&) = delete;
-    PthreadLockGuard& operator=(const PthreadLockGuard&) = delete;
-};
-
 void close_socket(int fd)
 {
     if (fd < 0) return;
@@ -48,23 +26,22 @@ void close_socket(int fd)
 }
 }
 
-GuiReceiver::GuiReceiver(GuiCommandConfig config)
-    : config_(std::move(config))
+GuiReceiver::GuiReceiver(GuiCommandConfig config, std::unique_ptr<IGuiCommandHandler> handler)
+    : config_(std::move(config)),
+      protocol_(std::make_unique<PcGuiProtocol>()),
+      handler_(handler ? std::move(handler) : GuiCommandHandlerFactory::create(config_.handler))
 {
-    if (pthread_mutex_init(&socket_mutex_, nullptr) != 0)
-        throw std::runtime_error("GuiReceiver mutex 초기화 실패");
 }
 
 GuiReceiver::~GuiReceiver()
 {
     stop();
-    pthread_mutex_destroy(&socket_mutex_);
 }
 
 bool GuiReceiver::stopped()
 {
     // stop()은 다른 thread에서 호출되므로 socket 상태와 같은 mutex로 보호한다.
-    PthreadLockGuard lock(socket_mutex_);
+    std::lock_guard<std::mutex> lock(socket_mutex_);
     return stopped_;
 }
 
@@ -73,7 +50,7 @@ bool GuiReceiver::open_listener()
 {
     // 이미 열렸거나 종료된 상태를 먼저 확인해 중복 listener 생성을 막는다.
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<std::mutex> lock(socket_mutex_);
         if (listen_fd_ >= 0) return true;
         if (stopped_) return false;
     }
@@ -128,7 +105,7 @@ bool GuiReceiver::open_listener()
     }
 
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<std::mutex> lock(socket_mutex_);
         if (stopped_)
         {
             close_socket(listener);
@@ -149,7 +126,7 @@ bool GuiReceiver::accept_client()
     {
         int listener = -1;
         {
-            PthreadLockGuard lock(socket_mutex_);
+            std::lock_guard<std::mutex> lock(socket_mutex_);
             if (client_fd_ >= 0) return true;
             listener = listen_fd_;
         }
@@ -159,7 +136,7 @@ bool GuiReceiver::accept_client()
         descriptor.fd = listener;
         descriptor.events = POLLIN;
         const int ready = ::poll(
-            &descriptor, 1, config_.receive_timeout_ms);
+            &descriptor, 1, poll_timeout_ms());
         if (ready == 0) continue;
         if (ready < 0)
         {
@@ -183,7 +160,7 @@ bool GuiReceiver::accept_client()
         }
 
         {
-            PthreadLockGuard lock(socket_mutex_);
+            std::lock_guard<std::mutex> lock(socket_mutex_);
             if (stopped_)
             {
                 close_socket(client);
@@ -191,29 +168,36 @@ bool GuiReceiver::accept_client()
             }
             client_fd_ = client;
         }
+        handler_->connected();
+        if (!send_message(client, handler_->initial_state()))
+        {
+            release_client(client);
+            continue;
+        }
         Logger::info("[GuiReceiver] GUI 명령 연결 수립");
         return true;
     }
     return false;
 }
 
-// TCP stream에서 command packet 하나의 고정 byte 수를 모두 모은다.
+// TCP stream에서 header 또는 body의 요청 byte 수를 모두 모은다.
 bool GuiReceiver::receive_exact(
     int fd,
     std::uint8_t* data,
     std::size_t size)
 {
     // TCP 한 번의 recv가 command 전체를 반환한다는 보장이 없으므로
-    // protocol의 고정 packet 크기가 찰 때까지 조각을 누적한다.
+    // 요청한 크기가 찰 때까지 조각을 누적한다.
     std::size_t received = 0;
     while (received < size && !stopped())
     {
-        // timeout마다 stopped 상태를 다시 확인해 영구 blocking을 피한다.
+        if (!service_client(fd)) return false;
+        // Timer processing also continues while a partial command is pending.
         pollfd descriptor{};
         descriptor.fd = fd;
         descriptor.events = POLLIN;
         const int ready = ::poll(
-            &descriptor, 1, config_.receive_timeout_ms);
+            &descriptor, 1, poll_timeout_ms());
         if (ready == 0) continue;
         if (ready < 0)
         {
@@ -223,14 +207,18 @@ bool GuiReceiver::receive_exact(
 
         if ((descriptor.revents & POLLIN) != 0)
         {
-            const ssize_t count = ::recv(
-                fd, data + received, size - received, 0);
+            ssize_t count;
+            {
+                std::lock_guard<std::mutex> lock(socket_mutex_);
+                if (client_fd_ != fd || stopped_) return false;
+                count = ::recv(fd, data + received, size - received, MSG_DONTWAIT);
+            }
             if (count > 0)
             {
                 received += static_cast<std::size_t>(count);
                 continue;
             }
-            if (count < 0 && errno == EINTR) continue;
+            if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
             return false;
         }
 
@@ -246,7 +234,7 @@ void GuiReceiver::release_client(int fd)
     // receive thread와 stop thread 중 한쪽만 같은 FD를 닫도록 소유권을 회수한다.
     bool owns_fd = false;
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<std::mutex> lock(socket_mutex_);
         if (client_fd_ == fd)
         {
             client_fd_ = -1;
@@ -255,47 +243,91 @@ void GuiReceiver::release_client(int fd)
     }
     // stop()이 이미 FD를 가져가 닫았다면 여기서 다시 닫지 않는다.
     if (owns_fd) close_socket(fd);
+    handler_->disconnected();
 }
 
-// 연결 관리, 고정 크기 수신, protocol 검증을 거쳐 command 하나를 반환한다.
+int GuiReceiver::poll_timeout_ms() const
+{
+    return std::min(config_.receive_timeout_ms, handler_->poll_timeout_ms());
+}
+bool GuiReceiver::service_client(int fd)
+{
+    std::vector<GuiCommand> replies;
+    handler_->tick(replies);
+    for (const auto& reply : replies)
+        if (!send_message(fd, reply)) return false;
+    return true;
+}
+
+// Small replies use nonblocking sends and bounded poll waits; stop() can interrupt.
+bool GuiReceiver::send_message(int fd, const GuiCommand& message)
+{
+    const auto packet = protocol_->encode_command(message);
+    if (packet.empty()) return false;
+    std::size_t sent = 0;
+    while (sent < packet.size() && !stopped()) {
+        ssize_t count;
+        {
+            std::lock_guard<std::mutex> lock(socket_mutex_);
+            if (client_fd_ != fd || stopped_) return false;
+            count = ::send(fd, packet.data() + sent, packet.size() - sent,
+                           MSG_NOSIGNAL | MSG_DONTWAIT);
+        }
+        if (count > 0) { sent += static_cast<std::size_t>(count); continue; }
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            pollfd descriptor{fd, POLLOUT, 0};
+            const int ready = ::poll(&descriptor, 1, poll_timeout_ms());
+            if (ready < 0 && errno == EINTR) continue;
+            if (ready > 0 && (descriptor.revents & POLLOUT)) continue;
+        }
+        return false;
+    }
+    return sent == packet.size();
+}
+
 bool GuiReceiver::receive(GuiCommand& command)
 {
-    if (!config_.enabled || stopped()) return false;
-    if (!open_listener()) return false;
-
-    // 한 번 성공할 때마다 검증된 command 하나만 호출자에게 반환한다.
-    // 연결이 끊기면 listener는 유지한 채 client 재접속부터 다시 시작한다.
-    std::array<std::uint8_t, kGuiCommandPacketSize> packet{};
-    while (!stopped())
-    {
-        if (!accept_client()) return false;
-
-        int client = -1;
+    if (!config_.enabled || stopped() || !open_listener()) { finish_session(); return false; }
+    while (!stopped()) {
+        if (!accept_client()) { finish_session(); return false; }
+        int client;
         {
-            PthreadLockGuard lock(socket_mutex_);
+            std::lock_guard<std::mutex> lock(socket_mutex_);
             client = client_fd_;
         }
         if (client < 0) continue;
-
-        if (!receive_exact(client, packet.data(), packet.size()))
-        {
-            release_client(client);
-            if (!stopped())
-                Logger::warn("[GuiReceiver] GUI 연결 종료, 재접속 대기");
-            continue;
-        }
-
-        // network byte order 변환과 magic/version/type 검증은 protocol 계층에 맡긴다.
-        if (!decode_gui_command(packet.data(), packet.size(), command))
-        {
-            // 고정 길이 protocol이 어긋나면 stream 경계를 복원할 수 없으므로
-            // 연결을 닫고 새 연결에서 다시 시작한다.
-            Logger::warn("[GuiReceiver] 유효하지 않은 GUI 명령 수신");
+        std::vector<std::uint8_t> packet(protocol_->command_header_size());
+        if (!receive_exact(client, packet.data(), packet.size())) {
             release_client(client);
             continue;
         }
+        const auto total = protocol_->command_packet_size(packet.data(), packet.size());
+        if (!total) {
+            Logger::warn("[GuiReceiver] Invalid PC command header");
+            release_client(client);
+            continue;
+        }
+        const auto header = packet.size();
+        packet.resize(total);
+        if (!receive_exact(client, packet.data() + header, total - header) ||
+            !protocol_->decode_command(packet.data(), packet.size(), command)) {
+            release_client(client);
+            continue;
+        }
+        std::vector<GuiCommand> replies;
+        if (!handler_->handle(command, replies)) {
+            release_client(client);
+            continue;
+        }
+        bool sent = true;
+        for (const auto& reply : replies) {
+            if (!send_message(client, reply)) { sent = false; break; }
+        }
+        if (!sent) { release_client(client); continue; }
         return true;
     }
+    finish_session();
     return false;
 }
 
@@ -307,7 +339,7 @@ void GuiReceiver::stop()
     int listener = -1;
     int client = -1;
     {
-        PthreadLockGuard lock(socket_mutex_);
+        std::lock_guard<std::mutex> lock(socket_mutex_);
         if (stopped_) return;
         stopped_ = true;
         listener = listen_fd_;

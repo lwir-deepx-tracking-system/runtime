@@ -91,13 +91,8 @@ struct DxrtDetectionPipeline::NpuState
 
   ~NpuState()
   {
-    try
-    {
-      wait_idle();
-    }
-    catch(...)
-    {
-    }
+    // 콜백 합류 실패를 삼킨 채 SDK 객체를 파괴하지 않는다.
+    wait_idle();
 
     {
       std::lock_guard<std::mutex> lock(completed_mutex);
@@ -126,9 +121,11 @@ struct DxrtDetectionPipeline::NpuState
     inflight_cv.notify_all();
   }
 
-  void wait_idle()
+  void wait_idle() noexcept
   {
     std::unique_lock<std::mutex> lock(inflight_mutex);
+    // 성공·오류 콜백 모두 반환한 뒤 release_slot()이 감소시킨 값만 확인한다.
+    // SDK 작업/프로파일 오류는 complete_requests()에서 Completion으로 전달한다.
     inflight_cv.wait(lock, [this]
                      { return inflight == 0; });
   }
@@ -143,6 +140,11 @@ struct DxrtDetectionPipeline::NpuState
     bool   found_npu_metric  = false;
     for(const dxrt::TaskMetrics &task : metrics.tasks)
     {
+      if(task.valid && task.task_name == "cpu_0")
+      {
+        timing.cpu_task_us = task.cpu_task_us;
+        timing.cpu_task_valid = true;
+      }
       for(const auto &device_entry : task.devices)
       {
         const dxrt::NpuDeviceMetrics &device = device_entry.second;
@@ -155,6 +157,12 @@ struct DxrtDetectionPipeline::NpuState
         timing.d2h_duration_us += device.d2h_us;
         timing.npu_output_format_duration_us += device.output_format_us;
         timing.npu_task_total_duration_us += device.total_us;
+        timing.npu_devices.push_back({
+            task.task_name, device_entry.first, device.input_format_us,
+            device.h2d_us, device.inference_core_all_us,
+            device.inference_core_0_us, device.inference_core_1_us,
+            device.inference_core_2_us, device.d2h_us,
+            device.output_format_us, device.total_us});
         found_npu_metric = true;
       }
     }
@@ -380,7 +388,7 @@ void DxrtDetectionPipeline::submit_async(
   }
 }
 
-void DxrtDetectionPipeline::wait_idle()
+void DxrtDetectionPipeline::wait_idle() noexcept
 {
   if(npu_)
     npu_->wait_idle();

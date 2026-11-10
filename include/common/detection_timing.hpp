@@ -2,11 +2,28 @@
 
 #include <chrono>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 // 비동기 요청 하나에 귀속되는 Detection 내부 단계별 측정 시각.
 // steady_clock을 사용해 시스템 시각 변경의 영향을 받지 않는다.
 struct DetectionTiming
 {
+    struct NpuDeviceTiming
+    {
+        std::string task_name;
+        int device_id = 0;
+        double input_format_us = 0.0;
+        double h2d_us = 0.0;
+        double inference_core_all_us = 0.0;
+        double inference_core_0_us = 0.0;
+        double inference_core_1_us = 0.0;
+        double inference_core_2_us = 0.0;
+        double d2h_us = 0.0;
+        double output_format_us = 0.0;
+        double total_us = 0.0;
+    };
+
     using Clock = std::chrono::steady_clock;
     using TimePoint = Clock::time_point;
 
@@ -27,6 +44,9 @@ struct DetectionTiming
     double npu_output_format_duration_us = 0.0;
     double npu_task_total_duration_us = 0.0;
     bool npu_profiler_valid = false;
+    std::vector<NpuDeviceTiming> npu_devices;
+    double cpu_task_us = 0.0;
+    bool cpu_task_valid = false;
 
     double preprocess_ms() const
     {

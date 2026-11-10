@@ -4,26 +4,33 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
-#include <pthread.h>
+#include <thread>
 #include <string>
 #include <vector>
 
 #include "common/detection.hpp"
+#include "common/track.hpp"
 #include "common/detection_timing.hpp"
 #include "common/frame.hpp"
 #include "common/stage_metric.hpp"
+#include "common/measurement_sink.hpp"
 #include "common/threadsafequeue.hpp"
-#include "detection/i_detection_pipeline.hpp"
+#include "pipeline/runtime_control.hpp"
+#include "pipeline/active_pipeline_slot.hpp"
 
 class DetectionThread
 {
 private:
-    IDetectionPipeline& pipeline_;
+    RuntimeControl& runtime_control_;
+    ActivePipelineSlot& active_pipeline_;
     ThreadSafeQueue<FrameMessage>& input_queue_;
     ThreadSafeQueue<DetectionResult>& output_queue_;
-    pthread_t thread_{};
+    ThreadSafeQueue<TrackingResultPtr>& gui_output_queue_;
+    bool gui_enabled_;
+    std::thread thread_;
     bool started_ = false;
     bool measurement_enabled_;
+    IMeasurementSink* measurements_;
     std::atomic<bool> failed_{false};
     mutable std::mutex state_mutex_;
     std::string error_message_;
@@ -41,10 +48,13 @@ private:
 
 public:
     DetectionThread(
-        IDetectionPipeline& pipeline,
+        RuntimeControl& runtime_control,
+        ActivePipelineSlot& active_pipeline,
         ThreadSafeQueue<FrameMessage>& input_queue,
         ThreadSafeQueue<DetectionResult>& output_queue,
-        bool measurement_enabled);
+        ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
+        bool gui_enabled,
+        bool measurement_enabled, IMeasurementSink* measurements = nullptr);
 
     void start();
     void join();

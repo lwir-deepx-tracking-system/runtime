@@ -57,7 +57,7 @@ endif()
 if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
     list(APPEND LWIR_OPENCV_COMPONENTS imgproc)
 endif()
-if(LWIR_BUILD_CAPTURE OR LWIR_BUILD_BENCHMARK)
+if(LWIR_BUILD_CAPTURE OR LWIR_BUILD_BENCHMARK OR LWIR_BUILD_RUNTIME)
     list(APPEND LWIR_OPENCV_COMPONENTS imgcodecs)
 endif()
 list(REMOVE_DUPLICATES LWIR_OPENCV_COMPONENTS)
@@ -66,9 +66,7 @@ if(LWIR_OPENCV_COMPONENTS)
     find_package(OpenCV REQUIRED COMPONENTS ${LWIR_OPENCV_COMPONENTS})
 endif()
 
-if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
-    find_package(Threads REQUIRED)
-endif()
+find_package(Threads REQUIRED)
 
 if(LWIR_NEEDS_RUNTIME_CORE)
     find_package(PkgConfig REQUIRED)
@@ -76,8 +74,8 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         GSTREAMER
         REQUIRED
         IMPORTED_TARGET
-        gstreamer-1.0>=1.16
-        gstreamer-app-1.0>=1.16
+        gstreamer-1.0>=1.20
+        gstreamer-app-1.0>=1.20
     )
 endif()
 
@@ -109,6 +107,15 @@ target_link_libraries(lwir_common
         yaml-cpp
 )
 
+
+# 콘솔·측정·종료·실행 폴더는 특정 실행 파일이나 GUI 구현에 의존하지 않는다.
+add_library(lwir_app_support
+    src/app/pipeline_console.cpp
+    src/app/metrics_writer.cpp
+    src/app/shutdown.cpp
+    src/app/run_directory.cpp
+)
+target_link_libraries(lwir_app_support PUBLIC lwir_common Threads::Threads)
 
 # ==============================================================================
 # 카메라 라이브러리
@@ -155,6 +162,8 @@ if(LWIR_NEEDS_VISION)
         src/detection/lwir_preprocessor.cpp
         src/detection/dxrt_detection_pipeline.cpp
         src/tracking/bytetrack_tracker.cpp
+        src/tracking/tracker_factory.cpp
+        src/tracking/tracker_manager.cpp
         src/tracking/kalman_filter.cpp
         src/tracking/ocsort_tracker.cpp
     )
@@ -187,6 +196,8 @@ if(LWIR_NEEDS_VISION)
                 LWIR_ENABLE_DX_APP=1
                 PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
+    else()
+        target_sources(lwir_vision PRIVATE src/detection/detector_factory_stub.cpp)
     endif()
 endif()
 
@@ -198,16 +209,25 @@ endif()
 if(LWIR_NEEDS_RUNTIME_CORE)
     add_library(lwir_runtime_core
         src/target/target_selector.cpp
-        src/control/gimbal_controller.cpp
+        src/control/gimbal_device.cpp
+        src/control/pid_controller.cpp
+        src/control/auto_tracking_controller.cpp
+        src/control/gimbal_command_executor.cpp
+        src/control/tracking_command_handler.cpp
+        src/gui/gui_command_handler.cpp
         src/gui/gui_protocol.cpp
         src/gui/gui_sender.cpp
         src/gui/gui_receiver.cpp
         src/pipeline/camera_thread.cpp
+        src/pipeline/tracker_change_service.cpp
+        src/pipeline/model_manager_thread.cpp
         src/pipeline/detection_thread.cpp
         src/pipeline/tracking_thread.cpp
         src/pipeline/control_thread.cpp
         src/pipeline/gui_sender_thread.cpp
         src/pipeline/gui_receiver_thread.cpp
+        src/pipeline/runtime_control.cpp
+        src/pipeline/active_pipeline_slot.cpp
     )
 
     target_include_directories(lwir_runtime_core
@@ -238,13 +258,18 @@ endif()
 # ------------------------------------------------------------------------------
 
 if(LWIR_BUILD_RUNTIME)
+    add_executable(lwir_video_send tools/video_send.cpp)
+    target_link_libraries(lwir_video_send PRIVATE lwir_runtime_core)
+
     add_executable(lwir_runtime
         apps/runtime/main.cpp
         apps/runtime/runtime.cpp
+        apps/runtime/runtime_workers.cpp
     )
 
     target_link_libraries(lwir_runtime
         PRIVATE
+            lwir_app_support
             lwir_common
             lwir_camera
             lwir_vision
@@ -266,6 +291,7 @@ if(LWIR_BUILD_BENCHMARK)
 
     target_link_libraries(lwir_benchmark
         PRIVATE
+            lwir_app_support
             lwir_common
             lwir_vision
     )
@@ -327,17 +353,45 @@ if(BUILD_TESTING)
         test_app_config
         tests/app/test_app_config.cpp
         apps/runtime/runtime.cpp
+        apps/runtime/runtime_workers.cpp
     )
     target_include_directories(test_app_config PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/apps
     )
     target_link_libraries(test_app_config PRIVATE
+        lwir_app_support
         lwir_common
         lwir_camera
         lwir_vision
         lwir_runtime_core
     )
     add_test(NAME app_config COMMAND test_app_config)
+
+    add_executable(test_runtime_metrics_writer
+        tests/app/test_runtime_metrics_writer.cpp)
+    target_include_directories(test_runtime_metrics_writer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_runtime_metrics_writer PRIVATE lwir_app_support)
+    add_test(NAME runtime_metrics_writer COMMAND test_runtime_metrics_writer)
+
+    add_executable(test_runtime_shutdown tests/app/test_runtime_shutdown.cpp)
+    target_include_directories(test_runtime_shutdown PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_runtime_shutdown PRIVATE lwir_app_support)
+    add_test(NAME runtime_shutdown COMMAND test_runtime_shutdown)
+
+    add_executable(test_runtime_console
+        tests/app/test_runtime_console.cpp)
+    target_include_directories(test_runtime_console PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_runtime_console PRIVATE lwir_app_support)
+    add_test(NAME runtime_console COMMAND test_runtime_console)
+
+    add_executable(test_benchmark_config
+        tests/app/test_benchmark_config.cpp
+        apps/benchmark/benchmark.cpp
+        apps/benchmark/result_writer.cpp)
+    target_include_directories(test_benchmark_config PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_benchmark_config PRIVATE lwir_vision lwir_app_support)
+    add_test(NAME benchmark_config COMMAND test_benchmark_config)
 
     add_executable(
         test_detection_config
@@ -356,6 +410,25 @@ if(BUILD_TESTING)
     )
     add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
 
+    add_executable(test_auto_control_e2e tests/control/test_auto_control_e2e.cpp)
+    target_link_libraries(test_auto_control_e2e PRIVATE lwir_runtime_core)
+    add_test(NAME auto_control_e2e COMMAND test_auto_control_e2e)
+    set_tests_properties(auto_control_e2e PROPERTIES TIMEOUT 15)
+
+    add_executable(test_pid_controller tests/control/test_pid_controller.cpp)
+    target_link_libraries(test_pid_controller PRIVATE lwir_runtime_core)
+    add_test(NAME pid_controller COMMAND test_pid_controller)
+
+    add_executable(test_auto_control tests/control/test_auto_control.cpp)
+    target_link_libraries(test_auto_control PRIVATE lwir_runtime_core)
+    add_test(NAME auto_control COMMAND test_auto_control)
+    set_tests_properties(auto_control PROPERTIES TIMEOUT 15)
+
+    add_executable(test_gimbal_device tests/control/test_gimbal_device.cpp)
+    target_link_libraries(test_gimbal_device PRIVATE lwir_runtime_core)
+    add_test(NAME gimbal_device COMMAND test_gimbal_device)
+    set_tests_properties(gimbal_device PROPERTIES TIMEOUT 15)
+
     add_executable(
         test_gui_protocol
         tests/gui/test_gui_protocol.cpp
@@ -370,12 +443,24 @@ if(BUILD_TESTING)
     target_link_libraries(test_gui_receiver PRIVATE lwir_runtime_core)
     add_test(NAME gui_receiver COMMAND test_gui_receiver)
 
+    add_executable(test_gui_pipeline_commands tests/gui/test_gui_pipeline_commands.cpp)
+    target_link_libraries(test_gui_pipeline_commands PRIVATE lwir_runtime_core)
+    add_test(NAME gui_pipeline_commands COMMAND test_gui_pipeline_commands)
+
     add_executable(
         test_gui_sender
         tests/gui/test_gui_sender.cpp
     )
     target_link_libraries(test_gui_sender PRIVATE lwir_runtime_core)
-    add_test(NAME gui_sender COMMAND test_gui_sender)
+    add_test(NAME gui_sender COMMAND test_gui_sender x264enc)
+    add_test(NAME gui_sender_jpeg COMMAND test_gui_sender jpegenc)
+    add_test(NAME gui_sender_bypass COMMAND test_gui_sender x264enc bypass)
+    add_test(NAME gui_sender_bypass_jpeg COMMAND test_gui_sender jpegenc bypass)
+    option(LWIR_TEST_MPP "Run Orange Pi MPP hardware encoder tests" OFF)
+    if(LWIR_TEST_MPP)
+        add_test(NAME gui_sender_mpp_jpeg COMMAND test_gui_sender mppjpegenc)
+        add_test(NAME gui_sender_mpp_h264 COMMAND test_gui_sender mpph264enc)
+    endif()
 
 
     # --------------------------------------------------------------------------
@@ -436,6 +521,35 @@ if(BUILD_TESTING)
     target_link_libraries(test_shared_frame_pipeline PRIVATE lwir_runtime_core)
     add_test(NAME shared_frame_pipeline COMMAND test_shared_frame_pipeline)
 
+    add_executable(test_model_manager_recovery
+        tests/pipeline/test_model_manager_recovery.cpp)
+    target_link_libraries(test_model_manager_recovery PRIVATE lwir_runtime_core)
+    add_test(NAME model_manager_recovery COMMAND test_model_manager_recovery)
+
+    add_executable(test_tracking_failure_shutdown tests/pipeline/test_tracking_failure_shutdown.cpp)
+    target_link_libraries(test_tracking_failure_shutdown PRIVATE lwir_runtime_core)
+    add_test(NAME tracking_failure_shutdown COMMAND test_tracking_failure_shutdown)
+    set_tests_properties(tracking_failure_shutdown PROPERTIES TIMEOUT 10)
+
+    add_executable(test_detection_quiescence tests/pipeline/test_detection_quiescence.cpp)
+    target_link_libraries(test_detection_quiescence PRIVATE lwir_runtime_core)
+    add_test(NAME detection_quiescence COMMAND test_detection_quiescence)
+    set_tests_properties(detection_quiescence PROPERTIES TIMEOUT 10)
+
+    add_executable(test_model_switch_wakeup
+        tests/pipeline/test_model_switch_wakeup.cpp)
+    target_link_libraries(test_model_switch_wakeup PRIVATE lwir_runtime_core)
+    add_test(NAME model_switch_wakeup COMMAND test_model_switch_wakeup)
+
+    add_executable(test_tracker_change_service tests/pipeline/test_tracker_change_service.cpp)
+    target_link_libraries(test_tracker_change_service PRIVATE lwir_runtime_core)
+    add_test(NAME tracker_change_service COMMAND test_tracker_change_service)
+    set_tests_properties(tracker_change_service PROPERTIES TIMEOUT 10)
+
+    add_executable(test_tracker_hotswap tests/pipeline/test_tracker_hotswap.cpp)
+    target_link_libraries(test_tracker_hotswap PRIVATE lwir_runtime_core)
+    add_test(NAME tracker_hotswap COMMAND test_tracker_hotswap)
+
 
     # --------------------------------------------------------------------------
     # 객체 추적 테스트
@@ -447,6 +561,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_bytetrack PRIVATE lwir_vision)
     add_test(NAME bytetrack COMMAND test_bytetrack)
+
+    add_executable(test_tracker_factory
+        tests/tracking/test_tracker_factory.cpp)
+    target_link_libraries(test_tracker_factory PRIVATE lwir_vision)
+    add_test(NAME tracker_factory COMMAND test_tracker_factory)
 
     set_tests_properties(
         bytetrack
@@ -468,6 +587,7 @@ if(BUILD_TESTING)
 
     set_tests_properties(
         app_config
+        benchmark_config
         detection_config
         lwir_preprocessor
         PROPERTIES
