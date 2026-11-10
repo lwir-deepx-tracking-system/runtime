@@ -68,6 +68,8 @@ control:
 
   auto:
     min_confidence: 0.0    # AUTO 제어 대상의 최소 신뢰도
+    input_timeout_ms: 500  # 캡처 시각 기준 입력 유효 시간
+    reacquire_timeout_ms: 2000 # 표적 상실 후 재획득 대기 시간
     # 흔들림 완화를 위해 P 제어로 기준을 잡고 실기에서 축별 kp를 조정한다.
     controller: p          # p / pi / pd / pid
     pid_x: {kp: 50.0, ki: 0.0, kd: 0.0}
