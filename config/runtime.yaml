@@ -67,17 +67,20 @@ control:
   enabled: true
 
   auto:
+    min_confidence: 0.0    # AUTO 제어 대상의 최소 신뢰도
+    input_timeout_ms: 500  # 캡처 시각 기준 입력 유효 시간
+    reacquire_timeout_ms: 2000 # 표적 상실 후 재획득 대기 시간
     # 흔들림 완화를 위해 P 제어로 기준을 잡고 실기에서 축별 kp를 조정한다.
     controller: p          # p / pi / pd / pid
-    pid_x: {kp: 35.0, ki: 0.0, kd: 0.0}
-    pid_y: {kp: 35.0, ki: 0.0, kd: 0.0}
+    pid_x: {kp: 40.0, ki: 0.0, kd: 0.0}
+    pid_y: {kp: 40.0, ki: 0.0, kd: 0.0}
     deadband_x: 0.06
     deadband_y: 0.06
     speed_max: 70          # AUTO 전용 상한
     speed_rate: 100.0       # SPD/초. STOP은 제한 우회
 
   gimbal:
-    device: /dev/ttyUSB0
+    device: /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_5a321a87be72ef1184f1744f8fcc3fa0-if00-port0
     speed: 30              # 수동 방향키 고정 속도. AUTO 상한과 독립
 
 # ============================================================
