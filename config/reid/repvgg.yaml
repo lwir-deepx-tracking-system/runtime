@@ -1,0 +1,22 @@
+# RepVGG-A0 사람 재식별 모델의 입력·출력 계약.
+# runtime은 계약을 검증하고, benchmark가 RepVGG 추론에 사용한다.
+model:
+  name: repvgg
+  path: ../model-bank/final_tracker/tracker/models/RVGGA0_REID2C256.dxnn
+
+input:
+  width: 64
+  height: 128
+  channels: 3
+  dtype: uint8
+  layout: NHWC
+
+preprocess:
+  resize: stretch
+  channel_mode: replicate_gray_to_rgb
+
+output:
+  name: embedding
+  dimensions: 128
+  dtype: float32
+  normalize: l2

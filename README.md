@@ -118,6 +118,14 @@ Benchmark는 설정된 dataset root 아래의 여러 sequence를 읽습니다. D
 수 있습니다. 각 sequence는 `000001.png`부터 누락 없이 연속된 frame 이름을 사용해야 하며,
 sequence가 바뀔 때마다 Tracker 상태를 초기화합니다.
 
+Benchmark의 `timing/<sequence>.csv` 표에는 프레임별 Detection 전처리·추론·후처리,
+Detection 전체, Tracking, ReID 전체, ReID crop 수, Matching, 프레임 전체 경과 시간이
+기록됩니다. `detect_host_ms`는 Detection의 호스트 측 추론 지연이며 `frame_total_ms`는 Detection
+제출 직전부터 Matching 완료까지의 실제 경과 시간입니다. 이미지 읽기와 결과 파일 쓰기
+시간은 제외합니다. 터미널과 `timing/<sequence>_profiler_summary.txt`의
+`FRAME STAGES`에는 각 단계의 평균과 P95가 표시됩니다. ReID를 실행하지 않은 프레임도
+ReID 시간 0 ms와 crop 수 0개로 집계합니다.
+
 `config/benchmark.yaml`의 `sequence.range_enabled`가 `false`이면 모든 sequence를 처리합니다.
 `true`이면 `sequence.start`부터 `sequence.end`까지 양끝을 포함해 처리합니다. 숫자 순서와
 문자열 정렬 순서가 일치하도록 `seq_001`과 같이 zero-padding된 ID를 사용해야 합니다.
@@ -179,12 +187,28 @@ SIGQUIT 뒤에 SIGINT나 콘솔 quit가 와도 폐기 종료가 우선합니다.
 ## Configuration
 
 Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yaml`,
-`config/benchmark.yaml` 설정을 사용합니다. 모델 관련 설정은 `config/model/` 아래의
-별도 model configuration으로 관리합니다. 모델의 후처리 조건도 해당 모델 YAML에
-포함됩니다. 트래커별 설정은 `config/tracking/` 아래의 YAML로 관리하며 Runtime과
+`config/benchmark.yaml` 설정을 사용합니다. 검출 모델 설정은 `config/detection/`,
+ReID 모델 설정은 `config/reid/` 아래에서 관리합니다. 검출 후처리 조건은 검출 모델
+YAML에 포함됩니다. 트래커별 설정은 `config/tracking/` 아래의 YAML로 관리하며 Runtime과
 Benchmark의 `tracking_catalog`가 트래커 ID와 설정 파일을 연결합니다.
 `tracking.id`로 실행에 사용할 트래커 설정을 선택합니다.
 Runtime과 Benchmark는 같은 `config/tracking/bytetrack.yaml`을 참조합니다.
+두 실행 설정의 `reid.config`는 `config/reid/repvgg.yaml`을 참조합니다. AppConfig가
+입출력 계약을 검증하며, 현재 ReID 추론은 `lwir_benchmark`에서만 실행합니다.
+두 실행 설정은 각각 `detection.inference`와 `reid.inference`에 모델별
+`max_inflight`, `buffer_count`, `use_ort`, `npu_cores` 값을 둡니다. `npu_cores`는
+`all`, `0`, `1`, `2`, `01`, `12`, `02` 중 하나이며 기본 설정은 `all`입니다.
+엔진 생성 시 DXRT `InferenceOption.boundOption`에 전달됩니다. ReID benchmark는 현재
+crop을 동기 처리하므로 `max_inflight: 1`을 사용합니다.
+ReID pipeline은 원본 LWIR crop을 8비트·3채널 모델 입력으로 바꾸고 RepVGG 추론과
+embedding L2 정규화를 수행합니다. `reid.matcher_config`는 별도의
+`config/reid/matcher.yaml`을 참조하며, `ReidMatcher`가 최근에 사라진 사람 ID를
+cosine similarity와 위치·크기 조건으로 새 Track에 1:1로 재연결합니다.
+Benchmark는 프레임당 최대 2개 crop을 처리하며 새 ID의 embedding을 우선합니다.
+`tracks/`에 원본 ByteTrack 결과, `tracks_reid/`에 재연결 결과,
+`reid/<sequence>_matches.csv`에 재연결 이벤트를 저장합니다.
+ReID embedding과 crop 소요 시간은 `reid/<sequence>.csv`에 저장합니다.
+Runtime의 ReID·matching 스레드 연결은 후속 작업입니다.
 runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고 실행 루프가 처리합니다.
 새 인스턴스를 먼저 만든 뒤 활성 트래커를 교체하며, 진행 중이던 프레임이 끝나면 이전
 인스턴스가 소멸합니다. TCP 5002의 Pipeline(category=4) 명령으로 모델·트래커 개수를
@@ -195,7 +219,8 @@ runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고
 - Capture dataset root와 sequence: `path.dataset_root`, `sequence.id`
 - Benchmark sequence 범위: `sequence.range_enabled`, `sequence.start`, `sequence.end`
 - Benchmark dataset/result root: `path.dataset_root`, `path.output_root`
-- Runtime/Benchmark model 설정: `model.config`
+- Runtime/Benchmark 검출 모델 설정: `detection.config`
+- Runtime/Benchmark ReID 모델 설정: `reid.config`
 
 테스트용 터미널 명령은 `lwir_runtime config/runtime.yaml --console`로 활성화합니다.
 `model 2`, `tracker 1`은 기존 전환 경로로 요청을 전달하고 접수·완료 결과를 출력합니다.

@@ -161,6 +161,8 @@ if(LWIR_NEEDS_VISION)
     add_library(lwir_vision
         src/detection/lwir_preprocessor.cpp
         src/detection/dxrt_detection_pipeline.cpp
+        src/reid/reid_pipeline.cpp
+        src/reid/reid_matcher.cpp
         src/tracking/bytetrack_tracker.cpp
         src/tracking/tracker_factory.cpp
         src/tracking/tracker_manager.cpp
@@ -186,6 +188,7 @@ if(LWIR_NEEDS_VISION)
             src/detection/yolov8_postprocessor.cpp
             src/detection/yolo26_postprocessor.cpp
             src/detection/detector_factory.cpp)
+        target_sources(lwir_vision PRIVATE src/reid/reid_factory.cpp)
         target_link_libraries(lwir_vision
             PRIVATE
                 dx_app_dependency
@@ -196,7 +199,9 @@ if(LWIR_NEEDS_VISION)
                 PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
     else()
-        target_sources(lwir_vision PRIVATE src/detection/detector_factory_stub.cpp)
+        target_sources(lwir_vision PRIVATE
+            src/detection/detector_factory_stub.cpp
+            src/reid/reid_factory_stub.cpp)
     endif()
 endif()
 
@@ -321,6 +326,21 @@ endif()
 # ==============================================================================
 
 if(BUILD_TESTING)
+
+    add_executable(test_reid_stages
+        tests/reid/test_reid_stages.cpp
+        src/reid/reid_pipeline.cpp)
+    target_include_directories(test_reid_stages PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(test_reid_stages PRIVATE ${OpenCV_LIBS})
+    add_test(NAME reid_stages COMMAND test_reid_stages)
+
+    add_executable(test_reid_matcher
+        tests/reid/test_reid_matcher.cpp
+        src/reid/reid_matcher.cpp)
+    target_include_directories(test_reid_matcher PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include ${OpenCV_INCLUDE_DIRS})
+    add_test(NAME reid_matcher COMMAND test_reid_matcher)
 
     # --------------------------------------------------------------------------
     # 실제 카메라 하드웨어 테스트

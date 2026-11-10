@@ -10,9 +10,12 @@
 #include "detection/detector_factory.hpp"
 #include "tracking/tracker_factory.hpp"
 #include "tracking/tracker.hpp"
+#include "reid/reid_factory.hpp"
+#include "reid/reid_matcher.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
@@ -26,6 +29,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 #include <opencv2/imgcodecs.hpp>
@@ -42,14 +46,31 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
     c.logging = config_parser::load_logging_config(root["logging"]);
     Logger::set_level(c.logging.level);
 
-    c.model_config_path = config_parser::required_string(
-        root["model"], "config", "model");
+    c.detection.config_path = config_parser::required_string(
+        root["detection"], "config", "detection");
 
-    if (c.model_config_path.empty())
-        throw std::runtime_error("model.config must not be empty");
+    if (c.detection.config_path.empty())
+        throw std::runtime_error("detection.config must not be empty");
 
-    c.model = load_model_config(c.model_config_path);
-    c.detection = config_parser::load_detection_config(root["detection"]);
+    c.detection.model = load_model_config(c.detection.config_path);
+    c.detection.inference = config_parser::load_inference_config(
+        root["detection"]["inference"], "detection.inference");
+    c.reid.config_path = config_parser::required_string(root["reid"], "config", "reid");
+    if (c.reid.config_path.empty())
+        throw std::runtime_error("reid.config must not be empty");
+    c.reid.model = load_reid_config(c.reid.config_path);
+    c.reid.matcher_config_path = config_parser::required_string(
+        root["reid"], "matcher_config", "reid");
+    if (c.reid.matcher_config_path.empty())
+        throw std::runtime_error("reid.matcher_config must not be empty");
+    c.reid.matcher = load_reid_matcher_config(c.reid.matcher_config_path);
+    c.reid.inference = config_parser::load_inference_config(
+        root["reid"]["inference"], "reid.inference");
+    if (c.reid.inference.max_inflight != 1)
+        throw std::runtime_error("reid.inference.max_inflight must be 1 in synchronous benchmark");
+    c.reid_options = config_parser::load_reid_benchmark_config(root["reid"]);
+    if (c.reid_options.person_class_id != c.reid.matcher.person_class_id)
+        throw std::runtime_error("reid.person_class_id and matcher.person_class_id must agree");
     c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
     c.tracking = config_parser::select_tracking_config(
         root["tracking"], c.tracking_catalog);
@@ -71,7 +92,9 @@ static fs::path create_run_directory(
     try {
         fs::create_directory(run_dir / "detections");
         fs::create_directory(run_dir / "tracks");
+        fs::create_directory(run_dir / "tracks_reid");
         fs::create_directory(run_dir / "timing");
+        fs::create_directory(run_dir / "reid");
         return run_dir;
     } catch (...) {
         std::error_code cleanup_error;
@@ -171,6 +194,8 @@ private:
 
     std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<Tracker> tracker_;
+    std::unique_ptr<IReidPipeline> reid_pipeline_;
+    std::unique_ptr<ReidMatcher> reid_matcher_;
 
 public:
     explicit BenchmarkApplication(const std::string& config_path);
@@ -182,13 +207,18 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
     : config_(load_benchmark_config(config_path)),
       config_path_(config_path)
 {
-    auto detector_factory = DetectorFactory::for_model(config_.model);
+    auto detector_factory = DetectorFactory::for_model(config_.detection.model);
     detection_pipeline_ = detector_factory->create(
-        config_.model, config_.detection);
+        config_.detection.model, config_.detection.inference);
 
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
     tracker_ = tracker_factory->create(config_.tracking);
+    auto reid_factory = ReidFactory::for_model(config_.reid.model);
+    reid_pipeline_ = reid_factory->create(config_.reid.model,
+        config_.detection.model.camera_input, config_.reid.inference);
+    reid_matcher_ = std::make_unique<ReidMatcher>(
+        config_.reid.matcher, config_.reid.model.output_dimensions);
 }
 
 
@@ -236,7 +266,7 @@ void BenchmarkApplication::run()
     }
 
     const fs::path run_dir = create_run_directory(
-        output_root, config_.model.name, tracker_name_);
+        output_root, config_.detection.model.name, tracker_name_);
 
     // run 디렉터리 생성 이후의 모든 실패는 불완전한 결과를 통째로 정리한다.
     try
@@ -244,8 +274,12 @@ void BenchmarkApplication::run()
         // 실행 당시 사용한 설정을 결과와 함께 보관한다.
         fs::copy_file(config_path_, run_dir / "benchmark.yaml");
         fs::copy_file(
-            config_.model_config_path,
-            run_dir / fs::path(config_.model_config_path).filename());
+            config_.detection.config_path,
+            run_dir / fs::path(config_.detection.config_path).filename());
+        fs::copy_file(config_.reid.config_path, run_dir / "reid" /
+            fs::path(config_.reid.config_path).filename());
+        fs::copy_file(config_.reid.matcher_config_path, run_dir / "reid" /
+            fs::path(config_.reid.matcher_config_path).filename());
         const fs::path tracking_dir = run_dir / "tracking";
         fs::create_directory(tracking_dir);
         for (const auto& [id, entry] : config_.tracking_catalog)
@@ -308,24 +342,40 @@ void BenchmarkApplication::run()
 
             std::ofstream track_file(
                 run_dir / "tracks" / (sequence_name + ".txt"));
+            std::ofstream reid_track_file(
+                run_dir / "tracks_reid" / (sequence_name + ".txt"));
 
             std::ofstream timing_file(
                 run_dir / "timing" / (sequence_name + ".csv"));
+            std::ofstream reid_file(
+                run_dir / "reid" / (sequence_name + ".csv"));
+            std::ofstream match_file(
+                run_dir / "reid" / (sequence_name + "_matches.csv"));
 
-            if (!detection_file || !track_file || !timing_file)
+            if (!detection_file || !track_file || !reid_track_file ||
+                !timing_file || !reid_file || !match_file)
                 throw std::runtime_error(
                     "Benchmark 결과 파일을 생성하지 못했습니다: " + sequence_name);
 
             detection_file << std::fixed << std::setprecision(6);
             track_file << std::fixed << std::setprecision(6);
+            reid_track_file << std::fixed << std::setprecision(6);
             benchmark_result_writer::write_timing_header(timing_file);
+            reid_file << "frame_id,track_id,x,y,width,height,elapsed_ms";
+            for (int i = 0; i < config_.reid.model.output_dimensions; ++i)
+                reid_file << ",embedding_" << i;
+            reid_file << '\n' << std::fixed << std::setprecision(6);
+            match_file << "frame_id,tracker_id,stable_id,similarity\n"
+                << std::fixed << std::setprecision(6);
 
-            if (!detection_file || !track_file || !timing_file)
+            if (!detection_file || !track_file || !reid_track_file ||
+                !timing_file || !reid_file || !match_file)
                 throw std::runtime_error(
                     "Benchmark 결과 파일 초기화에 실패했습니다: " + sequence_name);
 
             // Sequence 사이에서 Track 상태가 이어지지 않도록 초기화한다.
             tracker_->reset();
+            reid_matcher_->reset();
 
             Logger::info("[Benchmark] Sequence 시작: " + sequence_name);
 
@@ -357,6 +407,7 @@ void BenchmarkApplication::run()
                 std::promise<DetectionResult> completion_promise;
                 std::future<DetectionResult> completion_future =
                     completion_promise.get_future();
+                const auto frame_started_at = std::chrono::steady_clock::now();
                 detection_pipeline_->submit_async(
                     frame,
                     [&completion_promise](
@@ -411,12 +462,7 @@ void BenchmarkApplication::run()
                     profiler_samples.back().cpu_task_us =
                         detection_timing.cpu_task_us;
 
-                write_detections(detection_file, frame_id, detections);
-                if (!detection_file)
-                    throw std::runtime_error(
-                        "Detection 결과 저장에 실패했습니다: " + sequence_name);
-
-                // 결과 저장 시간을 제외하고 track() 호출 자체만 측정한다.
+                // 결과 저장 시간을 제외하고 각 처리 단계와 프레임 전체를 측정한다.
                 const auto tracking_started_at = std::chrono::steady_clock::now();
                 const std::vector<Track> tracks = tracker_->track(detections);
                 const auto tracking_finished_at = std::chrono::steady_clock::now();
@@ -424,10 +470,71 @@ void BenchmarkApplication::run()
                     tracking_finished_at - tracking_started_at).count();
                 profiler_samples.back().tracking_us = tracking_ms * 1000.0;
 
+                std::vector<const Track*> crop_candidates;
+                crop_candidates.reserve(tracks.size());
+                for (const Track& track : tracks) crop_candidates.push_back(&track);
+                std::stable_sort(crop_candidates.begin(), crop_candidates.end(),
+                    [this](const Track* a, const Track* b) {
+                        return reid_matcher_->needs_decision_feature(a->track_id) &&
+                            !reid_matcher_->needs_decision_feature(b->track_id);
+                    });
+                std::unordered_map<int, std::vector<float>> embeddings;
+                int crop_count = 0;
+                double reid_ms = 0.0;
+                std::ostringstream reid_rows;
+                reid_rows << std::fixed << std::setprecision(6);
+                for (const Track* candidate : crop_candidates)
+                {
+                    const Track& track = *candidate;
+                    if (track.predicted || track.class_id != config_.reid_options.person_class_id ||
+                        track.height < config_.reid_options.min_crop_height ||
+                        crop_count >= config_.reid_options.max_crops_per_frame)
+                        continue;
+                    if (!std::isfinite(track.x) || !std::isfinite(track.y) ||
+                        !std::isfinite(track.width) || !std::isfinite(track.height) ||
+                        track.width <= 0.0F || track.height <= 0.0F)
+                        continue;
+                    const int x1 = static_cast<int>(std::clamp(track.x, 0.0F, static_cast<float>(frame->image.cols)));
+                    const int y1 = static_cast<int>(std::clamp(track.y, 0.0F, static_cast<float>(frame->image.rows)));
+                    const int x2 = static_cast<int>(std::clamp(track.x + track.width, 0.0F, static_cast<float>(frame->image.cols)));
+                    const int y2 = static_cast<int>(std::clamp(track.y + track.height, 0.0F, static_cast<float>(frame->image.rows)));
+                    if (x2 - x1 < 2 || y2 - y1 < 2) continue;
+                    const cv::Rect crop(x1, y1, x2 - x1, y2 - y1);
+                    const auto reid_started_at = std::chrono::steady_clock::now();
+                    const auto embedding = reid_pipeline_->embed(frame->image, crop);
+                    const double elapsed_ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - reid_started_at).count();
+                    reid_ms += elapsed_ms;
+                    reid_rows << frame_id << ',' << track.track_id << ',' << x1 << ',' << y1
+                        << ',' << crop.width << ',' << crop.height << ',' << elapsed_ms;
+                    for (float value : embedding) reid_rows << ',' << value;
+                    reid_rows << '\n';
+                    embeddings.emplace(track.track_id, embedding);
+                    ++crop_count;
+                }
+                const auto matching_started_at = std::chrono::steady_clock::now();
+                const ReidMatchResult matched = reid_matcher_->step(frame_id, tracks, embeddings);
+                const auto matching_finished_at = std::chrono::steady_clock::now();
+                const double matching_ms = std::chrono::duration<double, std::milli>(
+                    matching_finished_at - matching_started_at).count();
+                const double frame_total_ms = std::chrono::duration<double, std::milli>(
+                    matching_finished_at - frame_started_at).count();
+                auto& sample = profiler_samples.back();
+                sample.reid_us = reid_ms * 1000.0;
+                sample.reid_crop_count = static_cast<std::size_t>(crop_count);
+                sample.matching_us = matching_ms * 1000.0;
+                sample.frame_total_us = frame_total_ms * 1000.0;
+
+                write_detections(detection_file, frame_id, detections);
                 write_tracks(track_file, frame_id, tracks);
-                if (!track_file)
-                    throw std::runtime_error(
-                        "Tracking 결과 저장에 실패했습니다: " + sequence_name);
+                reid_file << reid_rows.str();
+                write_tracks(reid_track_file, frame_id, matched.tracks);
+                for (const ReidMatchEvent& event : matched.matches)
+                    match_file << frame_id << ',' << event.tracker_id << ','
+                        << event.stable_id << ',' << event.similarity << '\n';
+                if (!detection_file || !track_file || !reid_file ||
+                    !reid_track_file || !match_file)
+                    throw std::runtime_error("Benchmark 결과 저장에 실패했습니다: " + sequence_name);
 
                 benchmark_result_writer::write_timing_row(
                     timing_file,
@@ -436,7 +543,7 @@ void BenchmarkApplication::run()
                     detection_timing.latency_ms(),
                     detection_timing.npu_processing_ms(),
                     detection_timing.postprocess_ms(),
-                    tracking_ms);
+                    tracking_ms, reid_ms, crop_count, matching_ms, frame_total_ms);
                 if (!timing_file)
                     throw std::runtime_error(
                         "Timing 결과 저장에 실패했습니다: " + sequence_name);
@@ -453,9 +560,13 @@ void BenchmarkApplication::run()
             benchmark_result_writer::write_timing_footer(timing_file);
             detection_file.close();
             track_file.close();
+            reid_track_file.close();
             timing_file.close();
+            reid_file.close();
+            match_file.close();
 
-            if (detection_file.fail() || track_file.fail() || timing_file.fail())
+            if (detection_file.fail() || track_file.fail() || reid_track_file.fail() ||
+                timing_file.fail() || reid_file.fail() || match_file.fail())
                 throw std::runtime_error(
                     "Benchmark 결과 파일 마무리에 실패했습니다: " + sequence_name);
 

@@ -10,7 +10,7 @@ std::unique_ptr<DetectorFactory> DetectorFactory::for_model(
 }
 
 std::unique_ptr<IDetectionPipeline> DetectorFactory::create(
-    const ModelConfig&, const DetectionConfig&) const
+    const ModelConfig&, const InferenceConfig&) const
 {
     throw std::runtime_error(
         "DetectorFactory requires a build with LWIR_ENABLE_DX_APP=ON");

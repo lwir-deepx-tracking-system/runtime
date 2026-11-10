@@ -55,11 +55,11 @@ std::unique_ptr<IPreprocessor> DetectorFactory::create_preprocessor(
 
 std::unique_ptr<IDetectionPipeline> DetectorFactory::create(
     const ModelConfig& model_config,
-    const DetectionConfig& detection_config) const
+    const InferenceConfig& inference_config) const
 {
     auto preprocessor = create_preprocessor(model_config);
     auto postprocessor = create_postprocessor(model_config);
     return std::make_unique<DxrtDetectionPipeline>(
-        model_config, detection_config,
+        model_config, inference_config,
         std::move(preprocessor), std::move(postprocessor));
 }

@@ -8,21 +8,35 @@ int main()
 {
     const YAML::Node runtime_root =
         config_parser::load_yaml("config/runtime.yaml");
-    const DetectionConfig runtime =
-        config_parser::load_detection_config(runtime_root["detection"]);
+    const InferenceConfig runtime =
+        config_parser::load_inference_config(runtime_root["detection"]["inference"], "detection.inference");
     if (runtime.max_inflight != 4 ||
         runtime.buffer_count != 6 ||
-        runtime.use_ort)
+        runtime.use_ort || runtime.npu_cores != NpuCoreBinding::All)
         return 1;
 
     const YAML::Node benchmark_root =
         config_parser::load_yaml("config/benchmark.yaml");
-    const DetectionConfig benchmark =
-        config_parser::load_detection_config(benchmark_root["detection"]);
+    const InferenceConfig benchmark =
+        config_parser::load_inference_config(benchmark_root["detection"]["inference"], "detection.inference");
     if (benchmark.max_inflight != 1 ||
         benchmark.buffer_count != 6 ||
         benchmark.use_ort)
         return 2;
+
+    const InferenceConfig reid = config_parser::load_inference_config(
+        benchmark_root["reid"]["inference"], "reid.inference");
+    if (reid.max_inflight != 1 || reid.buffer_count != 0 || reid.use_ort)
+        return 8;
+
+    const YAML::Node single_core = YAML::Load(
+        "max_inflight: 1\n"
+        "buffer_count: 0\n"
+        "use_ort: false\n"
+        "npu_cores: '1'\n");
+    if (config_parser::load_inference_config(single_core, "reid.inference").npu_cores !=
+        NpuCoreBinding::Core1)
+        return 9;
 
     const BenchmarkSequenceConfig configured_range =
         config_parser::load_benchmark_sequence_config(
@@ -66,7 +80,7 @@ int main()
         "max_inflight: 1\n"
         "buffer_count: 0\n"
         "use_ort: false\n");
-    if (config_parser::load_detection_config(automatic).buffer_count != 0)
+    if (config_parser::load_inference_config(automatic, "detection.inference").buffer_count != 0)
         return 6;
 
     const YAML::Node invalid = YAML::Load(
@@ -75,12 +89,24 @@ int main()
         "use_ort: false\n");
     try
     {
-        (void)config_parser::load_detection_config(invalid);
+        (void)config_parser::load_inference_config(invalid, "detection.inference");
         return 7;
     }
     catch (const std::runtime_error&)
     {
     }
+
+    const YAML::Node invalid_core = YAML::Load(
+        "max_inflight: 1\n"
+        "buffer_count: 0\n"
+        "use_ort: false\n"
+        "npu_cores: '3'\n");
+    try
+    {
+        (void)config_parser::load_inference_config(invalid_core, "reid.inference");
+        return 10;
+    }
+    catch (const std::runtime_error&) {}
 
     return 0;
 }

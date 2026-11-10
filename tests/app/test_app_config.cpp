@@ -12,10 +12,19 @@ int main()
     const RuntimeConfig config = load_runtime_config("config/runtime.yaml");
 
     // runtime.yaml의 모델 경로와 고정 Detection 실행 설정 검증.
-    if (config.model_config_path != "config/model/yolov8n.yaml" ||
-        config.detection.max_inflight != 4 ||
-        config.detection.buffer_count != 6 ||
-        config.detection.use_ort != yaml["detection"]["use_ort"].as<bool>()) return 1;
+    if (config.detection.config_path != "config/detection/yolov8n.yaml" ||
+        config.reid.config_path != "config/reid/repvgg.yaml" ||
+        config.reid.model.name != "repvgg" || config.reid.model.input_width != 64 ||
+        config.reid.model.input_height != 128 || config.reid.model.output_dimensions != 128 ||
+        config.reid.matcher_config_path != "config/reid/matcher.yaml" ||
+        config.reid.matcher.gallery_size != 5 ||
+        config.reid.matcher.max_lost_frames != 90 ||
+        config.reid.inference.max_inflight != 1 ||
+        config.reid.inference.buffer_count != 0 ||
+        config.reid.inference.use_ort ||
+        config.detection.inference.max_inflight != 4 ||
+        config.detection.inference.buffer_count != 6 ||
+        config.detection.inference.use_ort != yaml["detection"]["inference"]["use_ort"].as<bool>()) return 1;
 
     // runtime 카탈로그가 ByteTrack YAML을 선택하고 실행 설정으로 합치는지 확인한다.
     if (config.tracking.track_threshold != 0.5F ||
@@ -46,26 +55,26 @@ int main()
         return 42;
 
     // 연결된 모델 YAML의 Camera와 모델 입력 계약 검증.
-    if (config.model.camera_input.opencv_type != "CV_16UC1") return 3;
-    if (config.model.camera_input.width != 640 || config.model.camera_input.height != 480) return 4;
-    if (config.model.input.width != 640 || config.model.input.height != 640) return 5;
+    if (config.detection.model.camera_input.opencv_type != "CV_16UC1") return 3;
+    if (config.detection.model.camera_input.width != 640 || config.detection.model.camera_input.height != 480) return 4;
+    if (config.detection.model.input.width != 640 || config.detection.model.input.height != 640) return 5;
 
     // 모델 YAML의 전처리와 output tensor 계약이 typed 설정으로 전달되는지 확인한다.
-    if (config.model.preprocess.type != "lwir_letterbox" ||
-        config.model.postprocess.type != "yolov8" ||
-        config.model.preprocess.pad_value != 114 ||
-        config.model.postprocess.output_format != PostprocessOutputFormat::Auto ||
-        config.model.postprocess.split_output_levels != 3 ||
-        config.model.postprocess.split_regression_bins != 16 ||
-        config.model.postprocess.split_class_score_activation !=
+    if (config.detection.model.preprocess.type != "lwir_letterbox" ||
+        config.detection.model.postprocess.type != "yolov8" ||
+        config.detection.model.preprocess.pad_value != 114 ||
+        config.detection.model.postprocess.output_format != PostprocessOutputFormat::Auto ||
+        config.detection.model.postprocess.split_output_levels != 3 ||
+        config.detection.model.postprocess.split_regression_bins != 16 ||
+        config.detection.model.postprocess.split_class_score_activation !=
             PostprocessScoreActivation::Sigmoid ||
-        config.model.postprocess.nms_mode != PostprocessNmsMode::Enabled ||
-        !config.model.postprocess.class_agnostic_nms ||
-        config.model.postprocess.num_classes != 80)
+        config.detection.model.postprocess.nms_mode != PostprocessNmsMode::Enabled ||
+        !config.detection.model.postprocess.class_agnostic_nms ||
+        config.detection.model.postprocess.num_classes != 80)
         return 6;
 
     // YOLO26은 같은 parser를 사용하되 DFL-free split-head와 NMS auto 계약을 갖는다.
-    const ModelConfig yolo26 = load_model_config("config/model/yolo26s.yaml");
+    const ModelConfig yolo26 = load_model_config("config/detection/yolo26s.yaml");
     if (yolo26.name != "yolo26s" ||
         yolo26.preprocess.type != "lwir_letterbox" ||
         yolo26.postprocess.type != "yolo26" ||
@@ -78,10 +87,10 @@ int main()
         !yolo26.postprocess.class_agnostic_nms ||
         yolo26.postprocess.num_classes != 16)
         return 7;
-    if (config.model_catalog.at(2).model.postprocess.type != "yolo26")
+    if (config.detection_catalog.at(2).model.postprocess.type != "yolo26")
         return 44;
-    if (!YAML::LoadFile("config/model/yolov8n.yaml")["postprocess"] ||
-        !YAML::LoadFile("config/model/yolo26s.yaml")["postprocess"])
+    if (!YAML::LoadFile("config/detection/yolov8n.yaml")["postprocess"] ||
+        !YAML::LoadFile("config/detection/yolo26s.yaml")["postprocess"])
         return 47;
 
     // GUI 설정도 runtime.yaml에서 AppConfig를 통해 typed 값으로 전달된다.
@@ -227,11 +236,11 @@ int main()
     if (model_fd < 0) return 42;
     ::close(model_fd);
     RemoveConfig model_cleanup{model_filename};
-    auto alternate = YAML::LoadFile("config/model/yolo26s.yaml");
+    auto alternate = YAML::LoadFile("config/detection/yolo26s.yaml");
     alternate["camera_input"]["clip_max"] = 32000;
     { std::ofstream out(model_filename); out << alternate; }
     runtime["gui"]["command"]["handler"] = "deferred";
-    runtime["model_catalog"][1]["config"] = model_filename;
+    runtime["detection_catalog"][1]["config"] = model_filename;
     if (!invalid_combination()) return 43;
     runtime = YAML::Clone(yaml);
     runtime["tracking"]["id"] = 99;
@@ -243,7 +252,7 @@ int main()
     runtime["tracking"]["track_threshold"] = 0.9;
     if (!invalid_combination()) return 48;
     runtime = YAML::Clone(yaml);
-    runtime["model_catalog"][1]["id"] = 3;
+    runtime["detection_catalog"][1]["id"] = 3;
     if (!invalid_combination()) return 49;
     runtime = YAML::Clone(yaml);
     runtime["tracking_catalog"][0]["id"] = 2;

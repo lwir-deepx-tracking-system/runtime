@@ -8,7 +8,7 @@
 // LWIR 입력 검증, 16→8-bit 변환과 letterbox 좌표 정보를 함께 확인한다.
 int main()
 {
-    ModelConfig config = load_model_config("config/model/yolov8n.yaml");
+    ModelConfig config = load_model_config("config/detection/yolov8n.yaml");
     LwirPreprocessor preprocessor(config);
 
     // Camera 계약과 다른 8-bit 입력은 처리 전에 거부해야 한다.

@@ -11,7 +11,7 @@ measurement:
 
 
 # ============================================================
-# 2. Model
+# 2. Detection / ReID
 # ============================================================
 
 # 모델에 종속적인 설정은 별도 YAML에서 관리한다.
@@ -20,34 +20,37 @@ measurement:
 # - model input size
 # - preprocess
 # - postprocess
-model:
-  config: config/model/yolov8n.yaml
+detection:
+  config: config/detection/yolov8n.yaml
+  inference:
+    # 동시에 처리할 수 있는 최대 검출 요청 수
+    max_inflight: 4
+    # DXRT 내부 입력·출력 buffer 수. 0이면 자동 설정
+    buffer_count: 6
+    # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
+    use_ort: false
+    npu_cores: all
+
+reid:
+  config: config/reid/repvgg.yaml
+  matcher_config: config/reid/matcher.yaml
+  inference:
+    # runtime ReID 스레드는 후속 작업이며, 설정값은 미리 검증한다.
+    max_inflight: 1
+    buffer_count: 0
+    use_ort: false
+    npu_cores: all
 
 # Internal model catalog. The PC wire protocol does not define model selection.
-model_catalog:
+detection_catalog:
   - id: 1
-    config: config/model/yolov8n.yaml
+    config: config/detection/yolov8n.yaml
   - id: 2
-    config: config/model/yolo26s.yaml
+    config: config/detection/yolo26s.yaml
 
 
 # ============================================================
-# 3. Detection
-# ============================================================
-
-detection:
-  # 동시에 처리할 수 있는 최대 inference 요청 수
-  max_inflight: 4
-
-  # DXRT 내부 입력·출력 buffer 수. 0이면 DXRT가 자동으로 결정한다.
-  buffer_count: 6
-
-  # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
-  use_ort: false
-
-
-# ============================================================
-# 4. Tracking
+# 3. Tracking
 # ============================================================
 
 tracking:
@@ -59,7 +62,7 @@ tracking_catalog:
 
 
 # ============================================================
-# 5. Target / Control
+# 4. Target / Control
 # ============================================================
 
 control:
@@ -80,7 +83,7 @@ control:
     speed: 30              # 수동 방향키 고정 속도. AUTO 상한과 독립
 
 # ============================================================
-# 6. GUI Communication
+# 5. GUI Communication
 # ============================================================
 
 gui:

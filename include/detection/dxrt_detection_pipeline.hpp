@@ -11,7 +11,7 @@ class DxrtDetectionPipeline final : public IDetectionPipeline
 public:
     DxrtDetectionPipeline(
         const ModelConfig& model_config,
-        const DetectionConfig& detection_config,
+        const InferenceConfig& inference_config,
         std::unique_ptr<IPreprocessor> preprocessor,
         std::unique_ptr<IPostprocessor> postprocessor);
     ~DxrtDetectionPipeline() override;

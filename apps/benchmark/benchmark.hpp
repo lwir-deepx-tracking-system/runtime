@@ -9,10 +9,10 @@
 struct BenchmarkConfig
 {
     LoggingConfig logging;
-    std::string model_config_path;
-    ModelConfig model;
+    DetectionSettings detection;
+    ReidSettings reid;
+    ReidBenchmarkConfig reid_options;
     std::map<int, TrackingCatalogEntry> tracking_catalog;
-    DetectionConfig detection;
     TrackingConfig tracking;
     BenchmarkSequenceConfig sequence;
     BenchmarkPathConfig path;

@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "common/common_util.hpp"
+#include "common/dxrt_inference_option.hpp"
 
 struct DxrtDetectionPipeline::NpuState
 {
@@ -46,26 +47,22 @@ struct DxrtDetectionPipeline::NpuState
   std::thread                        completion_worker;
 
   static dxrt::InferenceOption make_inference_option(
-      const DetectionConfig &config)
+      const InferenceConfig &config)
   {
     // job별 NPU core 시간을 얻기 위해 engine 생성 전에 profiler를 켠다.
     dxrt::Configuration::GetInstance().SetEnable(
         dxrt::Configuration::ITEM::PROFILER, true);
 
-    dxrt::InferenceOption option;
-    // AppConfig가 검증한 DXRT 실행 옵션만 적용한다.
-    option.bufferCount = config.buffer_count;
-    option.useORT = config.use_ort;
-    return option;
+    return make_dxrt_inference_option(config);
   }
 
   NpuState(
       const ModelConfig &model_config,
-      const DetectionConfig &detection_config)
-      : inference_option(make_inference_option(detection_config)),
+      const InferenceConfig &inference_config)
+      : inference_option(make_inference_option(inference_config)),
         engine(model_config.path, inference_option),
         max_inflight(std::max<std::size_t>(
-            1, detection_config.max_inflight))
+            1, inference_config.max_inflight))
   {
     if(!dxapp::minversionforRTandCompiler(&engine))
       throw std::runtime_error("DXRT runtime/compiler version is incompatible with this model");
@@ -347,11 +344,11 @@ struct DxrtDetectionPipeline::NpuState
 
 DxrtDetectionPipeline::DxrtDetectionPipeline(
     const ModelConfig     &model_config,
-    const DetectionConfig &detection_config,
+    const InferenceConfig &inference_config,
     std::unique_ptr<IPreprocessor> preprocessor,
     std::unique_ptr<IPostprocessor> postprocessor)
     : preprocessor_(std::move(preprocessor)), postprocessor_(std::move(postprocessor)),
-      npu_(std::make_unique<NpuState>(model_config, detection_config))
+      npu_(std::make_unique<NpuState>(model_config, inference_config))
 {
   if (!preprocessor_ || !postprocessor_) throw std::invalid_argument("Detection strategies must not be null");
   npu_->register_callback(postprocessor_.get());

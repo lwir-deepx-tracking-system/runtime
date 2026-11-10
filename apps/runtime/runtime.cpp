@@ -118,7 +118,7 @@ public:
     RuntimeApplication& operator=(const RuntimeApplication&) = delete;
 
     // Pipeline Worker 실행
-    std::uint32_t model_count() const override { return config_.model_catalog.size(); }
+    std::uint32_t model_count() const override { return config_.detection_catalog.size(); }
     std::uint32_t tracker_count() const override { return config_.tracking_catalog.size(); }
     PipelineChangeTicket request_model_change(std::uint32_t model_id) override;
     // 트래커 변경 서비스에 요청을 위임한다.
@@ -169,7 +169,13 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         MetricsWriterOptions options;
         options.output_root = std::filesystem::path(config_.measurement.output_root) / runtime_mode_;
         options.snapshots.emplace_back(config_path_, "runtime.yaml");
-        for (const auto& [id, entry] : config_.model_catalog)
+        options.snapshots.emplace_back(config_.reid.config_path,
+            std::filesystem::path("reid") /
+                std::filesystem::path(config_.reid.config_path).filename());
+        options.snapshots.emplace_back(config_.reid.matcher_config_path,
+            std::filesystem::path("reid") /
+                std::filesystem::path(config_.reid.matcher_config_path).filename());
+        for (const auto& [id, entry] : config_.detection_catalog)
             options.model_configs.emplace(id, entry.config_path);
         for (const auto& [id, entry] : config_.tracking_catalog)
             options.snapshots.emplace_back(entry.config_path,
@@ -180,8 +186,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
     camera_ = std::make_unique<Camera>();
 
     model_manager_thread_ = std::make_unique<ModelManagerThread>(
-        config_.model_catalog.at(config_.initial_model_id),
-        config_.detection,
+        config_.detection_catalog.at(config_.initial_detection_id),
+        config_.detection.inference,
         model_change_requests_,
         active_pipeline_,
         runtime_control_, &model_change_results_,
@@ -241,8 +247,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         gui_sender_ = std::make_unique<GuiSender>(
             config_.gui.video,
             config_.gui.metadata,
-            config_.model.camera_input.clip_min,
-            config_.model.camera_input.clip_max);
+            config_.detection.model.camera_input.clip_min,
+            config_.detection.model.camera_input.clip_max);
         gui_sender_thread_ = std::make_unique<GuiSenderThread>(
             *gui_sender_, runtime_control_, gui_track_queue_);
 
@@ -286,7 +292,7 @@ PipelineChangeTicket RuntimeApplication::request_model_change(std::uint32_t mode
     runtime_control_.state.store(RuntimeState::Switching);
     frame_queue_.interrupt_waiters();
     suspend_for_model_.store(true);
-    if (!model_change_requests_.push({request_id, config_.model_catalog.at(static_cast<int>(model_id))})) {
+    if (!model_change_requests_.push({request_id, config_.detection_catalog.at(static_cast<int>(model_id))})) {
         model_completions_.erase(request_id);
         runtime_control_.state.store(state);
         return {GuiPipelineResult::NotReady, {}};

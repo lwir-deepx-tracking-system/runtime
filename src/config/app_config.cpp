@@ -121,22 +121,31 @@ LoggingConfig load_logging_config(const YAML::Node& node)
     return c;
 }
 
-DetectionConfig load_detection_config(const YAML::Node& node)
+InferenceConfig load_inference_config(const YAML::Node& node, const std::string& path)
 {
-    DetectionConfig c;
+    InferenceConfig c;
     const int max_inflight = required<int>(
-        node, "max_inflight", "detection");
+        node, "max_inflight", path);
     if (max_inflight <= 0)
-        throw std::runtime_error("detection.max_inflight must be positive");
+        throw std::runtime_error(path + ".max_inflight must be positive");
     c.max_inflight = static_cast<std::size_t>(max_inflight);
 
     c.buffer_count = required<int>(
-        node, "buffer_count", "detection");
+        node, "buffer_count", path);
     if (c.buffer_count < 0 || c.buffer_count > 100)
         throw std::runtime_error(
-            "detection.buffer_count must be 0 (auto) or in [1, 100]");
+            path + ".buffer_count must be 0 (auto) or in [1, 100]");
 
-    c.use_ort = required<bool>(node, "use_ort", "detection");
+    c.use_ort = required<bool>(node, "use_ort", path);
+    const std::string cores = optional_value<std::string>(node, "npu_cores", path, "all");
+    if (cores == "all") c.npu_cores = NpuCoreBinding::All;
+    else if (cores == "0") c.npu_cores = NpuCoreBinding::Core0;
+    else if (cores == "1") c.npu_cores = NpuCoreBinding::Core1;
+    else if (cores == "2") c.npu_cores = NpuCoreBinding::Core2;
+    else if (cores == "01") c.npu_cores = NpuCoreBinding::Core01;
+    else if (cores == "12") c.npu_cores = NpuCoreBinding::Core12;
+    else if (cores == "02") c.npu_cores = NpuCoreBinding::Core02;
+    else throw std::runtime_error(path + ".npu_cores must be all, 0, 1, 2, 01, 12 or 02");
     return c;
 }
 
@@ -533,6 +542,71 @@ ModelConfig load_model_config(const std::string& path)
     return c;
 }
 
+ReidModelConfig load_reid_config(const std::string& path)
+{
+    const YAML::Node root = config_parser::load_yaml(path);
+    ReidModelConfig c;
+    c.name = required<std::string>(root["model"], "name", "model");
+    c.path = required<std::string>(root["model"], "path", "model");
+    c.input_width = required<int>(root["input"], "width", "input");
+    c.input_height = required<int>(root["input"], "height", "input");
+    c.input_channels = required<int>(root["input"], "channels", "input");
+    c.input_dtype = required<std::string>(root["input"], "dtype", "input");
+    c.input_layout = required<std::string>(root["input"], "layout", "input");
+    c.resize = required<std::string>(root["preprocess"], "resize", "preprocess");
+    c.channel_mode = required<std::string>(root["preprocess"], "channel_mode", "preprocess");
+    c.output_name = required<std::string>(root["output"], "name", "output");
+    c.output_dimensions = required<int>(root["output"], "dimensions", "output");
+    c.output_dtype = required<std::string>(root["output"], "dtype", "output");
+    c.output_normalize = required<std::string>(root["output"], "normalize", "output");
+    if (c.name.empty() || c.path.empty() || c.output_name.empty() ||
+        c.input_width <= 0 || c.input_height <= 0 || c.output_dimensions <= 0)
+        throw std::runtime_error("invalid ReID model path, name or dimensions");
+    if (c.input_channels != 3 || c.input_dtype != "uint8" || c.input_layout != "NHWC" ||
+        c.resize != "stretch" || c.channel_mode != "replicate_gray_to_rgb" ||
+        c.output_dtype != "float32" || c.output_normalize != "l2")
+        throw std::runtime_error("unsupported ReID tensor or preprocessing contract");
+    return c;
+}
+
+ReidMatcherConfig load_reid_matcher_config(const std::string& path)
+{
+    const YAML::Node node = config_parser::load_yaml(path)["matcher"];
+    ReidMatcherConfig c;
+    c.person_class_id = required<int>(node, "person_class_id", "matcher");
+    c.similarity_threshold = required<float>(node, "similarity_threshold", "matcher");
+    c.max_lost_frames = required<int>(node, "max_lost_frames", "matcher");
+    c.gallery_size = required<int>(node, "gallery_size", "matcher");
+    c.decision_wait_frames = required<int>(node, "decision_wait_frames", "matcher");
+    c.min_height_ratio = required<float>(node, "min_height_ratio", "matcher");
+    c.max_height_ratio = required<float>(node, "max_height_ratio", "matcher");
+    c.max_center_distance_height = required<float>(node, "max_center_distance_height", "matcher");
+    c.distance_growth_per_10_frames = required<float>(node, "distance_growth_per_10_frames", "matcher");
+    if (c.person_class_id < 0 || !std::isfinite(c.similarity_threshold) ||
+        c.similarity_threshold < -1.0F || c.similarity_threshold > 1.0F ||
+        c.max_lost_frames <= 0 || c.gallery_size <= 0 || c.gallery_size > 100 ||
+        c.decision_wait_frames < 0 || c.decision_wait_frames > c.max_lost_frames ||
+        !std::isfinite(c.min_height_ratio) || !std::isfinite(c.max_height_ratio) ||
+        c.min_height_ratio <= 0.0F || c.max_height_ratio < c.min_height_ratio ||
+        !std::isfinite(c.max_center_distance_height) ||
+        c.max_center_distance_height < 0.0F ||
+        !std::isfinite(c.distance_growth_per_10_frames) ||
+        c.distance_growth_per_10_frames < 0.0F)
+        throw std::runtime_error("invalid ReID matcher configuration");
+    return c;
+}
+
+ReidBenchmarkConfig config_parser::load_reid_benchmark_config(const YAML::Node& node)
+{
+    ReidBenchmarkConfig c;
+    c.person_class_id = required<int>(node, "person_class_id", "reid");
+    c.min_crop_height = required<int>(node, "min_crop_height", "reid");
+    c.max_crops_per_frame = required<int>(node, "max_crops_per_frame", "reid");
+    if (c.person_class_id < 0 || c.min_crop_height <= 0 || c.max_crops_per_frame <= 0)
+        throw std::runtime_error("invalid ReID benchmark crop policy");
+    return c;
+}
+
 // 모델 YAML의 후처리 계약을 파싱하고 출력 해석 방식·필터링 조건을 검증한다.
 static ModelPostprocessConfig parse_postprocess_config(const YAML::Node& post)
 {
@@ -625,55 +699,68 @@ RuntimeConfig load_runtime_config(const std::string& path)
     RuntimeConfig c;
     c.logging = config_parser::load_logging_config(root["logging"]);
 
-    c.model_config_path = config_parser::required_string(
-        root["model"], "config", "model");
-    if (c.model_config_path.empty())
-        throw std::runtime_error("model.config must not be empty");
-    c.model = load_model_config(c.model_config_path);
+    c.detection.config_path = config_parser::required_string(
+        root["detection"], "config", "detection");
+    if (c.detection.config_path.empty())
+        throw std::runtime_error("detection.config must not be empty");
+    c.detection.model = load_model_config(c.detection.config_path);
+    c.detection.inference = config_parser::load_inference_config(
+        root["detection"]["inference"], "detection.inference");
 
-    const YAML::Node model_catalog = root["model_catalog"];
-    if (model_catalog && !model_catalog.IsSequence())
-        throw std::runtime_error("model_catalog must be a sequence");
-    if (model_catalog)
+    const YAML::Node detection_catalog = root["detection_catalog"];
+    if (detection_catalog && !detection_catalog.IsSequence())
+        throw std::runtime_error("detection_catalog must be a sequence");
+    if (detection_catalog)
     {
-        for (const YAML::Node& item : model_catalog)
+        for (const YAML::Node& item : detection_catalog)
         {
             ModelCatalogEntry entry;
             entry.id = item["id"].as<int>();
             entry.config_path = config_parser::required_string(
-                item, "config", "model_catalog");
+                item, "config", "detection_catalog");
             if (entry.id <= 0 || entry.config_path.empty())
                 throw std::runtime_error(
-                    "model_catalog entries need a positive id and config path");
+                    "detection_catalog entries need a positive id and config path");
             entry.model = load_model_config(entry.config_path);
-            if (!c.model_catalog.emplace(entry.id, std::move(entry)).second)
-                throw std::runtime_error("Duplicate model_catalog id");
+            if (!c.detection_catalog.emplace(entry.id, std::move(entry)).second)
+                throw std::runtime_error("Duplicate detection_catalog id");
         }
     }
-    if (c.model_catalog.empty())
+    if (c.detection_catalog.empty())
     {
         ModelCatalogEntry entry;
         entry.id = 1;
-        entry.config_path = c.model_config_path;
-        entry.model = c.model;
-        c.model_catalog.emplace(entry.id, std::move(entry));
+        entry.config_path = c.detection.config_path;
+        entry.model = c.detection.model;
+        c.detection_catalog.emplace(entry.id, std::move(entry));
     }
 
-    validate_catalog_ids(c.model_catalog, "model_catalog");
+    validate_catalog_ids(c.detection_catalog, "detection_catalog");
     const std::string active_config =
-        fs::path(c.model_config_path).lexically_normal().string();
-    for (const auto& item : c.model_catalog)
+        fs::path(c.detection.config_path).lexically_normal().string();
+    for (const auto& item : c.detection_catalog)
     {
         if (fs::path(item.second.config_path).lexically_normal().string() ==
             active_config)
-            c.initial_model_id = item.first;
+            c.initial_detection_id = item.first;
     }
-    if (c.initial_model_id == 0)
+    if (c.initial_detection_id == 0)
         throw std::runtime_error(
-            "model.config must be listed in model_catalog");
-    c.model = c.model_catalog.at(c.initial_model_id).model;
+            "detection.config must be listed in detection_catalog");
+    c.detection.model = c.detection_catalog.at(c.initial_detection_id).model;
 
-    c.detection = config_parser::load_detection_config(root["detection"]);
+    c.reid.config_path = config_parser::required_string(root["reid"], "config", "reid");
+    if (c.reid.config_path.empty())
+        throw std::runtime_error("reid.config must not be empty");
+    c.reid.model = load_reid_config(c.reid.config_path);
+    c.reid.matcher_config_path = config_parser::required_string(
+        root["reid"], "matcher_config", "reid");
+    if (c.reid.matcher_config_path.empty())
+        throw std::runtime_error("reid.matcher_config must not be empty");
+    c.reid.matcher = load_reid_matcher_config(c.reid.matcher_config_path);
+    c.reid.inference = config_parser::load_inference_config(
+        root["reid"]["inference"], "reid.inference");
+
     c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
     c.initial_tracker_id = config_parser::select_tracking_id(
         root["tracking"], c.tracking_catalog);
@@ -683,21 +770,21 @@ RuntimeConfig load_runtime_config(const std::string& path)
     c.gui = config_parser::load_gui_config(root["gui"]);
 
     // Camera and display conversion remain active while the inference model changes.
-    for (const auto& [id, entry] : c.model_catalog)
+    for (const auto& [id, entry] : c.detection_catalog)
     {
         const auto& camera = entry.model.camera_input;
-        const auto& initial = c.model.camera_input;
+        const auto& initial = c.detection.model.camera_input;
         if (camera.width != initial.width || camera.height != initial.height ||
             camera.opencv_type != initial.opencv_type ||
             camera.channel_mode != initial.channel_mode ||
             camera.clip_min != initial.clip_min || camera.clip_max != initial.clip_max)
-            throw std::runtime_error("model_catalog camera input differs for model id=" +
+            throw std::runtime_error("detection_catalog camera input differs for model id=" +
                 std::to_string(id));
     }
     if (c.gui.enabled)
     {
-        if (c.model.camera_input.width != static_cast<int>(kGuiFrameWidth) ||
-            c.model.camera_input.height != static_cast<int>(kGuiFrameHeight))
+        if (c.detection.model.camera_input.width != static_cast<int>(kGuiFrameWidth) ||
+            c.detection.model.camera_input.height != static_cast<int>(kGuiFrameHeight))
             throw std::runtime_error("Camera dimensions do not match the configured GUI protocol");
     }
 

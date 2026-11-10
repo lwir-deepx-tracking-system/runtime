@@ -17,7 +17,7 @@ public:
 
     std::unique_ptr<IDetectionPipeline> create(
         const ModelConfig& model_config,
-        const DetectionConfig& detection_config) const;
+        const InferenceConfig& inference_config) const;
 
 protected:
     virtual std::unique_ptr<IPostprocessor> create_postprocessor(

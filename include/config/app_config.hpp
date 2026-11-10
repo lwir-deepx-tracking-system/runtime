@@ -16,10 +16,13 @@ struct LoggingConfig {
     std::string level;
 };
 
-struct DetectionConfig {
+enum class NpuCoreBinding { All, Core0, Core1, Core2, Core01, Core12, Core02 };
+
+struct InferenceConfig {
     std::size_t max_inflight = 1;
     int buffer_count = 0;
     bool use_ort = false;
+    NpuCoreBinding npu_cores = NpuCoreBinding::All;
 };
 
 enum class TrackerType { ByteTrack };
@@ -260,6 +263,41 @@ struct ModelConfig {
     ModelPostprocessConfig postprocess;
 };
 
+// ReID 모델과 크롭·embedding 출력 계약. 모델별 YAML에서 검증된 값만 전달한다.
+struct ReidModelConfig {
+    std::string name;
+    std::string path;
+    int input_width = 0;
+    int input_height = 0;
+    int input_channels = 0;
+    std::string input_dtype;
+    std::string input_layout;
+    std::string resize;
+    std::string channel_mode;
+    std::string output_name;
+    int output_dimensions = 0;
+    std::string output_dtype;
+    std::string output_normalize;
+};
+
+struct ReidBenchmarkConfig {
+    int person_class_id = 0;
+    int min_crop_height = 0;
+    int max_crops_per_frame = 0;
+};
+
+struct ReidMatcherConfig {
+    int person_class_id = 0;
+    int max_lost_frames = 90;
+    int gallery_size = 5;
+    int decision_wait_frames = 3;
+    float similarity_threshold = 0.596F;
+    float min_height_ratio = 0.5F;
+    float max_height_ratio = 2.0F;
+    float max_center_distance_height = 3.5F;
+    float distance_growth_per_10_frames = 1.0F;
+};
+
 /********** Benchmark 어플리케이션에서 사용하는 데이터셋 경로와 출력 경로 설정  ***********/
 
 struct BenchmarkPathConfig
@@ -311,6 +349,22 @@ struct ModelCatalogEntry
     ModelConfig model;
 };
 
+struct DetectionSettings
+{
+    std::string config_path;
+    ModelConfig model;
+    InferenceConfig inference;
+};
+
+struct ReidSettings
+{
+    std::string config_path;
+    ReidModelConfig model;
+    InferenceConfig inference;
+    std::string matcher_config_path;
+    ReidMatcherConfig matcher;
+};
+
 // 트래커 ID에 설정 YAML 경로와 검증된 typed 설정을 연결한다.
 struct TrackingCatalogEntry
 {
@@ -323,13 +377,12 @@ struct TrackingCatalogEntry
 struct RuntimeConfig
 {
     LoggingConfig logging;
-    std::string model_config_path;
-    int initial_model_id = 0;
-    std::map<int, ModelCatalogEntry> model_catalog;
+    DetectionSettings detection;
+    int initial_detection_id = 0;
+    std::map<int, ModelCatalogEntry> detection_catalog;
     std::map<int, TrackingCatalogEntry> tracking_catalog;
     int initial_tracker_id = 0;
-    ModelConfig model;
-    DetectionConfig detection;
+    ReidSettings reid;
     TrackingConfig tracking;
     ControlConfig control;
     MeasurementConfig measurement;
@@ -339,6 +392,8 @@ struct RuntimeConfig
 RuntimeConfig load_runtime_config(const std::string& path);
 
 ModelConfig load_model_config(const std::string& config_path);
+ReidModelConfig load_reid_config(const std::string& config_path);
+ReidMatcherConfig load_reid_matcher_config(const std::string& config_path);
 // 트래커 전용 YAML을 읽고 종류별 설정을 검증한다.
 TrackingConfig load_tracker_config(const std::string& config_path);
 
@@ -351,8 +406,9 @@ std::string required_string(
     const std::string& path);
 
 LoggingConfig load_logging_config(const YAML::Node& node);
-DetectionConfig load_detection_config(const YAML::Node& node);
+InferenceConfig load_inference_config(const YAML::Node& node, const std::string& path);
 TrackingConfig load_tracking_config(const YAML::Node& node);
+ReidBenchmarkConfig load_reid_benchmark_config(const YAML::Node& node);
 // 트래커 카탈로그의 ID·경로를 검증하고 각 YAML을 typed 설정으로 읽는다.
 std::map<int, TrackingCatalogEntry> load_tracking_catalog(const YAML::Node& node);
 // 실행 YAML의 tracking.id가 카탈로그에 존재하는지 확인한다.

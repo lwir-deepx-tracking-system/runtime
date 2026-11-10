@@ -46,9 +46,14 @@ bool profiler_columns_align(const std::string& text)
 {
     std::istringstream input(text);
     std::string line;
+    bool stage_section = false;
     std::getline(input, line);  // sequence title
     while (std::getline(input, line))
     {
+        if (line.rfind("[ FRAME STAGES", 0) == 0)
+            stage_section = true;
+        if (stage_section)
+            continue;
         if (line.empty() || line.rfind("[ ", 0) == 0)
             continue;
         if (line.size() != 80)
@@ -64,19 +69,20 @@ int main()
     std::ostringstream timing;
     benchmark_result_writer::write_timing_header(timing);
     benchmark_result_writer::write_timing_row(
-        timing, 1, 0.125, 8.5, 7.312184, 0.25, 0.03125);
+        timing, 1, 0.125, 8.5, 7.312184, 0.25, 0.03125, 1.5, 2, 0.125, 10.75);
     benchmark_result_writer::write_timing_row(
-        timing, 488, 12.75, 20534.020, 13764.367, 103.5, 4.0);
+        timing, 488, 12.75, 20534.020, 13764.367, 103.5, 4.0, 0.0, 0, 0.5, 20660.0);
     benchmark_result_writer::write_timing_footer(timing);
 
     const std::string timing_text = timing.str();
     if (timing_text.find("| frame_id | preprocess_ms") == std::string::npos ||
-        timing_text.find("| total_latency_ms  |") == std::string::npos ||
+        timing_text.find("| frame_total_ms") == std::string::npos ||
+        timing_text.find("| reid_crop_count") == std::string::npos ||
         timing_text.find("0.125000") == std::string::npos ||
         timing_text.find("7.312184") == std::string::npos ||
         timing_text.find("20534.020000") == std::string::npos ||
-        timing_text.find("|          0.031250 |          8.906250 |") == std::string::npos ||
-        timing_text.find("|          4.000000 |      20654.270000 |") == std::string::npos ||
+        timing_text.find("|          0.031250 |          1.500000 |                 2 |          0.125000 |         10.750000 |") == std::string::npos ||
+        timing_text.find("|          0.000000 |                 0 |          0.500000 |      20660.000000 |") == std::string::npos ||
         !timing_columns_align(timing_text))
     {
         std::cerr << timing_text;
@@ -94,6 +100,10 @@ int main()
     first.postprocess_us = 30.0;
     first.tracking_us = 10.0;
     first.host_latency_us = 8290.0;
+    first.reid_us = 1500.0;
+    first.reid_crop_count = 2;
+    first.matching_us = 50.0;
+    first.frame_total_us = 10000.0;
 
     benchmark_result_writer::DxrtProfilerSample second = first;
     second.input_format_us = 12.0;
@@ -106,6 +116,10 @@ int main()
     second.postprocess_us = 50.0;
     second.tracking_us = 20.0;
     second.host_latency_us = 8690.0;
+    second.reid_us = 0.0;
+    second.reid_crop_count = 0;
+    second.matching_us = 40.0;
+    second.frame_total_us = 9000.0;
     first.npu_devices.push_back({"npu_0", 0, 8.0, 950.0, 7200.0,
                                  7200.0, 0.0, 0.0, 4.0, 18.0, 8210.0});
     second.npu_devices.push_back({"npu_0", 0, 12.0, 1050.0, 7400.0,
@@ -128,8 +142,9 @@ int main()
     const auto cpu_position = profiler_text.find("[ CPU TASK - cpu_0 / ONNX Runtime ]");
     const auto postprocess_position = profiler_text.find("[ C++ POSTPROCESS ]");
     const auto tracking_position = profiler_text.find("[ TRACKING ]");
-    const auto latency_position = profiler_text.find("[ LATENCY SUMMARY ]");
-    const auto total_position = profiler_text.find("TOTAL LATENCY");
+    const auto latency_position = profiler_text.find("[ DETECTION LATENCY ]");
+    const auto total_position = profiler_text.find("DETECTION + TRACKING");
+    const auto stage_position = profiler_text.find("[ FRAME STAGES (ms, all frames) ]");
     if (profiler_text.find(
             "[Benchmark] DXRT PROFILER SUMMARY: seq_001 (2 frames)") ==
             std::string::npos ||
@@ -141,20 +156,25 @@ int main()
         tracking_position == std::string::npos ||
         latency_position == std::string::npos ||
         total_position == std::string::npos ||
+        stage_position == std::string::npos ||
         !(preprocess_position < npu_position &&
           npu_position < second_npu_position &&
           second_npu_position < cpu_position &&
           cpu_position < postprocess_position &&
           postprocess_position < tracking_position &&
           tracking_position < latency_position &&
-          latency_position < total_position) ||
+          latency_position < total_position && total_position < stage_position) ||
         profiler_text.find(separator, preprocess_position) > npu_position ||
         profiler_text.find(separator, npu_position) > second_npu_position ||
         profiler_text.find(double_separator, latency_position) > total_position ||
         profiler_text.find("Preprocess                             100.0       200.0       150.0        47.1") == std::string::npos ||
         profiler_text.find("  - Inference Core 1                       -           -           -           -") == std::string::npos ||
         profiler_text.find("CPU Task (total)                      1000.0      3000.0      2000.0        70.7") == std::string::npos ||
-        profiler_text.find("TOTAL LATENCY                         8430.0      8960.0      8695.0         4.3") == std::string::npos ||
+        profiler_text.find("DETECTION + TRACKING                  8430.0      8960.0      8695.0         4.3") == std::string::npos ||
+        profiler_text.find("ReID                             0.750         1.500") == std::string::npos ||
+        profiler_text.find("ReID crops                       1.000         2.000") == std::string::npos ||
+        profiler_text.find("Matching                         0.045         0.050") == std::string::npos ||
+        profiler_text.find("Frame total                      9.500        10.000") == std::string::npos ||
         !profiler_columns_align(profiler_text))
     {
         std::cerr << profiler_text;

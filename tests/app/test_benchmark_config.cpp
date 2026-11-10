@@ -7,7 +7,15 @@
 int main()
 {
     const BenchmarkConfig config = load_benchmark_config("config/benchmark.yaml");
-    if (config.model.postprocess.type != "yolo26" ||
+    if (config.detection.model.postprocess.type != "yolo26" ||
+        config.detection.inference.max_inflight != 1 ||
+        config.reid.config_path != "config/reid/repvgg.yaml" ||
+        config.reid.model.name != "repvgg" ||
+        config.reid.matcher_config_path != "config/reid/matcher.yaml" ||
+        config.reid.matcher.similarity_threshold < 0.59F ||
+        config.reid.inference.max_inflight != 1 ||
+        config.reid.inference.buffer_count != 0 ||
+        config.reid_options.max_crops_per_frame != 2 ||
         config.tracking.type != TrackerType::ByteTrack ||
         config.tracking.track_threshold != 0.5F ||
         config.tracking.match_threshold != 0.8F ||

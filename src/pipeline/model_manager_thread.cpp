@@ -9,7 +9,7 @@
 
 ModelManagerThread::ModelManagerThread(
     ModelCatalogEntry initial_model,
-    DetectionConfig detection_config,
+    InferenceConfig inference_config,
     ThreadSafeQueue<ModelChangeRequest>& requests,
     ActivePipelineSlot& active_pipeline,
     RuntimeControl& runtime_control,
@@ -18,7 +18,7 @@ ModelManagerThread::ModelManagerThread(
         pipeline_creator, IMeasurementSink* measurements)
     : initial_model_(std::move(initial_model)),
       active_model_(initial_model_),
-      detection_config_(std::move(detection_config)),
+      inference_config_(std::move(inference_config)),
       requests_(requests),
       results_(results),
       measurements_(measurements),
@@ -76,7 +76,7 @@ std::shared_ptr<IDetectionPipeline> ModelManagerThread::create_pipeline(
     if (pipeline_creator_)
         return pipeline_creator_(entry);
     auto factory = DetectorFactory::for_model(entry.model);
-    auto pipeline = factory->create(entry.model, detection_config_);
+    auto pipeline = factory->create(entry.model, inference_config_);
     return std::shared_ptr<IDetectionPipeline>(std::move(pipeline));
 }
 

@@ -37,6 +37,10 @@ struct DxrtProfilerSample
     double postprocess_us = 0.0;
     double tracking_us = 0.0;
     double host_latency_us = 0.0;
+    double reid_us = 0.0;
+    std::size_t reid_crop_count = 0;
+    double matching_us = 0.0;
+    double frame_total_us = 0.0;
     std::vector<NpuDeviceSample> npu_devices;
     std::optional<double> cpu_task_us;
 };
@@ -47,10 +51,14 @@ void write_timing_row(
     std::ostream& file,
     std::uint64_t frame_id,
     double preprocess_ms,
-    double latency_ms,
+    double detection_latency_ms,
     double npu_processing_ms,
     double postprocess_ms,
-    double tracking_ms);
+    double tracking_ms,
+    double reid_ms,
+    std::size_t reid_crop_count,
+    double matching_ms,
+    double frame_total_ms);
 void write_timing_footer(std::ostream& file);
 
 // Sequence의 DXRT profiler 통계를 터미널용 표로 기록한다.

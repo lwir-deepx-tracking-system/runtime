@@ -39,7 +39,7 @@ class ModelManagerThread
 private:
     ModelCatalogEntry initial_model_;
     ModelCatalogEntry active_model_;
-    DetectionConfig detection_config_;
+    InferenceConfig inference_config_;
     ThreadSafeQueue<ModelChangeRequest>& requests_;
     ThreadSafeQueue<ModelChangeResult>* results_;
     IMeasurementSink* measurements_;
@@ -65,7 +65,7 @@ private:
 public:
     ModelManagerThread(
         ModelCatalogEntry initial_model,
-        DetectionConfig detection_config,
+        InferenceConfig inference_config,
         ThreadSafeQueue<ModelChangeRequest>& requests,
         ActivePipelineSlot& active_pipeline,
         RuntimeControl& runtime_control,

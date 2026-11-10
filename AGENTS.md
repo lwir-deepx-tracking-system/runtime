@@ -9,7 +9,7 @@
 
   ## Architecture
 
-  - Model-specific settings are stored in config/model/*.yaml.
+  - Model-specific settings are stored in config/detection/*.yaml.
   - AppConfig owns all YAML parsing and validation.
   - Processing classes receive typed configuration structures.
   - LwirPreprocessor must not open or parse YAML files directly.

@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <ostream>
 #include <set>
@@ -17,7 +18,7 @@ namespace {
 
 constexpr int kFrameIdWidth = 8;
 constexpr int kTimingValueWidth = 17;
-constexpr int kTimingColumnCount = 7;
+constexpr int kTimingColumnCount = 11;
 constexpr int kTimingTableWidth =
     kFrameIdWidth + (kTimingColumnCount - 1) * kTimingValueWidth +
     3 * kTimingColumnCount + 1;
@@ -104,6 +105,22 @@ double total_latency_us(const DxrtProfilerSample& sample)
         sample.postprocess_us + sample.tracking_us;
 }
 
+template <typename Selector>
+void write_stage_row(std::ostream& output, const char* name,
+                     const std::vector<DxrtProfilerSample>& samples, Selector selector)
+{
+    std::vector<double> values;
+    values.reserve(samples.size());
+    for (const auto& sample : samples) values.push_back(selector(sample));
+    std::sort(values.begin(), values.end());
+    const double sum = std::accumulate(values.begin(), values.end(), 0.0);
+    const std::size_t p95_index = (95 * values.size() + 99) / 100 - 1;
+    output << std::left << std::setw(24) << name << std::right
+           << std::fixed << std::setprecision(3)
+           << std::setw(14) << sum / values.size()
+           << std::setw(14) << values[p95_index] << '\n';
+}
+
 }  // namespace
 
 void write_timing_header(std::ostream& file)
@@ -112,11 +129,15 @@ void write_timing_header(std::ostream& file)
     file << separator << '\n'
          << "| " << std::left << std::setw(kFrameIdWidth) << "frame_id"
          << " | " << std::setw(kTimingValueWidth) << "preprocess_ms"
-         << " | " << std::setw(kTimingValueWidth) << "latency_ms"
+         << " | " << std::setw(kTimingValueWidth) << "detect_host_ms"
          << " | " << std::setw(kTimingValueWidth) << "npu_processing_ms"
          << " | " << std::setw(kTimingValueWidth) << "postprocess_ms"
+         << " | " << std::setw(kTimingValueWidth) << "detection_ms"
          << " | " << std::setw(kTimingValueWidth) << "tracking_ms"
-         << " | " << std::setw(kTimingValueWidth) << "total_latency_ms"
+         << " | " << std::setw(kTimingValueWidth) << "reid_ms"
+         << " | " << std::setw(kTimingValueWidth) << "reid_crop_count"
+         << " | " << std::setw(kTimingValueWidth) << "matching_ms"
+         << " | " << std::setw(kTimingValueWidth) << "frame_total_ms"
          << " |\n" << separator << '\n';
 }
 
@@ -124,20 +145,28 @@ void write_timing_row(
     std::ostream& file,
     std::uint64_t frame_id,
     double preprocess_ms,
-    double latency_ms,
+    double detection_latency_ms,
     double npu_processing_ms,
     double postprocess_ms,
-    double tracking_ms)
+    double tracking_ms,
+    double reid_ms,
+    std::size_t reid_crop_count,
+    double matching_ms,
+    double frame_total_ms)
 {
     file << std::fixed << std::setprecision(6) << std::right
          << "| " << std::setw(kFrameIdWidth) << frame_id
          << " | " << std::setw(kTimingValueWidth) << preprocess_ms
-         << " | " << std::setw(kTimingValueWidth) << latency_ms
+         << " | " << std::setw(kTimingValueWidth) << detection_latency_ms
          << " | " << std::setw(kTimingValueWidth) << npu_processing_ms
          << " | " << std::setw(kTimingValueWidth) << postprocess_ms
-         << " | " << std::setw(kTimingValueWidth) << tracking_ms
          << " | " << std::setw(kTimingValueWidth)
-         << (preprocess_ms + latency_ms + postprocess_ms + tracking_ms)
+         << (preprocess_ms + detection_latency_ms + postprocess_ms)
+         << " | " << std::setw(kTimingValueWidth) << tracking_ms
+         << " | " << std::setw(kTimingValueWidth) << reid_ms
+         << " | " << std::setw(kTimingValueWidth) << reid_crop_count
+         << " | " << std::setw(kTimingValueWidth) << matching_ms
+         << " | " << std::setw(kTimingValueWidth) << frame_total_ms
          << " |\n";
 }
 
@@ -235,14 +264,33 @@ void write_dxrt_profiler_summary(
         samples, [](const DxrtProfilerSample& s) { return s.tracking_us; }));
     output << section_separator << '\n';
 
-    output << "[ LATENCY SUMMARY ]\n";
-    write_profiler_row(output, "Host Latency", sample_statistics(
+    output << "[ DETECTION LATENCY ]\n";
+    write_profiler_row(output, "Detection Host Latency", sample_statistics(
         samples, [](const DxrtProfilerSample& s) { return s.host_latency_us; }));
     output << '\n' << separator << '\n';
-    write_profiler_row(output, "TOTAL LATENCY", sample_statistics(
+    write_profiler_row(output, "DETECTION + TRACKING", sample_statistics(
         samples, total_latency_us));
-
-    output << separator << '\n';
+    output << separator << "\n\n[ FRAME STAGES (ms, all frames) ]\n"
+           << std::left << std::setw(24) << "Stage" << std::right
+           << std::setw(14) << "avg" << std::setw(14) << "p95" << '\n';
+    write_stage_row(output, "Detection", samples, [](const DxrtProfilerSample& s) {
+        return (s.preprocess_us + s.host_latency_us + s.postprocess_us) / 1000.0;
+    });
+    write_stage_row(output, "Tracking", samples, [](const DxrtProfilerSample& s) {
+        return s.tracking_us / 1000.0;
+    });
+    write_stage_row(output, "ReID", samples, [](const DxrtProfilerSample& s) {
+        return s.reid_us / 1000.0;
+    });
+    write_stage_row(output, "ReID crops", samples, [](const DxrtProfilerSample& s) {
+        return static_cast<double>(s.reid_crop_count);
+    });
+    write_stage_row(output, "Matching", samples, [](const DxrtProfilerSample& s) {
+        return s.matching_us / 1000.0;
+    });
+    write_stage_row(output, "Frame total", samples, [](const DxrtProfilerSample& s) {
+        return s.frame_total_us / 1000.0;
+    });
 }
 
 void write_dxrt_profiler_summary_outputs(

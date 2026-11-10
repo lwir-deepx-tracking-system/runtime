@@ -8,32 +8,36 @@ logging:
 
 
 # ============================================================
-# 2. 모델 설정
-# ============================================================
-
-model:
-  # 사용할 모델 설정 파일
-  config: config/model/yolo26s.yaml
-
-
-# ============================================================
-# 3. Detection 설정
+# 2. Detection / ReID 설정
 # ============================================================
 
 detection:
-  # 동시에 처리할 수 있는 최대 inference 요청 수
-  # 프레임별 latency 측정을 위해 한 번에 하나씩 처리한다.
-  max_inflight: 1
+  # 사용할 모델 설정 파일
+  config: config/detection/yolo26s.yaml
+  inference:
+    # 프레임별 latency 측정을 위해 한 번에 하나씩 처리한다.
+    max_inflight: 1
+    # DXRT 내부 입력·출력 buffer 수. 0이면 자동 설정
+    buffer_count: 6
+    use_ort: false
+    npu_cores: all
 
-  # DXRT 내부 입력·출력 buffer 수. 0이면 DXRT가 자동으로 결정한다.
-  buffer_count: 6
-
-  # Runtime과 동일하게 ONNX Runtime CPU fallback을 끈다.
-  use_ort: false
+reid:
+  config: config/reid/repvgg.yaml
+  matcher_config: config/reid/matcher.yaml
+  inference:
+    # ReID crop은 현재 동기 추론한다.
+    max_inflight: 1
+    buffer_count: 0
+    use_ort: false
+    npu_cores: all
+  person_class_id: 0
+  min_crop_height: 32
+  max_crops_per_frame: 2
 
 
 # ============================================================
-# 4. Tracking
+# 3. Tracking
 # ============================================================
 
 tracking:
@@ -45,7 +49,7 @@ tracking_catalog:
 
 
 # ============================================================
-# 5. Benchmark Sequence 범위
+# 4. Benchmark Sequence 범위
 # ============================================================
 
 sequence:
@@ -59,7 +63,7 @@ sequence:
 
 
 # ============================================================
-# 6. Benchmark 경로
+# 5. Benchmark 경로
 # ============================================================
 
 path:

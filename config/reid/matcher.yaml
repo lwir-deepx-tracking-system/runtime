@@ -1,0 +1,11 @@
+# Online appearance matching after motion tracking.
+matcher:
+  person_class_id: 0
+  similarity_threshold: 0.596
+  max_lost_frames: 90
+  gallery_size: 5
+  decision_wait_frames: 3
+  min_height_ratio: 0.5
+  max_height_ratio: 2.0
+  max_center_distance_height: 3.5
+  distance_growth_per_10_frames: 1.0
