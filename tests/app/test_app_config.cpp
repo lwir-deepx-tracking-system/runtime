@@ -27,9 +27,12 @@ int main()
         config.tracking.kalman_format != "xywh" || config.tracking.lost_output_frames != 0 ||
         config.tracking.oru || config.tracking.ocm_weight != 0.0F ||
         config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
-        config.tracking_catalog.size() != 1 ||
+        config.tracking_catalog.size() != 2 ||
         config.tracking_catalog.at(1).config_path !=
             "config/tracking/bytetrack.yaml" ||
+        config.tracking_catalog.at(2).config_path !=
+            "config/tracking/ocsort.yaml" ||
+        config.tracking_catalog.at(2).config.type != TrackerType::OCSort ||
         config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
         !config.measurement.enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")
@@ -37,6 +40,7 @@ int main()
 
     auto tracking = YAML::LoadFile("config/tracking/bytetrack.yaml")["tracking"];
     tracking["type"] = "unsupported";
+
     try {
         config_parser::load_tracking_config(tracking);
         return 41;
@@ -44,6 +48,23 @@ int main()
     tracking.remove("type");
     if (config_parser::load_tracking_config(tracking).type != TrackerType::ByteTrack)
         return 42;
+    
+    {
+        const TrackingConfig oc = load_tracker_config("config/tracking/ocsort.yaml");
+        if (oc.type != TrackerType::OCSort || oc.ocsort.det_threshold != 0.6F ||
+            oc.ocsort.iou_threshold != 0.3F || oc.ocsort.max_age != 30 ||
+            oc.ocsort.min_hits != 3 || oc.ocsort.delta_t != 3 ||
+            oc.ocsort.inertia != 0.2F || oc.ocsort.use_byte)
+            return 54;
+
+        auto oc_node = YAML::LoadFile("config/tracking/ocsort.yaml")["tracking"];
+        oc_node["track_threshold"] = 0.5;      // ByteTrack 키가 섞인 OC-SORT 설정
+        bool rejected = false;
+        try { config_parser::load_tracking_config(oc_node); }
+        catch (const std::runtime_error&) { rejected = true; }
+        if (!rejected)
+            return 55;
+    }
 
     // 연결된 모델 YAML의 Camera와 모델 입력 계약 검증.
     if (config.model.camera_input.opencv_type != "CV_16UC1") return 3;

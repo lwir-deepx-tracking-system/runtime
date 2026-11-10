@@ -22,7 +22,26 @@ struct DetectionConfig {
     bool use_ort = false;
 };
 
-enum class TrackerType { ByteTrack };
+enum class TrackerType { ByteTrack, OCSort };
+
+// 단독 OC-SORT Tracker 설정 (yaml의 ocsort: 섹션). 모든 키는 생략할 수 있고, 기본값은 공식 OC-SORT
+// (noahcao/OC_SORT, MOT17 실행 인자) 값이다.
+struct OCSortConfig {
+    // 이 점수 초과 검출만 1차 매칭·OCR·새 Track에 쓴다 (공식 track_thresh)
+    float det_threshold = 0.6F;
+    // 매칭으로 인정하는 최소 IoU (공식 iou_thresh). ByteTrack의 match_threshold(1 - IoU)와 의미가 반대다
+    float iou_threshold = 0.3F;
+    // 이 프레임 수보다 오래 매칭되지 않은 Track을 지운다
+    int max_age = 30;
+    // 연속 매칭이 이 횟수 이상인 Track만 출력한다 (처음 min_hits 프레임은 예외)
+    int min_hits = 3;
+    // OCM 방향을 계산할 관측 간격(프레임)
+    int delta_t = 3;
+    // OCM 방향 일치도 가중치 (공식 inertia, vdc_weight)
+    float inertia = 0.2F;
+    // 0.1 < 점수 <= det_threshold 검출로 ByteTrack식 2차 매칭을 한다 (공식 기본 꺼짐)
+    bool use_byte = false;
+};
 
 struct TrackingConfig {
     TrackerType type = TrackerType::ByteTrack;
@@ -76,6 +95,8 @@ struct TrackingConfig {
     // OCR: 2차 매칭 뒤 남은 Track을 Kalman 예측 대신 마지막 관측 박스로 남은 high 검출과 한 번 더 매칭한다
     //      (match_threshold 사용). 멈춘 물체·짧은 가림 뒤 예측이 빗나간 Track을 복구한다.
     bool ocr = false;
+
+    OCSortConfig ocsort;
 };
 
 struct GimbalConfig {
@@ -342,6 +363,7 @@ ModelConfig load_model_config(const std::string& config_path);
 // 트래커 전용 YAML을 읽고 종류별 설정을 검증한다.
 TrackingConfig load_tracker_config(const std::string& config_path);
 
+
 namespace config_parser
 {
 YAML::Node load_yaml(const std::string& path);
@@ -353,6 +375,7 @@ std::string required_string(
 LoggingConfig load_logging_config(const YAML::Node& node);
 DetectionConfig load_detection_config(const YAML::Node& node);
 TrackingConfig load_tracking_config(const YAML::Node& node);
+OCSortConfig load_ocsort_config(const YAML::Node& node);
 // 트래커 카탈로그의 ID·경로를 검증하고 각 YAML을 typed 설정으로 읽는다.
 std::map<int, TrackingCatalogEntry> load_tracking_catalog(const YAML::Node& node);
 // 실행 YAML의 tracking.id가 카탈로그에 존재하는지 확인한다.

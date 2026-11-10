@@ -56,8 +56,9 @@ tracking:
 tracking_catalog:
   - id: 1
     config: config/tracking/bytetrack.yaml
-
-
+  - id: 2
+    config: config/tracking/ocsort.yaml
+  
 # ============================================================
 # 5. Target / Control
 # ============================================================

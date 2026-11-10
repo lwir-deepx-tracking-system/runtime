@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
 
@@ -147,8 +148,24 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         node, "type", "tracking", "bytetrack");
     if (type == "bytetrack")
         c.type = TrackerType::ByteTrack;
+    else if (type == "ocsort")
+    {
+        // 단독 OC-SORT: ByteTrack 키는 읽지 않는다. 오타를 막기 위해 모르는 키는 오류로 처리한다.
+        static const std::set<std::string> known = {"type", "det_threshold", "iou_threshold", "max_age",
+                                                    "min_hits", "delta_t", "inertia", "use_byte"};
+        for (const auto& kv : node)
+        {
+            const std::string key = kv.first.as<std::string>();
+            if (!known.count(key))
+                throw std::runtime_error("tracking: unknown OC-SORT key '" + key + "'");
+        }
+        c.type = TrackerType::OCSort;
+        c.ocsort = load_ocsort_config(node);
+        return c;
+    }
     else
         throw std::runtime_error("tracking.type is unsupported: " + type);
+    
     c.track_threshold = required<float>(
         node, "track_threshold", "tracking");
     c.match_threshold = required<float>(
@@ -220,6 +237,35 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         throw std::runtime_error("tracking.ocm_weight must be in [0, 1]");
     if (c.ocm_delta_t < 1 || c.ocm_delta_t > 30)
         throw std::runtime_error("tracking.ocm_delta_t must be in [1, 30]");
+    return c;
+}
+
+// ocsort: 섹션. 모든 키가 선택이며 생략하면 공식 OC-SORT 기본값을 쓴다.
+OCSortConfig load_ocsort_config(const YAML::Node& node)
+{
+    OCSortConfig c;
+    c.det_threshold = optional_value<float>(node, "det_threshold", "ocsort", c.det_threshold);
+    c.iou_threshold = optional_value<float>(node, "iou_threshold", "ocsort", c.iou_threshold);
+    c.max_age = optional_value<int>(node, "max_age", "ocsort", c.max_age);
+    c.min_hits = optional_value<int>(node, "min_hits", "ocsort", c.min_hits);
+    c.delta_t = optional_value<int>(node, "delta_t", "ocsort", c.delta_t);
+    c.inertia = optional_value<float>(node, "inertia", "ocsort", c.inertia);
+    c.use_byte = optional_value<bool>(node, "use_byte", "ocsort", c.use_byte);
+
+    if (c.det_threshold <= 0.0F || c.det_threshold > 1.0F)
+        throw std::runtime_error("ocsort.det_threshold must be in (0, 1]");
+    if (c.use_byte && c.det_threshold <= 0.1F)
+        throw std::runtime_error("ocsort.det_threshold must be above 0.1 when use_byte is true");
+    if (c.iou_threshold <= 0.0F || c.iou_threshold > 1.0F)
+        throw std::runtime_error("ocsort.iou_threshold must be in (0, 1]");
+    if (c.max_age <= 0)
+        throw std::runtime_error("ocsort.max_age must be positive");
+    if (c.min_hits < 0)
+        throw std::runtime_error("ocsort.min_hits must not be negative");
+    if (c.delta_t < 1 || c.delta_t > 30)
+        throw std::runtime_error("ocsort.delta_t must be in [1, 30]");
+    if (c.inertia < 0.0F || c.inertia > 1.0F)
+        throw std::runtime_error("ocsort.inertia must be in [0, 1]");
     return c;
 }
 
