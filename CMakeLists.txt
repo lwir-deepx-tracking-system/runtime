@@ -562,6 +562,13 @@ if(BUILD_TESTING)
     target_link_libraries(test_bytetrack PRIVATE lwir_vision)
     add_test(NAME bytetrack COMMAND test_bytetrack)
 
+    add_executable(
+        test_ocsort
+        tests/tracking/test_ocsort.cpp
+    )
+    target_link_libraries(test_ocsort PRIVATE lwir_vision)
+    add_test(NAME ocsort COMMAND test_ocsort)
+
     add_executable(test_tracker_factory
         tests/tracking/test_tracker_factory.cpp)
     target_link_libraries(test_tracker_factory PRIVATE lwir_vision)
