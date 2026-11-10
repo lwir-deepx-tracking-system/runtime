@@ -78,7 +78,7 @@ control:
     speed_rate: 150.0       # SPD/초. STOP은 제한 우회
 
   gimbal:
-    device: /dev/ttyUSB0
+    device: /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_5a321a87be72ef1184f1744f8fcc3fa0-if00-port0
     speed: 30              # 수동 방향키 고정 속도. AUTO 상한과 독립
 
 # ============================================================
