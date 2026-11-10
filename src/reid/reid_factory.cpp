@@ -12,7 +12,8 @@ class RepVggReidModel final : public IReidModel
 {
 public:
     RepVggReidModel(const ReidModelConfig& config, const InferenceConfig& inference)
-        : config_(config), engine_(config.path, make_dxrt_inference_option(inference))
+        : config_(config), inference_option_(make_dxrt_inference_option(inference)),
+          engine_(config.path, inference_option_)
     {
         const auto inputs = engine_.GetInputs();
         const auto outputs = engine_.GetOutputs();
@@ -49,6 +50,7 @@ public:
 
 private:
     ReidModelConfig config_;
+    dxrt::InferenceOption inference_option_;
     dxrt::InferenceEngine engine_;
 };
 
