@@ -110,7 +110,7 @@ struct AutoControlConfig {
     double deadband_y = 0.04;
     double fov_x_deg = 0.0; // both zero selects normalized pixel errors
     double fov_y_deg = 0.0;
-    double min_confidence = 0.5;
+    double min_confidence = 0.0;
     int speed_min = 1;
     int speed_max = 100;
     double speed_rate = 60.0; // SPD units/second; safety STOP bypasses this
