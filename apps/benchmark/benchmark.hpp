@@ -10,6 +10,7 @@ struct BenchmarkConfig
 {
     LoggingConfig logging;
     DetectionSettings detection;
+    bool reid_enabled = true;
     ReidSettings reid;
     ReidBenchmarkConfig reid_options;
     std::map<int, TrackingCatalogEntry> tracking_catalog;

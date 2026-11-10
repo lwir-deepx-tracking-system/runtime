@@ -24,6 +24,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -55,22 +56,33 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
     c.detection.model = load_model_config(c.detection.config_path);
     c.detection.inference = config_parser::load_inference_config(
         root["detection"]["inference"], "detection.inference");
-    c.reid.config_path = config_parser::required_string(root["reid"], "config", "reid");
-    if (c.reid.config_path.empty())
-        throw std::runtime_error("reid.config must not be empty");
-    c.reid.model = load_reid_config(c.reid.config_path);
-    c.reid.matcher_config_path = config_parser::required_string(
-        root["reid"], "matcher_config", "reid");
-    if (c.reid.matcher_config_path.empty())
-        throw std::runtime_error("reid.matcher_config must not be empty");
-    c.reid.matcher = load_reid_matcher_config(c.reid.matcher_config_path);
-    c.reid.inference = config_parser::load_inference_config(
-        root["reid"]["inference"], "reid.inference");
-    if (c.reid.inference.max_inflight != 1)
-        throw std::runtime_error("reid.inference.max_inflight must be 1 in synchronous benchmark");
-    c.reid_options = config_parser::load_reid_benchmark_config(root["reid"]);
-    if (c.reid_options.person_class_id != c.reid.matcher.person_class_id)
-        throw std::runtime_error("reid.person_class_id and matcher.person_class_id must agree");
+    if (root["reid"] && root["reid"]["enabled"])
+    {
+        try { c.reid_enabled = root["reid"]["enabled"].as<bool>(); }
+        catch (const YAML::Exception& error) {
+            throw std::runtime_error(
+                std::string("invalid configuration: reid.enabled (") + error.what() + ")");
+        }
+    }
+    if (c.reid_enabled)
+    {
+        c.reid.config_path = config_parser::required_string(root["reid"], "config", "reid");
+        if (c.reid.config_path.empty())
+            throw std::runtime_error("reid.config must not be empty");
+        c.reid.model = load_reid_config(c.reid.config_path);
+        c.reid.matcher_config_path = config_parser::required_string(
+            root["reid"], "matcher_config", "reid");
+        if (c.reid.matcher_config_path.empty())
+            throw std::runtime_error("reid.matcher_config must not be empty");
+        c.reid.matcher = load_reid_matcher_config(c.reid.matcher_config_path);
+        c.reid.inference = config_parser::load_inference_config(
+            root["reid"]["inference"], "reid.inference");
+        if (c.reid.inference.max_inflight != 1)
+            throw std::runtime_error("reid.inference.max_inflight must be 1 in synchronous benchmark");
+        c.reid_options = config_parser::load_reid_benchmark_config(root["reid"]);
+        if (c.reid_options.person_class_id != c.reid.matcher.person_class_id)
+            throw std::runtime_error("reid.person_class_id and matcher.person_class_id must agree");
+    }
     c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
     c.tracking = config_parser::select_tracking_config(
         root["tracking"], c.tracking_catalog);
@@ -86,15 +98,16 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
 static fs::path create_run_directory(
     const fs::path& output_root,
     const std::string& model_name,
-    const std::string& tracker_name)
+    const std::string& tracker_name,
+    bool reid_enabled)
 {
     const auto run_dir = ::create_run_directory(output_root / (model_name + "_" + tracker_name));
     try {
         fs::create_directory(run_dir / "detections");
         fs::create_directory(run_dir / "tracks");
-        fs::create_directory(run_dir / "tracks_reid");
+        if (reid_enabled) fs::create_directory(run_dir / "tracks_reid");
         fs::create_directory(run_dir / "timing");
-        fs::create_directory(run_dir / "reid");
+        if (reid_enabled) fs::create_directory(run_dir / "reid");
         return run_dir;
     } catch (...) {
         std::error_code cleanup_error;
@@ -214,11 +227,14 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
     tracker_ = tracker_factory->create(config_.tracking);
-    auto reid_factory = ReidFactory::for_model(config_.reid.model);
-    reid_pipeline_ = reid_factory->create(config_.reid.model,
-        config_.detection.model.camera_input, config_.reid.inference);
-    reid_matcher_ = std::make_unique<ReidMatcher>(
-        config_.reid.matcher, config_.reid.model.output_dimensions);
+    if (config_.reid_enabled)
+    {
+        auto reid_factory = ReidFactory::for_model(config_.reid.model);
+        reid_pipeline_ = reid_factory->create(config_.reid.model,
+            config_.detection.model.camera_input, config_.reid.inference);
+        reid_matcher_ = std::make_unique<ReidMatcher>(
+            config_.reid.matcher, config_.reid.model.output_dimensions);
+    }
 }
 
 
@@ -266,7 +282,7 @@ void BenchmarkApplication::run()
     }
 
     const fs::path run_dir = create_run_directory(
-        output_root, config_.detection.model.name, tracker_name_);
+        output_root, config_.detection.model.name, tracker_name_, config_.reid_enabled);
 
     // run 디렉터리 생성 이후의 모든 실패는 불완전한 결과를 통째로 정리한다.
     try
@@ -276,10 +292,13 @@ void BenchmarkApplication::run()
         fs::copy_file(
             config_.detection.config_path,
             run_dir / fs::path(config_.detection.config_path).filename());
-        fs::copy_file(config_.reid.config_path, run_dir / "reid" /
-            fs::path(config_.reid.config_path).filename());
-        fs::copy_file(config_.reid.matcher_config_path, run_dir / "reid" /
-            fs::path(config_.reid.matcher_config_path).filename());
+        if (config_.reid_enabled)
+        {
+            fs::copy_file(config_.reid.config_path, run_dir / "reid" /
+                fs::path(config_.reid.config_path).filename());
+            fs::copy_file(config_.reid.matcher_config_path, run_dir / "reid" /
+                fs::path(config_.reid.matcher_config_path).filename());
+        }
         const fs::path tracking_dir = run_dir / "tracking";
         fs::create_directory(tracking_dir);
         for (const auto& [id, entry] : config_.tracking_catalog)
@@ -293,6 +312,8 @@ void BenchmarkApplication::run()
                 "[Benchmark] Sequence 범위: " + config_.sequence.start +
                 " ~ " + config_.sequence.end);
         Logger::info("[Benchmark] 결과 경로: " + run_dir.string());
+        Logger::info(std::string("[Benchmark] ReID: ") +
+            (config_.reid_enabled ? "enabled" : "disabled"));
 
         for (const fs::path& sequence_dir : sequence_dirs)
         {
@@ -342,40 +363,46 @@ void BenchmarkApplication::run()
 
             std::ofstream track_file(
                 run_dir / "tracks" / (sequence_name + ".txt"));
-            std::ofstream reid_track_file(
-                run_dir / "tracks_reid" / (sequence_name + ".txt"));
+            std::ofstream reid_track_file;
 
             std::ofstream timing_file(
                 run_dir / "timing" / (sequence_name + ".csv"));
-            std::ofstream reid_file(
-                run_dir / "reid" / (sequence_name + ".csv"));
-            std::ofstream match_file(
-                run_dir / "reid" / (sequence_name + "_matches.csv"));
+            std::ofstream reid_file;
+            std::ofstream match_file;
+            if (config_.reid_enabled)
+            {
+                reid_track_file.open(run_dir / "tracks_reid" / (sequence_name + ".txt"));
+                reid_file.open(run_dir / "reid" / (sequence_name + ".csv"));
+                match_file.open(run_dir / "reid" / (sequence_name + "_matches.csv"));
+            }
 
-            if (!detection_file || !track_file || !reid_track_file ||
-                !timing_file || !reid_file || !match_file)
+            if (!detection_file || !track_file || !timing_file ||
+                (config_.reid_enabled && (!reid_track_file || !reid_file || !match_file)))
                 throw std::runtime_error(
                     "Benchmark 결과 파일을 생성하지 못했습니다: " + sequence_name);
 
             detection_file << std::fixed << std::setprecision(6);
             track_file << std::fixed << std::setprecision(6);
-            reid_track_file << std::fixed << std::setprecision(6);
             benchmark_result_writer::write_timing_header(timing_file);
-            reid_file << "frame_id,track_id,x,y,width,height,elapsed_ms";
-            for (int i = 0; i < config_.reid.model.output_dimensions; ++i)
-                reid_file << ",embedding_" << i;
-            reid_file << '\n' << std::fixed << std::setprecision(6);
-            match_file << "frame_id,tracker_id,stable_id,similarity\n"
-                << std::fixed << std::setprecision(6);
+            if (config_.reid_enabled)
+            {
+                reid_track_file << std::fixed << std::setprecision(6);
+                reid_file << "frame_id,track_id,x,y,width,height,elapsed_ms";
+                for (int i = 0; i < config_.reid.model.output_dimensions; ++i)
+                    reid_file << ",embedding_" << i;
+                reid_file << '\n' << std::fixed << std::setprecision(6);
+                match_file << "frame_id,tracker_id,stable_id,similarity\n"
+                    << std::fixed << std::setprecision(6);
+            }
 
-            if (!detection_file || !track_file || !reid_track_file ||
-                !timing_file || !reid_file || !match_file)
+            if (!detection_file || !track_file || !timing_file ||
+                (config_.reid_enabled && (!reid_track_file || !reid_file || !match_file)))
                 throw std::runtime_error(
                     "Benchmark 결과 파일 초기화에 실패했습니다: " + sequence_name);
 
             // Sequence 사이에서 Track 상태가 이어지지 않도록 초기화한다.
             tracker_->reset();
-            reid_matcher_->reset();
+            if (config_.reid_enabled) reid_matcher_->reset();
 
             Logger::info("[Benchmark] Sequence 시작: " + sequence_name);
 
@@ -470,55 +497,61 @@ void BenchmarkApplication::run()
                     tracking_finished_at - tracking_started_at).count();
                 profiler_samples.back().tracking_us = tracking_ms * 1000.0;
 
-                std::vector<const Track*> crop_candidates;
-                crop_candidates.reserve(tracks.size());
-                for (const Track& track : tracks) crop_candidates.push_back(&track);
-                std::stable_sort(crop_candidates.begin(), crop_candidates.end(),
-                    [this](const Track* a, const Track* b) {
-                        return reid_matcher_->needs_decision_feature(a->track_id) &&
-                            !reid_matcher_->needs_decision_feature(b->track_id);
-                    });
-                std::unordered_map<int, std::vector<float>> embeddings;
                 int crop_count = 0;
                 double reid_ms = 0.0;
+                double matching_ms = 0.0;
                 std::ostringstream reid_rows;
-                reid_rows << std::fixed << std::setprecision(6);
-                for (const Track* candidate : crop_candidates)
+                std::optional<ReidMatchResult> matched;
+                auto frame_finished_at = tracking_finished_at;
+                if (config_.reid_enabled)
                 {
-                    const Track& track = *candidate;
-                    if (track.predicted || track.class_id != config_.reid_options.person_class_id ||
-                        track.height < config_.reid_options.min_crop_height ||
-                        crop_count >= config_.reid_options.max_crops_per_frame)
-                        continue;
-                    if (!std::isfinite(track.x) || !std::isfinite(track.y) ||
-                        !std::isfinite(track.width) || !std::isfinite(track.height) ||
-                        track.width <= 0.0F || track.height <= 0.0F)
-                        continue;
-                    const int x1 = static_cast<int>(std::clamp(track.x, 0.0F, static_cast<float>(frame->image.cols)));
-                    const int y1 = static_cast<int>(std::clamp(track.y, 0.0F, static_cast<float>(frame->image.rows)));
-                    const int x2 = static_cast<int>(std::clamp(track.x + track.width, 0.0F, static_cast<float>(frame->image.cols)));
-                    const int y2 = static_cast<int>(std::clamp(track.y + track.height, 0.0F, static_cast<float>(frame->image.rows)));
-                    if (x2 - x1 < 2 || y2 - y1 < 2) continue;
-                    const cv::Rect crop(x1, y1, x2 - x1, y2 - y1);
-                    const auto reid_started_at = std::chrono::steady_clock::now();
-                    const auto embedding = reid_pipeline_->embed(frame->image, crop);
-                    const double elapsed_ms = std::chrono::duration<double, std::milli>(
-                        std::chrono::steady_clock::now() - reid_started_at).count();
-                    reid_ms += elapsed_ms;
-                    reid_rows << frame_id << ',' << track.track_id << ',' << x1 << ',' << y1
-                        << ',' << crop.width << ',' << crop.height << ',' << elapsed_ms;
-                    for (float value : embedding) reid_rows << ',' << value;
-                    reid_rows << '\n';
-                    embeddings.emplace(track.track_id, embedding);
-                    ++crop_count;
+                    std::vector<const Track*> crop_candidates;
+                    crop_candidates.reserve(tracks.size());
+                    for (const Track& track : tracks) crop_candidates.push_back(&track);
+                    std::stable_sort(crop_candidates.begin(), crop_candidates.end(),
+                        [this](const Track* a, const Track* b) {
+                            return reid_matcher_->needs_decision_feature(a->track_id) &&
+                                !reid_matcher_->needs_decision_feature(b->track_id);
+                        });
+                    std::unordered_map<int, std::vector<float>> embeddings;
+                    reid_rows << std::fixed << std::setprecision(6);
+                    for (const Track* candidate : crop_candidates)
+                    {
+                        const Track& track = *candidate;
+                        if (track.predicted || track.class_id != config_.reid_options.person_class_id ||
+                            track.height < config_.reid_options.min_crop_height ||
+                            crop_count >= config_.reid_options.max_crops_per_frame)
+                            continue;
+                        if (!std::isfinite(track.x) || !std::isfinite(track.y) ||
+                            !std::isfinite(track.width) || !std::isfinite(track.height) ||
+                            track.width <= 0.0F || track.height <= 0.0F)
+                            continue;
+                        const int x1 = static_cast<int>(std::clamp(track.x, 0.0F, static_cast<float>(frame->image.cols)));
+                        const int y1 = static_cast<int>(std::clamp(track.y, 0.0F, static_cast<float>(frame->image.rows)));
+                        const int x2 = static_cast<int>(std::clamp(track.x + track.width, 0.0F, static_cast<float>(frame->image.cols)));
+                        const int y2 = static_cast<int>(std::clamp(track.y + track.height, 0.0F, static_cast<float>(frame->image.rows)));
+                        if (x2 - x1 < 2 || y2 - y1 < 2) continue;
+                        const cv::Rect crop(x1, y1, x2 - x1, y2 - y1);
+                        const auto reid_started_at = std::chrono::steady_clock::now();
+                        const auto embedding = reid_pipeline_->embed(frame->image, crop);
+                        const double elapsed_ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - reid_started_at).count();
+                        reid_ms += elapsed_ms;
+                        reid_rows << frame_id << ',' << track.track_id << ',' << x1 << ',' << y1
+                            << ',' << crop.width << ',' << crop.height << ',' << elapsed_ms;
+                        for (float value : embedding) reid_rows << ',' << value;
+                        reid_rows << '\n';
+                        embeddings.emplace(track.track_id, embedding);
+                        ++crop_count;
+                    }
+                    const auto matching_started_at = std::chrono::steady_clock::now();
+                    matched.emplace(reid_matcher_->step(frame_id, tracks, embeddings));
+                    frame_finished_at = std::chrono::steady_clock::now();
+                    matching_ms = std::chrono::duration<double, std::milli>(
+                        frame_finished_at - matching_started_at).count();
                 }
-                const auto matching_started_at = std::chrono::steady_clock::now();
-                const ReidMatchResult matched = reid_matcher_->step(frame_id, tracks, embeddings);
-                const auto matching_finished_at = std::chrono::steady_clock::now();
-                const double matching_ms = std::chrono::duration<double, std::milli>(
-                    matching_finished_at - matching_started_at).count();
                 const double frame_total_ms = std::chrono::duration<double, std::milli>(
-                    matching_finished_at - frame_started_at).count();
+                    frame_finished_at - frame_started_at).count();
                 auto& sample = profiler_samples.back();
                 sample.reid_us = reid_ms * 1000.0;
                 sample.reid_crop_count = static_cast<std::size_t>(crop_count);
@@ -527,13 +560,16 @@ void BenchmarkApplication::run()
 
                 write_detections(detection_file, frame_id, detections);
                 write_tracks(track_file, frame_id, tracks);
-                reid_file << reid_rows.str();
-                write_tracks(reid_track_file, frame_id, matched.tracks);
-                for (const ReidMatchEvent& event : matched.matches)
-                    match_file << frame_id << ',' << event.tracker_id << ','
-                        << event.stable_id << ',' << event.similarity << '\n';
-                if (!detection_file || !track_file || !reid_file ||
-                    !reid_track_file || !match_file)
+                if (config_.reid_enabled)
+                {
+                    reid_file << reid_rows.str();
+                    write_tracks(reid_track_file, frame_id, matched->tracks);
+                    for (const ReidMatchEvent& event : matched->matches)
+                        match_file << frame_id << ',' << event.tracker_id << ','
+                            << event.stable_id << ',' << event.similarity << '\n';
+                }
+                if (!detection_file || !track_file ||
+                    (config_.reid_enabled && (!reid_file || !reid_track_file || !match_file)))
                     throw std::runtime_error("Benchmark 결과 저장에 실패했습니다: " + sequence_name);
 
                 benchmark_result_writer::write_timing_row(
@@ -560,13 +596,17 @@ void BenchmarkApplication::run()
             benchmark_result_writer::write_timing_footer(timing_file);
             detection_file.close();
             track_file.close();
-            reid_track_file.close();
+            if (config_.reid_enabled) reid_track_file.close();
             timing_file.close();
-            reid_file.close();
-            match_file.close();
+            if (config_.reid_enabled)
+            {
+                reid_file.close();
+                match_file.close();
+            }
 
-            if (detection_file.fail() || track_file.fail() || reid_track_file.fail() ||
-                timing_file.fail() || reid_file.fail() || match_file.fail())
+            if (detection_file.fail() || track_file.fail() || timing_file.fail() ||
+                (config_.reid_enabled &&
+                    (reid_track_file.fail() || reid_file.fail() || match_file.fail())))
                 throw std::runtime_error(
                     "Benchmark 결과 파일 마무리에 실패했습니다: " + sequence_name);
 

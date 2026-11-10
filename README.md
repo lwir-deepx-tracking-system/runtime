@@ -208,6 +208,10 @@ Benchmark는 프레임당 최대 2개 crop을 처리하며 새 ID의 embedding�
 `tracks/`에 원본 ByteTrack 결과, `tracks_reid/`에 재연결 결과,
 `reid/<sequence>_matches.csv`에 재연결 이벤트를 저장합니다.
 ReID embedding과 crop 소요 시간은 `reid/<sequence>.csv`에 저장합니다.
+Benchmark에서 `reid.enabled: false`로 설정하면 ReID 모델과 Matcher를 생성하지 않고
+Detection·Tracking만 실행합니다. 이때 ReID 설정의 나머지 키는 생략할 수 있으며
+`tracks_reid/`와 `reid/` 결과는 생성하지 않습니다. `timing/`의 ReID·Matching 시간과
+crop 수는 0으로 기록됩니다. `reid.enabled`를 생략하면 기존처럼 ReID를 실행합니다.
 Runtime의 ReID·matching 스레드 연결은 후속 작업입니다.
 runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고 실행 루프가 처리합니다.
 새 인스턴스를 먼저 만든 뒤 활성 트래커를 교체하며, 진행 중이던 프레임이 끝나면 이전

@@ -20,9 +20,11 @@ detection:
     # DXRT 내부 입력·출력 buffer 수. 0이면 자동 설정
     buffer_count: 6
     use_ort: false
-    npu_cores: all
+    # Detection과 ReID가 서로 다른 NPU core를 사용하도록 지정한다.
+    npu_cores: 0
 
 reid:
+  enabled: true
   config: config/reid/repvgg.yaml
   matcher_config: config/reid/matcher.yaml
   inference:
@@ -30,7 +32,7 @@ reid:
     max_inflight: 1
     buffer_count: 0
     use_ort: false
-    npu_cores: all
+    npu_cores: 1
   person_class_id: 0
   min_crop_height: 32
   max_crops_per_frame: 2

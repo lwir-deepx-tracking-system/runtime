@@ -1,6 +1,10 @@
 #include "benchmark/benchmark.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
+#include <string>
 #include <yaml-cpp/yaml.h>
 
 // Benchmark가 외부 ByteTrack 설정을 카탈로그 ID로 선택하는지 검증한다.
@@ -9,6 +13,7 @@ int main()
     const BenchmarkConfig config = load_benchmark_config("config/benchmark.yaml");
     if (config.detection.model.postprocess.type != "yolo26" ||
         config.detection.inference.max_inflight != 1 ||
+        !config.reid_enabled ||
         config.reid.config_path != "config/reid/repvgg.yaml" ||
         config.reid.model.name != "repvgg" ||
         config.reid.matcher_config_path != "config/reid/matcher.yaml" ||
@@ -30,5 +35,20 @@ int main()
         config_parser::select_tracking_config(selection, config.tracking_catalog);
         return 2;
     } catch (const std::runtime_error&) {}
+
+    YAML::Node disabled = YAML::Clone(root);
+    disabled["reid"] = YAML::Load("enabled: false");
+    const auto disabled_path = std::filesystem::temp_directory_path() /
+        ("lwir-benchmark-reid-disabled-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()) + ".yaml");
+    {
+        std::ofstream file(disabled_path);
+        file << disabled;
+    }
+    const BenchmarkConfig without_reid = load_benchmark_config(disabled_path.string());
+    std::filesystem::remove(disabled_path);
+    if (without_reid.reid_enabled || !without_reid.reid.config_path.empty() ||
+        !without_reid.reid.matcher_config_path.empty())
+        return 3;
     return 0;
 }
