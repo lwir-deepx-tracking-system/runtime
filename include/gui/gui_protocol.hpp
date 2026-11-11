@@ -1,10 +1,12 @@
 #pragma once
 
 #include "app/pipeline_result.hpp"
+#include "common/frame_telemetry.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 // PC application contract. Multibyte values (including float bits) are big endian.
@@ -57,6 +59,9 @@ struct GuiTrackingMetadata {
     // Local prioritization hint, never serialized. Zero means no selected target.
     // ID-based following is deferred, so the runtime currently leaves it zero.
     std::uint32_t selected_track_id = 0;
+    // Reserve trailer capacity even when no completed sample exists yet.
+    bool telemetry_enabled = false;
+    std::optional<FrameTelemetrySnapshot> telemetry;
 };
 
 // Wire strategy: socket and pipeline classes never inspect protocol fields.

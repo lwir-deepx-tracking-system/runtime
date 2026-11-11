@@ -97,6 +97,10 @@ void TrackingThread::run()
 
             if (measurement_enabled_)
             {
+                if (measurements_)
+                    measurements_->bind_tracking(detections.model_generation,
+                        detections.frame->metadata.frame_id, tracker.epoch, tracker.id,
+                        detections.frame->metadata.captured_at);
                 // Tracking 완료 시점에서 Camera frame 수신 이후 지연을 기록한다.
                 if (measurements_)
                     measurements_->record(detections.model_generation, MetricStage::Tracking,

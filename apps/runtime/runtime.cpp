@@ -55,6 +55,8 @@ class RuntimeApplication : public IPipelineRequests
 private:
     RuntimeConfig config_;
     std::unique_ptr<MetricsWriter> metrics_writer_;
+    std::unique_ptr<FrameTelemetryCollector> telemetry_collector_;
+    IMeasurementSink* measurement_sink_ = nullptr;
 
     // Camera의 shared FrameContext를 Detection으로 전달
     ThreadSafeQueue<FrameMessage> frame_queue_;
@@ -132,7 +134,9 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
     : config_(load_runtime_config(config_path)), config_path_(config_path), console_enabled_(console_enabled)
 {
     Logger::set_level(config_.logging.level);
-    measurement_enabled_ = config_.measurement.enabled;
+    const bool telemetry_enabled = config_.gui.enabled && config_.gui.metadata.enabled &&
+        config_.gui.metadata.telemetry_enabled;
+    measurement_enabled_ = config_.measurement.enabled || telemetry_enabled;
 
     // Control은 GUI 선택 ID에 의존하므로 enable 조합만으로 세 모드를 결정한다.
     if (config_.control.enabled)
@@ -165,7 +169,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         std::to_string(gui_track_queue_.size())
     );
 
-    if (measurement_enabled_) {
+    if (config_.measurement.enabled) {
         MetricsWriterOptions options;
         options.output_root = std::filesystem::path(config_.measurement.output_root) / runtime_mode_;
         options.snapshots.emplace_back(config_path_, "runtime.yaml");
@@ -177,6 +181,10 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         metrics_writer_ = std::make_unique<MetricsWriter>(options);
         Logger::info("[Measurement] 결과 경로: " + metrics_writer_->directory().string());
     }
+    if (telemetry_enabled)
+        telemetry_collector_ = std::make_unique<FrameTelemetryCollector>(metrics_writer_.get());
+    measurement_sink_ = telemetry_collector_ ? static_cast<IMeasurementSink*>(telemetry_collector_.get()) :
+        static_cast<IMeasurementSink*>(metrics_writer_.get());
     camera_ = std::make_unique<Camera>();
 
     model_manager_thread_ = std::make_unique<ModelManagerThread>(
@@ -186,7 +194,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         active_pipeline_,
         runtime_control_, &model_change_results_,
         std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>{},
-        metrics_writer_.get());
+        measurement_sink_);
 
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
@@ -214,7 +222,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             gui_track_queue_,
             config_.gui.enabled,
-            measurement_enabled_, metrics_writer_.get()
+            measurement_enabled_, measurement_sink_
         );
     
     // detection_queue → Tracking → track_queue
@@ -225,7 +233,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             control_track_queue_,
             gui_track_queue_,
-            measurement_enabled_, metrics_writer_.get()
+            measurement_enabled_, measurement_sink_
         );
 
     // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
@@ -233,7 +241,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         gimbal_executor_ = std::make_unique<GimbalCommandExecutor>(
             config_.control, GimbalDeviceFactory::create(config_.control.gimbal), runtime_control_);
     control_thread_ = std::make_unique<ControlThread>(
-        control_track_queue_, gimbal_executor_.get(), measurement_enabled_, metrics_writer_.get());
+        control_track_queue_, gimbal_executor_.get(), measurement_enabled_, measurement_sink_);
 
 
     if (config_.gui.enabled)
@@ -242,7 +250,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             config_.gui.video,
             config_.gui.metadata,
             config_.model.camera_input.clip_min,
-            config_.model.camera_input.clip_max);
+            config_.model.camera_input.clip_max, telemetry_collector_.get());
         gui_sender_thread_ = std::make_unique<GuiSenderThread>(
             *gui_sender_, runtime_control_, gui_track_queue_);
 

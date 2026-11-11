@@ -419,6 +419,14 @@ GuiConfig load_gui_config(const YAML::Node& node)
         throw std::runtime_error(
             "gui.metadata.max_packet_bytes must be in [64, 65507]");
     c.metadata.max_packet_bytes = static_cast<std::size_t>(max_packet_bytes);
+    const auto telemetry = metadata["telemetry"];
+    if (telemetry && !telemetry.IsMap())
+        throw std::runtime_error("gui.metadata.telemetry must be a map");
+    if (telemetry)
+        c.metadata.telemetry_enabled = telemetry["enabled"].as<bool>(true);
+    if (c.metadata.telemetry_enabled &&
+        c.metadata.max_packet_bytes < kGuiMetadataHeaderSize + kTelemetrySize)
+        throw std::runtime_error("gui.metadata.max_packet_bytes must reserve 152 bytes for telemetry");
 
     // 명령 설정: PC 명령과 보드 응답을 위한 양방향 TCP 채널이다.
     const YAML::Node command = node["command"];

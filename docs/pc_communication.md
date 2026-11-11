@@ -1,6 +1,7 @@
 # Runtime–PC communication
 
-Runtime follows `pc-application`'s current `feat/gui-video` wire contract and the
+Runtime follows `pc-application`'s base video wire contract, the optional fixed
+telemetry extension in `feat/runtime-telemetry`, and the
 adopted decisions in [Application 설계](https://app.notion.com/p/3f29de3f14a280829f90dc2dfd666d04).
 The [1103 roadmap](https://app.notion.com/p/40c9de3f14a28074905bd2239d6e9fdb)
 describes wider state/control/gimbal work. The [tracking handler](auto_control.md)
@@ -29,6 +30,8 @@ gui:
     host: <PC IPv4>
     port: 5001
     max_packet_bytes: 1200
+    telemetry:
+      enabled: true
   command:
     enabled: true
     handler: deferred
@@ -91,8 +94,11 @@ not change that mapping. `gui_started_us` alone does not measure network latency
 without a clock synchronization contract.
 
 A datagram carries display records for one frame, including a header for zero
-records. At the default 1200-byte limit, 46 tracks fit (1178 bytes); 47 would need
-1203 bytes. Capacity is derived from the configured payload limit, not a fixed
+records. With telemetry disabled, the default 1200-byte limit fits 46 tracks
+(1178 bytes); 47 would need 1203 bytes. Telemetry is enabled by default and
+reserves 124 bytes, fitting 41 tracks (1177 bytes with the trailer). That
+reservation also applies before a completed sample is available. Capacity is
+derived from the configured payload limit, not a fixed
 track count. Valid records are included in stable input order up to capacity;
 extra display records are excluded, and trackCount is the actual encoded count.
 The local metadata object supports a selected-target priority hint, which is not
@@ -106,6 +112,19 @@ list that policy as unresolved. This change follows the explicitly adopted desig
 for selection; the numeric UDP limit remains a provisional, unmeasured setting.
 Actual UDP send errors still propagate as sender failure; transient transport
 error recovery is not added here.
+
+### Optional Runtime telemetry
+
+`gui.metadata.telemetry.enabled` defaults to **true**, including when omitted.
+It requires a PC application that supports the fixed LWTM extension; the older
+PC parser rejects packets containing a trailer. Set it to false for an older PC.
+The new decoder accepts both the base packet and exactly 124 extra bytes.
+There is no version, flags, variable trailer length or protocol selector.
+
+The trailer belongs to a completed **earlier** frame K, where K < current frame N;
+it never changes the current boxes or video association. See
+[Runtime telemetry](runtime_telemetry.md) for fields, timing meanings and collection.
+The minimum configured packet limit with telemetry enabled is 152 bytes.
 
 ## Control TCP 5002
 

@@ -125,6 +125,8 @@ gui:
     port: 5001
 
     max_packet_bytes: 1200
+    telemetry:
+      enabled: true
 
   # ----------------------------------------------------------
   # 6-3. GUI Command

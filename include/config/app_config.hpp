@@ -186,6 +186,7 @@ struct GuiMetadataConfig
     std::string host;
     std::uint16_t port = 0;
     std::size_t max_packet_bytes = 0;
+    bool telemetry_enabled = true;
 };
 
 struct GuiCommandConfig

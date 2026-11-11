@@ -121,6 +121,15 @@ bool display_track(const GuiTrackMetadata& source, GuiTrackMetadata& track)
     track.height = static_cast<float>(bottom - top);
     return true;
 }
+bool valid_telemetry(const FrameTelemetrySnapshot& t, std::uint64_t frame)
+{
+    if (!t.session_id || !t.frame_id || t.frame_id >= frame || !t.model_id || !t.tracker_id ||
+        (t.valid_mask & ~kTelemetryValidBits) || !std::isfinite(t.sample_age_ms) || t.sample_age_ms < 0)
+        return false;
+    for (unsigned i = 0; i < kTelemetryMetricCount; ++i)
+        if ((t.valid_mask & (1U << i)) && (!std::isfinite(t.values[i]) || t.values[i] < 0)) return false;
+    return true;
+}
 }
 
 bool encode_tracking_metadata(const GuiTrackingMetadata& metadata,
@@ -128,7 +137,10 @@ bool encode_tracking_metadata(const GuiTrackingMetadata& metadata,
 {
     if (!metadata.frame_id || metadata.width != 640 || metadata.height != 480 ||
         limit < kGuiMetadataHeaderSize) return false;
-    const auto capacity = (std::min(limit, std::size_t{65507}) - kGuiMetadataHeaderSize)
+    const auto trailer = metadata.telemetry_enabled || metadata.telemetry ? kTelemetrySize : 0;
+    if (limit < kGuiMetadataHeaderSize + trailer ||
+        (metadata.telemetry && !valid_telemetry(*metadata.telemetry, metadata.frame_id))) return false;
+    const auto capacity = (std::min(limit, std::size_t{65507}) - kGuiMetadataHeaderSize - trailer)
                           / kGuiTrackMetadataSize;
     std::vector<GuiTrackMetadata> selected;
     selected.reserve(std::min(capacity, metadata.tracks.size()));
@@ -166,6 +178,16 @@ bool encode_tracking_metadata(const GuiTrackingMetadata& metadata,
         put(encoded, track.class_id, 1);
         put_float(encoded, track.confidence);
     }
+    if (metadata.telemetry) {
+        const auto& t = *metadata.telemetry;
+        put(encoded, kTelemetryMagic, 4);
+        put(encoded, t.session_id, 8); put(encoded, t.model_generation, 8);
+        put(encoded, t.tracker_epoch, 8); put(encoded, t.frame_id, 8);
+        put(encoded, t.valid_mask, 4); put_float(encoded, t.sample_age_ms);
+        put(encoded, t.model_id, 4); put(encoded, t.tracker_id, 4);
+        for (unsigned i = 0; i < kTelemetryMetricCount; ++i)
+            put_float(encoded, (t.valid_mask & (1U << i)) ? t.values[i] : 0.0F);
+    }
     packet = std::move(encoded);
     return true;
 }
@@ -175,12 +197,28 @@ bool decode_tracking_metadata(const std::uint8_t* data, std::size_t size,
     if (!data || size < kGuiMetadataHeaderSize || size > 65507 ||
         get(data, 4) != kGuiMetadataMagic || !get(data + 4, 8)) return false;
     const auto count = get(data + 24, 4);
-    if (count > (size - kGuiMetadataHeaderSize) / kGuiTrackMetadataSize ||
-        size != kGuiMetadataHeaderSize + count * kGuiTrackMetadataSize) return false;
+    if (count > (size - kGuiMetadataHeaderSize) / kGuiTrackMetadataSize) return false;
+    const auto base = kGuiMetadataHeaderSize + count * kGuiTrackMetadataSize;
+    if (size != base && size != base + kTelemetrySize) return false;
     GuiTrackingMetadata decoded;
     decoded.frame_id = get(data + 4, 8);
     decoded.rtp_timestamp = get(data + 12, 4);
     decoded.gui_started_us = get(data + 16, 8);
+    if (size != base) {
+        const auto* p = data + base;
+        if (get(p, 4) != kTelemetryMagic) return false;
+        FrameTelemetrySnapshot t;
+        t.session_id = get(p + 4, 8); t.model_generation = get(p + 12, 8);
+        t.tracker_epoch = get(p + 20, 8); t.frame_id = get(p + 28, 8);
+        t.valid_mask = static_cast<std::uint32_t>(get(p + 36, 4));
+        t.sample_age_ms = get_float(p + 40);
+        t.model_id = static_cast<std::uint32_t>(get(p + 44, 4));
+        t.tracker_id = static_cast<std::uint32_t>(get(p + 48, 4));
+        for (unsigned i = 0; i < kTelemetryMetricCount; ++i)
+            if (t.valid_mask & (1U << i)) t.values[i] = get_float(p + 52 + 4 * i);
+        if (!valid_telemetry(t, decoded.frame_id)) return false;
+        decoded.telemetry_enabled = true; decoded.telemetry = t;
+    }
     for (std::size_t i = 0; i < count; ++i) {
         const auto* p = data + kGuiMetadataHeaderSize + i * kGuiTrackMetadataSize;
         GuiTrackMetadata source, track;

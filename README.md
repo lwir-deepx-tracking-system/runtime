@@ -204,6 +204,8 @@ runtime 내부의 `request_tracker_change(id)`는 변경 요청을 큐에 넣고
 계속 동작합니다. 옵션을 생략하면 표준 입력을 읽지 않습니다.
 
 Runtime–PC 통신은 [PC 통신 계약](docs/pc_communication.md)을 따릅니다.
+GUI 성능 통계는 [Runtime telemetry](docs/runtime_telemetry.md)를 참고합니다.
+`gui.metadata.telemetry.enabled`는 기본 `true`이며, LWTM 확장을 지원하는 PC 앱이 필요합니다.
 GUI 키보드 수동 제어와 AUTO는 [통합 제어 설정·시험](docs/auto_control.md)을 참고합니다.
 고정 IP와 직결 LAN·Windows 수신 방화벽 설정은 [네트워크 설정](docs/network_setup.md)을 참고합니다.
 통신 형식은 PC 규격으로 고정합니다. `gui.command.handler`는 AppConfig가 검증하고

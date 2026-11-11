@@ -11,6 +11,7 @@
 #include "config/app_config.hpp"
 #include "common/track.hpp"
 #include "gui/gui_protocol.hpp"
+#include "common/frame_telemetry_collector.hpp"
 
 struct _GstAppSrc;
 struct _GstElement;
@@ -46,6 +47,7 @@ private:
     GuiVideoConfig video_config_;
     GuiMetadataConfig metadata_config_;
     std::unique_ptr<IGuiProtocol> protocol_;
+    FrameTelemetryCollector* telemetry_ = nullptr; // Application owns it beyond probe teardown.
     std::uint16_t clip_min_;
     std::uint16_t clip_max_;
 
@@ -74,7 +76,8 @@ private:
 
     // 변환된 BGR frame을 appsrc에 전달한다. encode, RTP packetize, UDP 송신은
     // downstream GStreamer element가 비동기로 수행한다.
-    bool push_frame_to_gstreamer(const cv::Mat& image);
+    bool push_frame_to_gstreamer(const cv::Mat& image,
+        const TrackingResult* result = nullptr, double queue_ms = 0, double convert_ms = 0);
 
     // 영상 RTP 포트와 독립된 metadata UDP 목적지를 최초 1회 준비한다.
     bool open_metadata_socket();
@@ -89,7 +92,8 @@ public:
         GuiVideoConfig video_config,
         GuiMetadataConfig metadata_config,
         std::uint16_t clip_min,
-        std::uint16_t clip_max);
+        std::uint16_t clip_max,
+        FrameTelemetryCollector* telemetry = nullptr);
     ~GuiSender();
 
     GuiSender(const GuiSender&) = delete;

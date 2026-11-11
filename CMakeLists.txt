@@ -94,6 +94,7 @@ endif()
 
 add_library(lwir_common
     src/common/logger.cpp
+    src/common/frame_telemetry_collector.cpp
     src/config/app_config.cpp
 )
 
@@ -105,6 +106,7 @@ target_include_directories(lwir_common
 target_link_libraries(lwir_common
     PUBLIC
         yaml-cpp
+        Threads::Threads
 )
 
 
@@ -323,6 +325,11 @@ endif()
 
 if(BUILD_TESTING)
 
+    add_executable(test_runtime_telemetry tests/gui/test_runtime_telemetry.cpp)
+    target_link_libraries(test_runtime_telemetry PRIVATE lwir_runtime_core)
+    add_test(NAME runtime_telemetry COMMAND test_runtime_telemetry)
+    set_tests_properties(runtime_telemetry PROPERTIES TIMEOUT 15)
+
     # --------------------------------------------------------------------------
     # 실제 카메라 하드웨어 테스트
     # --------------------------------------------------------------------------
@@ -456,6 +463,8 @@ if(BUILD_TESTING)
     add_test(NAME gui_sender_jpeg COMMAND test_gui_sender jpegenc)
     add_test(NAME gui_sender_bypass COMMAND test_gui_sender x264enc bypass)
     add_test(NAME gui_sender_bypass_jpeg COMMAND test_gui_sender jpegenc bypass)
+    add_test(NAME gui_sender_telemetry COMMAND test_gui_sender x264enc telemetry)
+    add_test(NAME gui_sender_telemetry_jpeg COMMAND test_gui_sender jpegenc telemetry)
     option(LWIR_TEST_MPP "Run Orange Pi MPP hardware encoder tests" OFF)
     if(LWIR_TEST_MPP)
         add_test(NAME gui_sender_mpp_jpeg COMMAND test_gui_sender mppjpegenc)

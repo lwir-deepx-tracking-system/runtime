@@ -37,7 +37,7 @@ struct TrackingResult
     std::vector<Track> tracks;
     std::chrono::steady_clock::time_point enqueued_at{};
     std::uint64_t model_generation = 0;
-    std::uint64_t tracker_epoch = 0; // 로컬 추적 세대; PC 통신에는 포함하지 않는다.
+    std::uint64_t tracker_epoch = 0; // 추적 세대; 기본 헤더에는 없고 telemetry에 포함한다.
     bool bypass = false;
 };
 

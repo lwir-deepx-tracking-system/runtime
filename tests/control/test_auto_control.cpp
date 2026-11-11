@@ -78,6 +78,7 @@ FrameMetadata next_metadata() {
 }
 void calculations() {
     AutoControlConfig c; c.speed_max = 30; c.pid_x.kp = c.pid_y.kp = 100; c.deadband_x = .25; c.deadband_y = .05;
+    c.min_confidence = .5; // Exercise configured filtering; production default is now zero.
     AutoTrackingController controller(c);
     auto d = controller.calculate(track(384, 264), 640, 480, next_metadata()); // .20 inside x, .10 outside y
     check(d.x == 0 && d.y == -1 && std::abs(d.speed - 10) < .001, "Inactive axis inflated common SPD");
@@ -99,6 +100,7 @@ void calculations() {
     check(!controller.valid(bad,640,480), "predicted box used for AUTO");
     bad = track(); bad.confidence = .1;
     check(!controller.valid(bad,640,480), "low confidence");
+    check(AutoTrackingController(AutoControlConfig{}).valid(bad,640,480), "default confidence accepts low scores");
     check(!controller.valid(track(650),640,480), "off-frame center");
     c.fov_x_deg = c.fov_y_deg = 90; c.deadband_x = c.deadband_y = 0;
     d = AutoTrackingController(c).calculate(track(480), 640, 480, next_metadata());

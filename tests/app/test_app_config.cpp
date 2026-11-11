@@ -132,6 +132,18 @@ int main()
         try { config_parser::load_gui_config(gui); } catch (const std::runtime_error&) { return true; }
         return false;
     };
+    // Telemetry defaults on when its YAML key is omitted, independent of CSV.
+    gui["metadata"].remove("telemetry");
+    if (!config_parser::load_gui_config(gui).metadata.telemetry_enabled) return 60;
+    gui["metadata"]["max_packet_bytes"] = 151;
+    if (!rejects()) return 61;
+    gui["metadata"]["max_packet_bytes"] = 152;
+    if (!config_parser::load_gui_config(gui).metadata.telemetry_enabled) return 62;
+    gui["metadata"]["telemetry"]["enabled"] = false;
+    gui["metadata"]["max_packet_bytes"] = 64;
+    if (config_parser::load_gui_config(gui).metadata.telemetry_enabled) return 63;
+    gui["metadata"]["max_packet_bytes"] = 1200;
+    gui["metadata"]["telemetry"]["enabled"] = true;
     gui["video"]["encoder"] = "mppjpegenc";
     if (!rejects()) return 11;
     gui["video"]["encoder"] = "mpph264enc";
