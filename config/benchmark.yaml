@@ -48,6 +48,10 @@ tracking:
 tracking_catalog:
   - id: 1
     config: config/tracking/bytetrack.yaml
+  - id: 2
+    config: config/tracking/botsort.yaml
+  - id: 3
+    config: config/tracking/bytetrack_post_reid.yaml
 
 
 # ============================================================

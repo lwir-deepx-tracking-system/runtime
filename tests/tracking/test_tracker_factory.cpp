@@ -1,5 +1,6 @@
 #include "tracking/tracker_factory.hpp"
 #include "tracking/bytetrack_tracker.hpp"
+#include "tracking/botsort_tracker.hpp"
 
 #include <stdexcept>
 
@@ -13,6 +14,19 @@ int main()
     std::unique_ptr<Tracker> tracker = factory->create(config);
     if (!tracker || dynamic_cast<ByteTrackTracker*>(tracker.get()) == nullptr)
         return 2;
+    ReidSettings reid;
+    CameraInputConfig camera;
+    ReidBenchmarkConfig crops;
+    if(dynamic_cast<ByteTrackTracker*>(TrackerFactory::create_configured(
+        config,reid,camera,crops).get())==nullptr) return 5;
+    config.type=TrackerType::BotSort;
+    config.kalman_format="xywh";
+    auto bot_factory=TrackerFactory::for_type(config.type);
+    if(std::string(bot_factory->name())!="botsort" ||
+        dynamic_cast<BotSortTracker*>(bot_factory->create(config).get())==nullptr)
+        return 6;
+    try { TrackerFactory::create_configured(config,reid,camera,crops);return 7; }
+    catch(const std::invalid_argument&) {}
 
     try {
         TrackerFactory::for_type(static_cast<TrackerType>(255));

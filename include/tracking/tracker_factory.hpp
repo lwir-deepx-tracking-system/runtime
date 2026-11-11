@@ -13,6 +13,10 @@ public:
 
     // 설정에서 선택한 트래커 종류에 맞는 팩토리를 반환한다.
     static std::unique_ptr<TrackerFactory> for_type(TrackerType type);
+    // Build the selected tracker and its generation-owned ReID components.
+    static std::unique_ptr<Tracker> create_configured(
+        const TrackingConfig& tracking, const ReidSettings& reid,
+        const CameraInputConfig& camera, const ReidBenchmarkConfig& crops);
     // 검증된 추적 설정으로 공통 Tracker 인터페이스 구현체를 만든다.
     virtual std::unique_ptr<Tracker> create(
         const TrackingConfig& config) const = 0;

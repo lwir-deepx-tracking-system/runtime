@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -20,6 +21,13 @@ struct ReidMatchResult
 {
     std::vector<Track> tracks;
     std::vector<ReidMatchEvent> matches;
+    struct Diagnostic {
+        int tracker_id = -1;
+        int stable_id = -1;
+        std::string reason;
+        float similarity = 0;
+    };
+    std::vector<Diagnostic> diagnostics;
 };
 
 // Tracker의 원본 ID를 보존하면서, 새 사람 ID를 최근에 사라진 ID에 1:1로 재연결한다.

@@ -160,10 +160,11 @@ endif()
 if(LWIR_NEEDS_VISION)
     add_library(lwir_vision
         src/detection/lwir_preprocessor.cpp
-        src/detection/dxrt_detection_pipeline.cpp
         src/reid/reid_pipeline.cpp
         src/reid/reid_matcher.cpp
         src/tracking/bytetrack_tracker.cpp
+        src/tracking/botsort_tracker.cpp
+        src/tracking/post_reid_tracker.cpp
         src/tracking/tracker_factory.cpp
         src/tracking/tracker_manager.cpp
         src/tracking/kalman_filter.cpp
@@ -184,6 +185,7 @@ if(LWIR_NEEDS_VISION)
 
     if(LWIR_ENABLE_DX_APP)
         target_sources(lwir_vision PRIVATE
+            src/detection/dxrt_detection_pipeline.cpp
             src/detection/yolo_postprocessor_core.cpp
             src/detection/yolov8_postprocessor.cpp
             src/detection/yolo26_postprocessor.cpp
@@ -326,6 +328,22 @@ endif()
 # ==============================================================================
 
 if(BUILD_TESTING)
+
+    add_executable(test_botsort tests/tracking/test_botsort.cpp
+        src/tracking/botsort_tracker.cpp src/tracking/kalman_filter.cpp)
+    target_include_directories(test_botsort PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(test_botsort PRIVATE ${OpenCV_LIBS})
+    add_test(NAME botsort COMMAND test_botsort)
+    add_executable(test_multitracker_config
+        tests/tracking/test_multitracker_config.cpp)
+    target_link_libraries(test_multitracker_config PRIVATE lwir_common)
+    add_test(NAME multitracker_config COMMAND test_multitracker_config)
+    add_executable(test_post_reid_tracker tests/tracking/test_post_reid_tracker.cpp)
+    target_link_libraries(test_post_reid_tracker PRIVATE lwir_vision)
+    add_test(NAME post_reid_tracker COMMAND test_post_reid_tracker)
+    set_tests_properties(multitracker_config PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
     add_executable(test_reid_stages
         tests/reid/test_reid_stages.cpp
@@ -568,6 +586,11 @@ if(BUILD_TESTING)
     add_executable(test_tracker_hotswap tests/pipeline/test_tracker_hotswap.cpp)
     target_link_libraries(test_tracker_hotswap PRIVATE lwir_runtime_core)
     add_test(NAME tracker_hotswap COMMAND test_tracker_hotswap)
+
+    add_executable(test_multitracker_runtime
+        tests/pipeline/test_multitracker_runtime.cpp)
+    target_link_libraries(test_multitracker_runtime PRIVATE lwir_runtime_core)
+    add_test(NAME multitracker_runtime COMMAND test_multitracker_runtime)
 
 
     # --------------------------------------------------------------------------

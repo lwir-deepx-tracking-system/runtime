@@ -1,0 +1,22 @@
+tracking:
+  type: bytetrack
+  post_reid: true
+  track_threshold: 0.5
+  match_threshold: 0.8
+  track_buffer: 30
+  low_threshold: 0.1
+  new_track_threshold: 0
+  low_match_threshold: 0.5
+  unconfirmed_match_threshold: 0.7
+  fuse_score: false
+  nsa_kalman: false
+  kalman_format: xywh
+  lost_output_frames: 0
+  buffer_scale: 0.5
+  buffer_max_px: 0
+  buffer_small_size: 0
+  buffer_snap: false
+  oru: false
+  ocm_weight: 0.0
+  ocm_delta_t: 3
+  ocr: true

@@ -36,9 +36,11 @@ int main()
         config.tracking.kalman_format != "xywh" || config.tracking.lost_output_frames != 0 ||
         config.tracking.oru || config.tracking.ocm_weight != 0.0F ||
         config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
-        config.tracking_catalog.size() != 1 ||
+        config.tracking_catalog.size() != 3 ||
         config.tracking_catalog.at(1).config_path !=
             "config/tracking/bytetrack.yaml" ||
+        config.tracking_catalog.at(2).config.type != TrackerType::BotSort ||
+        !config.tracking_catalog.at(3).config.post_reid ||
         config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
         !config.measurement.enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")

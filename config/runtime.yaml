@@ -34,6 +34,8 @@ detection:
 reid:
   config: config/reid/repvgg.yaml
   matcher_config: config/reid/matcher.yaml
+  min_crop_height: 32
+  max_crops_per_frame: 2
   inference:
     # runtime ReID 스레드는 후속 작업이며, 설정값은 미리 검증한다.
     max_inflight: 1
@@ -59,6 +61,10 @@ tracking:
 tracking_catalog:
   - id: 1
     config: config/tracking/bytetrack.yaml
+  - id: 2
+    config: config/tracking/botsort.yaml
+  - id: 3
+    config: config/tracking/bytetrack_post_reid.yaml
 
 
 # ============================================================

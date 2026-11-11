@@ -85,7 +85,7 @@ void TrackingThread::run()
             const auto started_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};
-            tracks->tracks = tracker.tracker->track(detections.detections);
+            tracks->tracks = tracker.tracker->process(detections).tracks;
             const auto finished_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};

@@ -156,8 +156,13 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         node, "type", "tracking", "bytetrack");
     if (type == "bytetrack")
         c.type = TrackerType::ByteTrack;
+    else if (type == "botsort")
+        c.type = TrackerType::BotSort;
     else
         throw std::runtime_error("tracking.type is unsupported: " + type);
+    c.post_reid = optional_value<bool>(node, "post_reid", "tracking", false);
+    if (c.type == TrackerType::BotSort && c.post_reid)
+        throw std::runtime_error("tracking.post_reid is only valid for bytetrack");
     c.track_threshold = required<float>(
         node, "track_threshold", "tracking");
     c.match_threshold = required<float>(
@@ -198,32 +203,46 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         node, "ocm_delta_t", "tracking", c.ocm_delta_t);
     c.ocr = optional_value<bool>(
         node, "ocr", "tracking", c.ocr);
+    if (c.type == TrackerType::BotSort)
+    {
+        c.proximity_threshold = required<float>(node, "proximity_threshold", "tracking");
+        c.appearance_threshold = required<float>(node, "appearance_threshold", "tracking");
+        c.feature_alpha = optional_value<float>(node, "feature_alpha", "tracking", c.feature_alpha);
+        c.appearance_min_crop_height = optional_value<int>(node, "appearance_min_crop_height", "tracking", c.appearance_min_crop_height);
+        c.appearance_max_crops_per_frame = optional_value<int>(node, "appearance_max_crops_per_frame", "tracking", c.appearance_max_crops_per_frame);
+        if (!std::isfinite(c.proximity_threshold) || c.proximity_threshold < 0 || c.proximity_threshold > 1 ||
+            !std::isfinite(c.appearance_threshold) || c.appearance_threshold < 0 || c.appearance_threshold > 1 ||
+            !std::isfinite(c.feature_alpha) || c.feature_alpha < 0 || c.feature_alpha >= 1 ||
+            c.appearance_min_crop_height < 0 || c.appearance_max_crops_per_frame < 0)
+            throw std::runtime_error("tracking BoT-SORT appearance settings are out of range");
+    }
 
-    if (c.track_threshold <= 0.0F || c.track_threshold > 1.0F)
+    if (!std::isfinite(c.track_threshold) || c.track_threshold <= 0.0F || c.track_threshold > 1.0F)
         throw std::runtime_error("tracking.track_threshold must be in (0, 1]");
-    if (c.match_threshold <= 0.0F || c.match_threshold > 1.0F)
+    if (!std::isfinite(c.match_threshold) || c.match_threshold <= 0.0F || c.match_threshold > 1.0F)
         throw std::runtime_error("tracking.match_threshold must be in (0, 1]");
     if (c.track_buffer <= 0)
         throw std::runtime_error("tracking.track_buffer must be positive");
-    if (c.low_threshold < 0.0F || c.low_threshold >= c.track_threshold)
+    if (!std::isfinite(c.low_threshold) || c.low_threshold < 0.0F || c.low_threshold >= c.track_threshold)
         throw std::runtime_error("tracking.low_threshold must be in [0, track_threshold)");
-    if (c.new_track_threshold != 0.0F &&
+    if (!std::isfinite(c.new_track_threshold) || (c.new_track_threshold != 0.0F &&
         (c.new_track_threshold < c.track_threshold || c.new_track_threshold > 1.0F))
+        )
         throw std::runtime_error(
             "tracking.new_track_threshold must be 0 (auto) or in [track_threshold, 1]");
-    if (c.low_match_threshold <= 0.0F || c.low_match_threshold > 1.0F)
+    if (!std::isfinite(c.low_match_threshold) || c.low_match_threshold <= 0.0F || c.low_match_threshold > 1.0F)
         throw std::runtime_error("tracking.low_match_threshold must be in (0, 1]");
-    if (c.unconfirmed_match_threshold <= 0.0F || c.unconfirmed_match_threshold > 1.0F)
+    if (!std::isfinite(c.unconfirmed_match_threshold) || c.unconfirmed_match_threshold <= 0.0F || c.unconfirmed_match_threshold > 1.0F)
         throw std::runtime_error("tracking.unconfirmed_match_threshold must be in (0, 1]");
     if (c.lost_output_frames < 0)
         throw std::runtime_error("tracking.lost_output_frames must not be negative");
     if (c.kalman_format != "xyah" && c.kalman_format != "xywh")
         throw std::runtime_error("tracking.kalman_format must be xyah or xywh");
-    if (c.buffer_scale < 0.0F || c.buffer_scale > 2.0F)
+    if (!std::isfinite(c.buffer_scale) || c.buffer_scale < 0.0F || c.buffer_scale > 2.0F)
         throw std::runtime_error("tracking.buffer_scale must be in [0, 2]");
-    if (c.buffer_max_px < 0.0F)
+    if (!std::isfinite(c.buffer_max_px) || c.buffer_max_px < 0.0F)
         throw std::runtime_error("tracking.buffer_max_px must not be negative");
-    if (c.buffer_small_size < 0.0F)
+    if (!std::isfinite(c.buffer_small_size) || c.buffer_small_size < 0.0F)
         throw std::runtime_error("tracking.buffer_small_size must not be negative");
     if (!std::isfinite(c.ocm_weight) || c.ocm_weight < 0.0F || c.ocm_weight > 1.0F)
         throw std::runtime_error("tracking.ocm_weight must be in [0, 1]");
@@ -760,6 +779,13 @@ RuntimeConfig load_runtime_config(const std::string& path)
     c.reid.matcher = load_reid_matcher_config(c.reid.matcher_config_path);
     c.reid.inference = config_parser::load_inference_config(
         root["reid"]["inference"], "reid.inference");
+    c.reid_options.person_class_id = c.reid.matcher.person_class_id;
+    c.reid_options.min_crop_height = optional_value<int>(root["reid"],
+        "min_crop_height", "reid", 32);
+    c.reid_options.max_crops_per_frame = optional_value<int>(root["reid"],
+        "max_crops_per_frame", "reid", 2);
+    if(c.reid_options.min_crop_height<0 || c.reid_options.max_crops_per_frame<=0)
+        throw std::runtime_error("reid crop limits must be nonnegative height and positive count");
 
     c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
     c.initial_tracker_id = config_parser::select_tracking_id(

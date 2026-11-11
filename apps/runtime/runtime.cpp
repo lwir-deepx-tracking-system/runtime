@@ -200,7 +200,10 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         tracker_name_ = "switchable";
     tracker_manager_ = std::make_unique<TrackerManager>(
         config_.tracking_catalog, config_.initial_tracker_id,
-        TrackerManager::Creator{}, &runtime_control_.tracker_epoch);
+        [this](const TrackingConfig& tracking) -> std::shared_ptr<Tracker> {
+            return TrackerFactory::create_configured(tracking,config_.reid,
+                config_.detection.model.camera_input,config_.reid_options);
+        }, &runtime_control_.tracker_epoch);
 
     
     // Camera Thread에 연결

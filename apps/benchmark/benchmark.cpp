@@ -86,6 +86,10 @@ BenchmarkConfig load_benchmark_config(const std::string& path)
     c.tracking_catalog = config_parser::load_tracking_catalog(root["tracking_catalog"]);
     c.tracking = config_parser::select_tracking_config(
         root["tracking"], c.tracking_catalog);
+    if (c.tracking.type == TrackerType::ByteTrack && c.reid_enabled)
+        c.tracking.post_reid = true; // legacy benchmark reid.enabled
+    if (c.tracking.type == TrackerType::BotSort && !c.reid_enabled)
+        throw std::runtime_error("BoT-SORT requires reid.enabled and a ReID model");
     c.sequence = config_parser::load_benchmark_sequence_config(root["sequence"]);
     c.path = config_parser::load_benchmark_path_config(root["path"]);
 
@@ -207,8 +211,6 @@ private:
 
     std::unique_ptr<IDetectionPipeline> detection_pipeline_;
     std::unique_ptr<Tracker> tracker_;
-    std::unique_ptr<IReidPipeline> reid_pipeline_;
-    std::unique_ptr<ReidMatcher> reid_matcher_;
 
 public:
     explicit BenchmarkApplication(const std::string& config_path);
@@ -226,15 +228,8 @@ BenchmarkApplication::BenchmarkApplication(const std::string& config_path)
 
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
-    tracker_ = tracker_factory->create(config_.tracking);
-    if (config_.reid_enabled)
-    {
-        auto reid_factory = ReidFactory::for_model(config_.reid.model);
-        reid_pipeline_ = reid_factory->create(config_.reid.model,
-            config_.detection.model.camera_input, config_.reid.inference);
-        reid_matcher_ = std::make_unique<ReidMatcher>(
-            config_.reid.matcher, config_.reid.model.output_dimensions);
-    }
+    tracker_ = TrackerFactory::create_configured(config_.tracking,config_.reid,
+        config_.detection.model.camera_input,config_.reid_options);
 }
 
 
@@ -387,11 +382,15 @@ void BenchmarkApplication::run()
             if (config_.reid_enabled)
             {
                 reid_track_file << std::fixed << std::setprecision(6);
-                reid_file << "frame_id,track_id,x,y,width,height,elapsed_ms";
+                reid_file << (config_.tracking.type == TrackerType::BotSort ?
+                    "frame_id,detection_index,x,y,width,height,elapsed_ms" :
+                    "frame_id,track_id,x,y,width,height,elapsed_ms");
                 for (int i = 0; i < config_.reid.model.output_dimensions; ++i)
                     reid_file << ",embedding_" << i;
                 reid_file << '\n' << std::fixed << std::setprecision(6);
-                match_file << "frame_id,tracker_id,stable_id,similarity\n"
+                match_file << (config_.tracking.type == TrackerType::BotSort ?
+                    "frame_id,event,track_id,detection_index\n" :
+                    "frame_id,event,tracker_id,stable_id,similarity\n")
                     << std::fixed << std::setprecision(6);
             }
 
@@ -402,7 +401,6 @@ void BenchmarkApplication::run()
 
             // Sequence 사이에서 Track 상태가 이어지지 않도록 초기화한다.
             tracker_->reset();
-            if (config_.reid_enabled) reid_matcher_->reset();
 
             Logger::info("[Benchmark] Sequence 시작: " + sequence_name);
 
@@ -490,66 +488,16 @@ void BenchmarkApplication::run()
                         detection_timing.cpu_task_us;
 
                 // 결과 저장 시간을 제외하고 각 처리 단계와 프레임 전체를 측정한다.
-                const auto tracking_started_at = std::chrono::steady_clock::now();
-                const std::vector<Track> tracks = tracker_->track(detections);
-                const auto tracking_finished_at = std::chrono::steady_clock::now();
-                const double tracking_ms = std::chrono::duration<double, std::milli>(
-                    tracking_finished_at - tracking_started_at).count();
+                ::DetectionResult tracking_input;
+                tracking_input.frame = frame;
+                tracking_input.detections = detections;
+                const TrackingStep step = tracker_->process(tracking_input);
+                const auto frame_finished_at = std::chrono::steady_clock::now();
+                const double tracking_ms = step.association_ms;
+                const double reid_ms = step.reid_ms;
+                const int crop_count = static_cast<int>(step.embeddings.size());
+                const double matching_ms = step.matching_ms;
                 profiler_samples.back().tracking_us = tracking_ms * 1000.0;
-
-                int crop_count = 0;
-                double reid_ms = 0.0;
-                double matching_ms = 0.0;
-                std::ostringstream reid_rows;
-                std::optional<ReidMatchResult> matched;
-                auto frame_finished_at = tracking_finished_at;
-                if (config_.reid_enabled)
-                {
-                    std::vector<const Track*> crop_candidates;
-                    crop_candidates.reserve(tracks.size());
-                    for (const Track& track : tracks) crop_candidates.push_back(&track);
-                    std::stable_sort(crop_candidates.begin(), crop_candidates.end(),
-                        [this](const Track* a, const Track* b) {
-                            return reid_matcher_->needs_decision_feature(a->track_id) &&
-                                !reid_matcher_->needs_decision_feature(b->track_id);
-                        });
-                    std::unordered_map<int, std::vector<float>> embeddings;
-                    reid_rows << std::fixed << std::setprecision(6);
-                    for (const Track* candidate : crop_candidates)
-                    {
-                        const Track& track = *candidate;
-                        if (track.predicted || track.class_id != config_.reid_options.person_class_id ||
-                            track.height < config_.reid_options.min_crop_height ||
-                            crop_count >= config_.reid_options.max_crops_per_frame)
-                            continue;
-                        if (!std::isfinite(track.x) || !std::isfinite(track.y) ||
-                            !std::isfinite(track.width) || !std::isfinite(track.height) ||
-                            track.width <= 0.0F || track.height <= 0.0F)
-                            continue;
-                        const int x1 = static_cast<int>(std::clamp(track.x, 0.0F, static_cast<float>(frame->image.cols)));
-                        const int y1 = static_cast<int>(std::clamp(track.y, 0.0F, static_cast<float>(frame->image.rows)));
-                        const int x2 = static_cast<int>(std::clamp(track.x + track.width, 0.0F, static_cast<float>(frame->image.cols)));
-                        const int y2 = static_cast<int>(std::clamp(track.y + track.height, 0.0F, static_cast<float>(frame->image.rows)));
-                        if (x2 - x1 < 2 || y2 - y1 < 2) continue;
-                        const cv::Rect crop(x1, y1, x2 - x1, y2 - y1);
-                        const auto reid_started_at = std::chrono::steady_clock::now();
-                        const auto embedding = reid_pipeline_->embed(frame->image, crop);
-                        const double elapsed_ms = std::chrono::duration<double, std::milli>(
-                            std::chrono::steady_clock::now() - reid_started_at).count();
-                        reid_ms += elapsed_ms;
-                        reid_rows << frame_id << ',' << track.track_id << ',' << x1 << ',' << y1
-                            << ',' << crop.width << ',' << crop.height << ',' << elapsed_ms;
-                        for (float value : embedding) reid_rows << ',' << value;
-                        reid_rows << '\n';
-                        embeddings.emplace(track.track_id, embedding);
-                        ++crop_count;
-                    }
-                    const auto matching_started_at = std::chrono::steady_clock::now();
-                    matched.emplace(reid_matcher_->step(frame_id, tracks, embeddings));
-                    frame_finished_at = std::chrono::steady_clock::now();
-                    matching_ms = std::chrono::duration<double, std::milli>(
-                        frame_finished_at - matching_started_at).count();
-                }
                 const double frame_total_ms = std::chrono::duration<double, std::milli>(
                     frame_finished_at - frame_started_at).count();
                 auto& sample = profiler_samples.back();
@@ -559,14 +507,22 @@ void BenchmarkApplication::run()
                 sample.frame_total_us = frame_total_ms * 1000.0;
 
                 write_detections(detection_file, frame_id, detections);
-                write_tracks(track_file, frame_id, tracks);
+                write_tracks(track_file, frame_id, step.raw_tracks);
                 if (config_.reid_enabled)
                 {
-                    reid_file << reid_rows.str();
-                    write_tracks(reid_track_file, frame_id, matched->tracks);
-                    for (const ReidMatchEvent& event : matched->matches)
-                        match_file << frame_id << ',' << event.tracker_id << ','
-                            << event.stable_id << ',' << event.similarity << '\n';
+                    for (const auto& embedding : step.embeddings) {
+                        reid_file << frame_id << ',' <<
+                            (config_.tracking.type == TrackerType::BotSort ?
+                                static_cast<int>(embedding.source_index) : embedding.track_id) << ','
+                            << embedding.crop.x << ',' << embedding.crop.y << ','
+                            << embedding.crop.width << ',' << embedding.crop.height << ','
+                            << embedding.elapsed_ms;
+                        for (float value : embedding.values) reid_file << ',' << value;
+                        reid_file << '\n';
+                    }
+                    write_tracks(reid_track_file, frame_id, step.tracks);
+                    for (const auto& event : step.association_events)
+                        match_file << event << '\n';
                 }
                 if (!detection_file || !track_file ||
                     (config_.reid_enabled && (!reid_file || !reid_track_file || !match_file)))

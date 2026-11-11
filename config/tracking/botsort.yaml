@@ -1,0 +1,16 @@
+tracking:
+  type: botsort
+  track_threshold: 0.5
+  match_threshold: 0.8
+  track_buffer: 30
+  low_threshold: 0.1
+  new_track_threshold: 0.6
+  low_match_threshold: 0.5
+  kalman_format: xywh
+  fuse_score: true
+  # These are maximum distances: 1 - IoU and (1 - cosine) / 2.
+  proximity_threshold: 0.5
+  appearance_threshold: 0.25
+  feature_alpha: 0.9
+  appearance_min_crop_height: 32
+  appearance_max_crops_per_frame: 0

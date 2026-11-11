@@ -141,6 +141,8 @@ ReidMatchResult ReidMatcher::step(std::uint64_t frame_id,
             if (it != mappings_.end()) active_stable.insert(it->second.stable_id);
         }
 
+    ReidMatchResult result;
+    result.tracks = tracks;
     struct Pair { float score; int raw_id; int stable_id; };
     std::vector<Pair> pairs;
     for (const Track& track : tracks)
@@ -148,20 +150,40 @@ ReidMatchResult ReidMatcher::step(std::uint64_t frame_id,
         if (track.class_id != config_.person_class_id || track.predicted || !valid_box(track))
             continue;
         const auto feature = features.find(track.track_id);
-        if (feature == features.end()) continue;
+        if (feature == features.end()) {
+            result.diagnostics.push_back({track.track_id,-1,"feature_missing",0});
+            continue;
+        }
         const auto mapping = mappings_.find(track.track_id);
-        if (mapping != mappings_.end() && !mapping->second.pending) continue;
+        if (mapping != mappings_.end() && !mapping->second.pending) {
+            result.diagnostics.push_back({track.track_id,-1,"decision_closed",0});
+            continue;
+        }
         if (mapping != mappings_.end() && frame_id - mapping->second.first_frame >
-            static_cast<std::uint64_t>(config_.decision_wait_frames)) continue;
+            static_cast<std::uint64_t>(config_.decision_wait_frames)) {
+            result.diagnostics.push_back({track.track_id,-1,"decision_window_expired",0});
+            continue;
+        }
+        if (identities_.empty())
+            result.diagnostics.push_back({track.track_id,-1,"gallery_empty",0});
         for (const auto& [stable_id, old] : identities_)
         {
-            if (active_stable.count(stable_id) || old.gallery.empty() ||
-                old.last_frame >= frame_id ||
+            if (active_stable.count(stable_id)) {
+                result.diagnostics.push_back({track.track_id,stable_id,"identity_active",0});continue;
+            }
+            if (old.gallery.empty()) {
+                result.diagnostics.push_back({track.track_id,stable_id,"gallery_empty",0});continue;
+            }
+            if (old.last_frame >= frame_id ||
                 frame_id - old.last_frame > static_cast<std::uint64_t>(config_.max_lost_frames) ||
-                !valid_box(old.last_track)) continue;
+                !valid_box(old.last_track)) {
+                result.diagnostics.push_back({track.track_id,stable_id,"time_or_box_gate",0});continue;
+            }
             const float height_ratio = track.height / old.last_track.height;
             if (height_ratio < config_.min_height_ratio ||
-                height_ratio > config_.max_height_ratio) continue;
+                height_ratio > config_.max_height_ratio) {
+                result.diagnostics.push_back({track.track_id,stable_id,"height_gate",0});continue;
+            }
             const float dx = (track.x + track.width * 0.5F) -
                 (old.last_track.x + old.last_track.width * 0.5F);
             const float dy = (track.y + track.height * 0.5F) -
@@ -170,10 +192,13 @@ ReidMatchResult ReidMatcher::step(std::uint64_t frame_id,
             const float radius = old.last_track.height *
                 (config_.max_center_distance_height +
                  config_.distance_growth_per_10_frames * gap / 10.0F);
-            if (std::hypot(dx, dy) > radius) continue;
+            if (std::hypot(dx, dy) > radius) {
+                result.diagnostics.push_back({track.track_id,stable_id,"distance_gate",0});continue;
+            }
             const float score = gallery_similarity(feature->second, old.gallery);
             if (score >= config_.similarity_threshold)
                 pairs.push_back({score, track.track_id, stable_id});
+            else result.diagnostics.push_back({track.track_id,stable_id,"similarity_gate",score});
         }
     }
     std::sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) {
@@ -182,8 +207,6 @@ ReidMatchResult ReidMatcher::step(std::uint64_t frame_id,
         return a.stable_id < b.stable_id;
     });
 
-    ReidMatchResult result;
-    result.tracks = tracks;
     std::map<int, int> assignments;
     std::set<int> taken_raw, taken_stable;
     for (const Pair& pair : pairs)

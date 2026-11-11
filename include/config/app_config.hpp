@@ -25,10 +25,11 @@ struct InferenceConfig {
     NpuCoreBinding npu_cores = NpuCoreBinding::All;
 };
 
-enum class TrackerType { ByteTrack };
+enum class TrackerType { ByteTrack, BotSort };
 
 struct TrackingConfig {
     TrackerType type = TrackerType::ByteTrack;
+    bool post_reid = false;
     float track_threshold = 0.5F;
     float match_threshold = 0.8F;
     int track_buffer = 30;
@@ -79,6 +80,13 @@ struct TrackingConfig {
     // OCR: 2차 매칭 뒤 남은 Track을 Kalman 예측 대신 마지막 관측 박스로 남은 high 검출과 한 번 더 매칭한다
     //      (match_threshold 사용). 멈춘 물체·짧은 가림 뒤 예측이 빗나간 Track을 복구한다.
     bool ocr = false;
+    // BoT-SORT: distances are 1-IoU and (1-cosine)/2 respectively.
+    float proximity_threshold = 0.5F;
+    float appearance_threshold = 0.25F;
+    float feature_alpha = 0.9F;
+    int appearance_min_crop_height = 32;
+    // 0 means all eligible detections; missing features fall back to IoU.
+    int appearance_max_crops_per_frame = 0;
 };
 
 struct GimbalConfig {
@@ -383,6 +391,7 @@ struct RuntimeConfig
     std::map<int, TrackingCatalogEntry> tracking_catalog;
     int initial_tracker_id = 0;
     ReidSettings reid;
+    ReidBenchmarkConfig reid_options{0, 32, 2};
     TrackingConfig tracking;
     ControlConfig control;
     MeasurementConfig measurement;

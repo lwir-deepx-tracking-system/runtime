@@ -4,8 +4,9 @@
 
 #include "config/app_config.hpp"
 #include "detection/i_detection_pipeline.hpp"
-#include "detection/i_postprocessor.hpp"
 #include "detection/i_preprocessor.hpp"
+
+class IPostprocessor;
 
 class DetectorFactory
 {
