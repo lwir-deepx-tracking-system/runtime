@@ -201,3 +201,17 @@ DXRT NPU profiler 평균 inference 13.769 ms를 확인했다. 상세 실행 명�
 아니다. 원격의 브랜치, SHA, 기존 미추적 파일, Python 서버·짐벌 브리지·DXRT
 상태는 전후 동일했다. 다음 단계는 호스트 Benchmark/Runtime 구현과 테스트,
 Commit/Push 이후 격리된 원격 테스트 및 복원이다.
+
+## 2026-11-11 통합 커밋 Benchmark 검증
+
+호스트 작업을 `6f582eab2d311bdaa02d1f5015965188ace879e9`로 Commit/Push했다.
+Orange Pi의 기존 작업 트리를 유지하고 격리된 worktree에서 이 SHA의 DXRT
+빌드와 `frame_policy` CTest를 통과했다. 같은 `seq_004`의 네 Tracker/정책
+구성이 모두 281프레임을 처리하고 정상 종료했다. [실기 결과와 로그](test_evidence/orangepi_integrated_6f582ea/)에
+종료 코드, 단계별 지연, 출력 차이 및 평가 한계를 기록했다.
+
+테스트 worktree를 제거하고 기존 원격 브랜치·HEAD·미추적 파일·Python/짐벌/DXRT
+상태의 복원을 확인했다. GMC 옵션은 13.938 ms의 평균 Tracking 비용이 측정돼
+성능 개선·재검증이 필요하다. 사후 ReID는 이 시퀀스에서 raw Track과 결과가
+동일해 ID 개선을 주장하지 않는다. Phase 1의 Gate/Judge/Motion 및 실제
+ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았다.

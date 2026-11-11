@@ -1,0 +1,60 @@
+[INFO] [Config] Benchmark Config loaded
+[INFO] [Benchmark] Sequence 수: 1
+[INFO] [Benchmark] Sequence 범위: seq_004 ~ seq_004
+[INFO] [Benchmark] 결과 경로: /tmp/lwir-integrated-benchmark-20261111/results/botsort/yolo26s_botsort/20261111_222446
+[INFO] [Benchmark] ReID: enabled
+[INFO] [Benchmark] Sequence 시작: seq_004
+[INFO] [Benchmark] seq_004 처리 프레임: 30
+[INFO] [Benchmark] seq_004 처리 프레임: 60
+[INFO] [Benchmark] seq_004 처리 프레임: 90
+[INFO] [Benchmark] seq_004 처리 프레임: 120
+[INFO] [Benchmark] seq_004 처리 프레임: 150
+[INFO] [Benchmark] seq_004 처리 프레임: 180
+[INFO] [Benchmark] seq_004 처리 프레임: 210
+[INFO] [Benchmark] seq_004 처리 프레임: 240
+[INFO] [Benchmark] seq_004 처리 프레임: 270
+[Benchmark] DXRT PROFILER SUMMARY: seq_004 (281 frames)
+
+================================================================================
+Name                                 min(us)     max(us)     avg(us)      CoV(%)
+================================================================================
+[ PREPROCESS ]
+Preprocess                             660.0      4538.9      1630.6        26.7
+--------------------------------------------------------------------------------
+[ NPU TASK - npu_0 / Device 0 ]
+NPU Input Format Handler                 2.3       126.3         9.0        85.6
+H2D (PCIe Write)                       992.2      2784.2      1809.5        21.7
+NPU Inference                        13761.0     13775.0     13767.7         0.0
+  - Inference Core 0                 13761.0     13775.0     13767.7         0.0
+  - Inference Core 1                   319.0       322.0       320.1         0.1
+  - Inference Core 2                       -           -           -           -
+D2H (PCIe Read)                        568.2      2855.4      1388.0        18.8
+NPU Output Format Handler              536.2      3157.5      1070.7        47.3
+NPU Task Total                       16543.4     25598.7     19052.5         5.1
+--------------------------------------------------------------------------------
+[ CPU TASK - cpu_0 / ONNX Runtime ]
+CPU Task (total)                           -           -           -           -
+--------------------------------------------------------------------------------
+[ C++ POSTPROCESS ]
+Postprocess                           1480.5     26077.9      7841.5        65.2
+--------------------------------------------------------------------------------
+[ TRACKING ]
+Tracking                                37.0       745.2       280.8        24.1
+--------------------------------------------------------------------------------
+[ DETECTION LATENCY ]
+Detection Host Latency               16700.9     25989.4     19220.0         5.6
+
+================================================================================
+DETECTION + TRACKING                 22042.1     49182.8     28972.8        19.2
+================================================================================
+
+[ FRAME STAGES (ms, all frames) ]
+Stage                              avg           p95
+Detection                       28.692        47.148
+Tracking                         0.281         0.364
+ReID                            10.193        16.642
+ReID crops                       3.726         4.000
+Matching                         0.000         0.000
+Frame total                     39.448        62.954
+[INFO] [Benchmark] Sequence 완료: seq_004 / 처리 프레임: 281
+[INFO] [Benchmark] 전체 Benchmark 완료

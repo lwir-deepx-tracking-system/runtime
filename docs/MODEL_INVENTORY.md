@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | NEWMRT480A | `/home/orangepi/workspace/model-bank/final_tracker/dxnn/yolo26m_flir_rt480_a_nms_480x384.dxnn` | [1, 480, 384, 3] uint8 | box_s8/16/32: [1,4,H/s,W/s]; cls_s8/16/32: [1,16,H/s,W/s]; float32 | 일치 | 미실행 |
 | NEWMRT480B | `/home/orangepi/workspace/model-bank/final_tracker/dxnn/yolo26m_flir_rt480_b_nms_480x384.dxnn` | [1, 480, 384, 3] uint8 | box_s8/16/32: [1,4,H/s,W/s]; cls_s8/16/32: [1,16,H/s,W/s]; float32 | 일치 | 미실행 |
-| RVGGA0_REID2C256 | `/home/orangepi/workspace/model-bank/final_tracker/dxnn/repvgg_tmot_camel_reid.dxnn` | [1, 128, 64, 3] uint8 | `embedding [1,128] float32` | 일치 | 미실행 |
+| RVGGA0_REID2C256 | `/home/orangepi/workspace/model-bank/final_tracker/dxnn/repvgg_tmot_camel_reid.dxnn` | [1, 128, 64, 3] uint8 | `embedding [1,128] float32` | 일치 | 2026-11-11 `seq_004` 사후 ReID/BoT-SORT 추론 성공 |
 | NEWMRW480 | `/home/orangepi/workspace/model-bank/final_tracker/dxnn/yolo26m_flir_whole480_nms_640x480.dxnn` | [1, 480, 640, 3] uint8 | box_s8/16/32: [1,4,H/s,W/s]; cls_s8/16/32: [1,16,H/s,W/s]; float32 | 일치 | 미실행 |
 | S640 | 조사한 bank에서 일치 파일 미확인 | 미확인 | 미확인 | 미확인 | 미실행 |
 | S6 | `/home/orangepi/workspace/model-bank/yolo26/yolo26s_nms_640x640.dxnn` | [1, 640, 640, 3] uint8 | box_s8/16/32: [1,4,H/s,W/s]; cls_s8/16/32: [1,16,H/s,W/s]; float32 | 일치 | 미실행 |
@@ -24,6 +24,8 @@
 2026-11-11 Orange Pi 기존 `feat/runtime-telemetry` Benchmark에서
 `/home/orangepi/workspace/runtime/models/yolo26s_finetuned.dxnn`이
 `seq_004` 281프레임에 대해 DXRT NPU 추론 및 출력 기록까지 성공했다.
+호스트 통합 커밋 `6f582ea`의 별도 worktree에서도 이 Detection 모델과 위
+RepVGG 모델을 사용한 4개 구성의 실제 추론이 완료됐다.
 이 검증은 위 Python 모델 목록이나 호스트 개발 브랜치의 모델 등록 검증을
 대신하지 않는다. 산출물은 [`TEST_RESULTS.md`](TEST_RESULTS.md)에 기록했다.
 

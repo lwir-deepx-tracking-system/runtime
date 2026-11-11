@@ -1,0 +1,7 @@
+exit=0
+branch=feat/runtime-telemetry
+sha=71eb9c84922723176ca8312a5b87bddff82d2387
+status=?? tests/tracking/lwir_to_mot.py
+  30367 python3
+  30416 gimbal_bridge_v
+active

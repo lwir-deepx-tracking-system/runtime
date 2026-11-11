@@ -90,6 +90,28 @@ ctest --test-dir /tmp/lwir-integration-build --output-on-failure
 - 수정 후 전체 빌드 완료, **38/38 통과 (3.27초)**. `git diff --check` 통과.
 - 이번 후속 작업도 원격 브랜치/서비스 변경 및 실기 테스트는 하지 않았다.
 
+## 2026-11-11 호스트 통합 커밋의 Orange Pi 실기 Benchmark
+
+- 호스트 브랜치 `feat/python-runtime-integration`의
+  `6f582eab2d311bdaa02d1f5015965188ace879e9`를 Push하고 원격 SHA를 대조했다.
+- Orange Pi 기존 `feat/runtime-telemetry` / `71eb9c84922723176ca8312a5b87bddff82d2387`와
+  미추적 `tests/tracking/lwir_to_mot.py`를 기록했다. 기존 Python 서버와 짐벌
+  브리지는 실행 중이었다.
+- 원격 별도 worktree에 테스트 커밋을 배치해 CMake DXRT 활성 빌드 성공.
+  `frame_policy` CTest 1/1 통과. 첫 SSH 장시간 무출력 타임아웃으로 Benchmark 전
+  스크립트가 끝났으나 보호 절차가 worktree를 제거했다. SSH helper를 로컬에서
+  수정한 뒤 같은 빌드 산출물과 새 worktree로 시험을 완료했다.
+- 네 구성(ByteTrack, ByteTrack 사후 ReID, BoT-SORT 사전 ReID, Warmth/Edge/GMC
+  사후 ReID) 각각 `seq_004` 281프레임, 종료 0, DXRT 실제 추론 및 출력 확인.
+  설정·수치·제한과 로그는 [증거](test_evidence/orangepi_integrated_6f582ea/)에 있다.
+- 네 실행의 Detection 파일 SHA가 같았고, 사후 ReID의 Track 결과는 raw와
+  동일했다. BoT-SORT에서는 appearance_gate 이벤트 10건. 새 GMC 정책의
+  Tracking 평균 지연은 13.938 ms로 비용이 컸다.
+- 후처리로 별도 worktree 제거. 원래 브랜치·SHA·미추적 파일 및 기존 Python
+  PID 30367·짐벌 PID 30416·DXRT active가 전후 동일했다. 테스트 프로세스 종료.
+- TrackEval 미설치 및 GT 출처 미확인으로 IDSW/IDF1/HOTA는 미평가.
+  Runtime GUI/LAN, 모델 교체, PC 애플리케이션은 이번 테스트 범위가 아니다.
+
 ### 원격 상태 재확인
 
 읽기 전용 SSH 재조회 결과: `feat/runtime-telemetry`,
