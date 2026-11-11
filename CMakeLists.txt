@@ -55,7 +55,7 @@ if(LWIR_NEEDS_CAMERA OR LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
     list(APPEND LWIR_OPENCV_COMPONENTS core)
 endif()
 if(LWIR_NEEDS_VISION OR LWIR_NEEDS_RUNTIME_CORE)
-    list(APPEND LWIR_OPENCV_COMPONENTS imgproc)
+    list(APPEND LWIR_OPENCV_COMPONENTS imgproc video calib3d)
 endif()
 if(LWIR_BUILD_CAPTURE OR LWIR_BUILD_BENCHMARK OR LWIR_BUILD_RUNTIME)
     list(APPEND LWIR_OPENCV_COMPONENTS imgcodecs)
@@ -164,6 +164,7 @@ if(LWIR_NEEDS_VISION)
         src/reid/reid_matcher.cpp
         src/tracking/bytetrack_tracker.cpp
         src/tracking/botsort_tracker.cpp
+        src/tracking/frame_policy_tracker.cpp
         src/tracking/post_reid_tracker.cpp
         src/tracking/tracker_factory.cpp
         src/tracking/tracker_manager.cpp
@@ -328,6 +329,11 @@ endif()
 # ==============================================================================
 
 if(BUILD_TESTING)
+
+    add_executable(test_frame_policy tests/tracking/test_frame_policy.cpp)
+    target_link_libraries(test_frame_policy PRIVATE lwir_vision)
+    add_test(NAME frame_policy COMMAND test_frame_policy)
+    set_tests_properties(frame_policy PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
     add_executable(test_botsort tests/tracking/test_botsort.cpp
         src/tracking/botsort_tracker.cpp src/tracking/kalman_filter.cpp)

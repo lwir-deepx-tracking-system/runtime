@@ -1,3 +1,4 @@
+#include "tracking/tracking_policy.hpp"
 #include "tracking/bytetrack_tracker.hpp"
 
 #include <algorithm>
@@ -93,6 +94,15 @@ std::vector<std::vector<float>> buffered_iou_distance(
             cost[i][j] = 1.0f - iou(tbb, buffered(dets[j]->det_tlwh, c.buffer_scale, c.buffer_max_px));
     }
     return cost;
+}
+
+void gate_classes(std::vector<std::vector<float>>& costs, const std::vector<STrackPtr>& tracks,
+                  const std::vector<STrackPtr>& detections, const TrackingConfig& config)
+{
+    if(!config.class_gate) return;
+    for(size_t i=0;i<tracks.size();++i)
+        for(size_t j=0;j<detections.size();++j)
+            if(!tracking_classes_match(tracks[i]->class_id,detections[j]->class_id,config)) costs[i][j]=2.0F;
 }
 
 void fuse_score(std::vector<std::vector<float>>& cost, const std::vector<STrackPtr>& dets)
@@ -324,7 +334,7 @@ std::vector<STrackPtr> sub(
 
 // tracked와 lost에 거의 같은 위치의 Track이 있으면 짧게 유지된 쪽을 지운다.
 void remove_duplicates(
-    std::vector<STrackPtr>& tracked, std::vector<STrackPtr>& lost)
+    std::vector<STrackPtr>& tracked, std::vector<STrackPtr>& lost, const TrackingConfig& config)
 {
     std::vector<char> drop_a(tracked.size(), 0), drop_b(lost.size(), 0);
     for (size_t i = 0; i < tracked.size(); ++i)
@@ -332,6 +342,7 @@ void remove_duplicates(
         {
             if (1.0f - iou(track_box(*tracked[i]), track_box(*lost[j])) >= 0.15f)
                 continue;
+            if(!tracking_classes_match(tracked[i]->class_id,lost[j]->class_id,config)) continue;
             const int age_a = tracked[i]->frame_id - tracked[i]->start_frame;
             const int age_b = lost[j]->frame_id - lost[j]->start_frame;
             if (age_a > age_b)
@@ -420,7 +431,7 @@ void ByteTrackTracker::activate(STrack& t)
     t.track_id = ++next_track_id_;
     t.kf = kalman_.initiate(to_measurement(t.det_tlwh, kalman_.format()));
     t.state = TrackState::Tracked;
-    t.is_activated = (frame_id_ == 1);  // 첫 프레임이 아니면 다음 프레임에 확정
+    t.is_activated = (frame_id_ == 1 || config_.confirmation_frames==1);  // 첫 프레임이 아니면 다음 프레임에 확정
     t.tracklet_len = 0;
     t.frame_id = frame_id_;
     t.start_frame = frame_id_;
@@ -476,7 +487,7 @@ void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
     t.has_lost_kf = false;
     kalman_.update(t.kf, to_measurement(det.det_tlwh, kalman_.format()), measurement_noise_scale(det.score));
     t.state = TrackState::Tracked;
-    t.is_activated = true;
+    t.is_activated = t.is_activated || t.tracklet_len+1 >= config_.confirmation_frames;
     t.score = det.score;
     t.class_id = det.class_id;
     t.frame_id = frame_id_;
@@ -506,7 +517,7 @@ std::vector<Track> ByteTrackTracker::track(
 
         if (d.confidence >= config_.track_threshold)
             high_dets.push_back(std::move(det));
-        else if (d.confidence > config_.low_threshold)
+        else if (config_.type != TrackerType::Sort && d.confidence > config_.low_threshold)
             low_dets.push_back(std::move(det));
     }
 
@@ -560,6 +571,7 @@ std::vector<Track> ByteTrackTracker::track(
     auto cost1 = iou_distance(pool, high_dets);
     if (config_.fuse_score)
         fuse_score(cost1, high_dets);
+    gate_classes(cost1,pool,high_dets,config_);
     // OCM: 순위용 비용에서 방향 일치도를 뺀다. 허용 판단은 cost1(IoU 기반)로만 한다.
     //   Track 방향  : delta_t 프레임 전 관측 → 마지막 관측
     //   후보 방향   : 지금 기준 delta_t 프레임 안의 가장 이른 관측(없으면 마지막 관측) → 검출
@@ -604,6 +616,7 @@ std::vector<Track> ByteTrackTracker::track(
         auto costb = buffered_iou_distance(bt, bd, config_);
         if (config_.fuse_score)
             fuse_score(costb, bd);
+        gate_classes(costb,bt,bd,config_);
         const auto mb = linear_assignment(costb, bt.size(), bd.size(), config_.match_threshold);
         for (const auto& [r, c] : mb.matches)
         {
@@ -637,8 +650,10 @@ std::vector<Track> ByteTrackTracker::track(
         if (pool[r]->state == TrackState::Tracked)
             remain_tracked.push_back(pool[r]);
 
+    auto cost2=iou_distance(remain_tracked,low_dets);
+    gate_classes(cost2,remain_tracked,low_dets,config_);
     const auto m2 = linear_assignment(
-        iou_distance(remain_tracked, low_dets), remain_tracked.size(),
+        cost2, remain_tracked.size(),
         low_dets.size(), config_.low_match_threshold);
     for (const auto& [r, c] : m2.matches)
         on_match(remain_tracked[r], low_dets[c]);
@@ -666,6 +681,7 @@ std::vector<Track> ByteTrackTracker::track(
             for (size_t j = 0; j < od.size(); ++j)
                 costr[i][j] = 1.0f - iou(last, od[j]->det_tlwh);
         }
+        gate_classes(costr,ot,od,config_);
         const auto mr = linear_assignment(costr, ot.size(), od.size(), config_.match_threshold);
         std::unordered_set<const STrack*> used_dets;
         for (const auto& [r, c] : mr.matches)
@@ -706,6 +722,7 @@ std::vector<Track> ByteTrackTracker::track(
     auto cost3 = iou_distance(unconfirmed, remain_high);
     if (config_.fuse_score)
         fuse_score(cost3, remain_high);
+    gate_classes(cost3,unconfirmed,remain_high,config_);
     const auto m3 = linear_assignment(
         cost3, unconfirmed.size(), remain_high.size(), config_.unconfirmed_match_threshold);
     for (const auto& [r, c] : m3.matches)
@@ -724,7 +741,9 @@ std::vector<Track> ByteTrackTracker::track(
     for (size_t c : m3.unmatched_cols)
     {
         auto& det = remain_high[c];
-        if (det->score < new_track_threshold_)
+        if (det->score < new_track_threshold_ || !edge_birth_allowed(
+                det->det_tlwh[0],det->det_tlwh[1],det->det_tlwh[2],det->det_tlwh[3],
+                det->score,image_width_,image_height_,config_))
             continue;
         activate(*det);
         activated.push_back(det);
@@ -752,7 +771,7 @@ std::vector<Track> ByteTrackTracker::track(
     lost_stracks_.insert(lost_stracks_.end(), lost_new.begin(), lost_new.end());
     lost_stracks_ = sub(lost_stracks_, removed);
 
-    remove_duplicates(new_tracked, lost_stracks_);
+    remove_duplicates(new_tracked, lost_stracks_, config_);
     tracked_stracks_ = std::move(new_tracked);
 
     // 5. Track 목록 생성 (확정된 Track만 출력)

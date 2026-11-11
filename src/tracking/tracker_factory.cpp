@@ -7,22 +7,27 @@
 #include "tracking/botsort_tracker.hpp"
 #include "tracking/post_reid_tracker.hpp"
 #include "reid/reid_factory.hpp"
+#include "tracking/frame_policy_tracker.hpp"
 
 namespace
 {
 // ByteTrack 구현체의 생성과 이름을 TrackerFactory 계약에 맞춰 제공한다.
 class ByteTrackFactory final : public TrackerFactory
 {
+    TrackerType type_;
 public:
+    explicit ByteTrackFactory(TrackerType type) : type_(type) {}
     std::unique_ptr<Tracker> create(
         const TrackingConfig& config) const override
     {
-        if (config.type != TrackerType::ByteTrack)
+        if (config.type != type_)
             throw std::invalid_argument("TrackerFactory configuration type mismatch");
         return std::make_unique<ByteTrackTracker>(config);
     }
 
-    const char* name() const noexcept override { return "bytetrack"; }
+    const char* name() const noexcept override {
+        return type_==TrackerType::Sort ? "sort" : type_==TrackerType::OcSort ? "ocsort" : "bytetrack";
+    }
 };
 class BotSortFactory final : public TrackerFactory
 {
@@ -42,8 +47,10 @@ std::unique_ptr<TrackerFactory> TrackerFactory::for_type(TrackerType type)
 {
     switch (type)
     {
+    case TrackerType::Sort:
+    case TrackerType::OcSort:
     case TrackerType::ByteTrack:
-        return std::make_unique<ByteTrackFactory>();
+        return std::make_unique<ByteTrackFactory>(type);
     case TrackerType::BotSort:
         return std::make_unique<BotSortFactory>();
     }
@@ -55,8 +62,13 @@ std::unique_ptr<Tracker> TrackerFactory::create_configured(
     const CameraInputConfig& camera, const ReidBenchmarkConfig& crops)
 {
     auto factory=for_type(tracking.type);
-    if(tracking.type==TrackerType::ByteTrack && !tracking.post_reid)
-        return factory->create(tracking);
+    auto wrap=[&](std::unique_ptr<Tracker> tracker) -> std::unique_ptr<Tracker> {
+        if(tracking.frame.gmc || tracking.frame.warmth_min || tracking.frame.warmth_max || tracking.edge_birth_threshold>0)
+            return std::make_unique<FramePolicyTracker>(std::move(tracker),tracking.frame);
+        return tracker;
+    };
+    if(tracking.type!=TrackerType::BotSort && !tracking.post_reid)
+        return wrap(factory->create(tracking));
     if(reid.model.name.empty() || reid.model.path.empty())
         throw std::invalid_argument("Selected tracker requires a ReID model");
     if(!std::filesystem::is_regular_file(reid.model.path))
@@ -64,8 +76,8 @@ std::unique_ptr<Tracker> TrackerFactory::create_configured(
     auto reid_factory=ReidFactory::for_model(reid.model);
     auto pipeline=reid_factory->create(reid.model,camera,reid.inference);
     if(tracking.type==TrackerType::BotSort)
-        return std::make_unique<BotSortTracker>(tracking,std::move(pipeline),
-            crops.person_class_id);
-    return std::make_unique<PostReidTracker>(factory->create(tracking),
-        std::move(pipeline),reid.matcher,reid.model.output_dimensions,crops);
+        return wrap(std::make_unique<BotSortTracker>(tracking,std::move(pipeline),
+            crops.person_class_id));
+    return wrap(std::make_unique<PostReidTracker>(factory->create(tracking),
+        std::move(pipeline),reid.matcher,reid.model.output_dimensions,crops));
 }

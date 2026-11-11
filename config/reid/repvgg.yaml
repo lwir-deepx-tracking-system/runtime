@@ -1,3 +1,5 @@
+path_base: ../..
+
 # RepVGG-A0 사람 재식별 모델의 입력·출력 계약.
 # runtime은 계약을 검증하고, benchmark가 RepVGG 추론에 사용한다.
 model:

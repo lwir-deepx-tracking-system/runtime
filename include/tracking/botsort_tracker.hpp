@@ -9,7 +9,7 @@
 #include "tracking/tracker.hpp"
 
 // BoT-SORT association with XYWH Kalman motion and smoothed appearance features.
-// No camera-motion estimate is supplied by the current pipeline.
+// Frame-aware policy wrapper supplies camera motion when configured.
 class BotSortTracker final : public Tracker
 {
 public:
@@ -21,6 +21,8 @@ public:
     TrackingStep track_with_features(const std::vector<Detection>& detections,
         const std::vector<std::vector<float>>& features);
     void reset() override;
+    void set_camera_motion(const CameraMotion& motion) override { motion_ = motion; }
+    void set_image_size(float width, float height) override { width_ = width; height_ = height; }
 
 private:
     enum class State { Tracked, Lost, Removed };
@@ -29,6 +31,7 @@ private:
         int last_frame = 0;
         State state = State::Tracked;
         bool confirmed = false;
+        int hits = 1;
         KalmanState kf{};
         Detection observation;
         std::vector<float> feature;
@@ -39,6 +42,8 @@ private:
     KalmanFilter kalman_{KalmanFormat::XYWH};
     int frame_ = 0;
     int next_id_ = 0;
+    CameraMotion motion_;
+    float width_ = 0, height_ = 0;
     std::vector<Target> targets_;
     TrackingStep associate(const std::vector<Detection>& detections,
         const std::vector<std::vector<float>>& features);

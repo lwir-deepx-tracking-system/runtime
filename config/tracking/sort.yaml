@@ -1,0 +1,11 @@
+# SORT-style XYWH Kalman/IoU variant, matching the Python selectable variant.
+# No low-score association pass. Not a claim of equivalence to original 7-state SORT.
+tracking:
+  type: sort
+  track_threshold: 0.25
+  match_threshold: 0.7
+  track_buffer: 1
+  new_track_threshold: 0.35
+  kalman_format: xywh
+  class_gate: true
+  confirmation_frames: 3

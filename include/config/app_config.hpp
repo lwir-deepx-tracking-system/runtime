@@ -25,7 +25,15 @@ struct InferenceConfig {
     NpuCoreBinding npu_cores = NpuCoreBinding::All;
 };
 
-enum class TrackerType { ByteTrack, BotSort };
+enum class TrackerType { ByteTrack, BotSort, OcSort, Sort };
+
+struct TrackingFrameConfig {
+    int person_class_id = 0;
+    int warmth_min = 0, warmth_max = 0;
+    bool gmc = false;
+    int gmc_downscale = 2, gmc_max_corners = 300;
+    double gmc_min_distance = 5.0;
+};
 
 struct TrackingConfig {
     TrackerType type = TrackerType::ByteTrack;
@@ -33,6 +41,11 @@ struct TrackingConfig {
     float track_threshold = 0.5F;
     float match_threshold = 0.8F;
     int track_buffer = 30;
+    bool class_gate = false; // Python policy: person vs non-person; legacy BoT-SORT remains strict when false.
+    int confirmation_frames = 2;
+    float edge_birth_threshold = 0.0F;
+    float edge_margin_px = 4.0F;
+    TrackingFrameConfig frame;
 
     // 아래 값은 runtime/benchmark yaml에서 생략할 수 있다. 생략하면 해당 기능은 꺼진다.
 

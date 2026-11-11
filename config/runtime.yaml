@@ -1,3 +1,6 @@
+# Resource paths below are relative to this YAML directory plus path_base.
+path_base: ..
+
 # ============================================================
 # 1. Runtime / Logging
 # ============================================================

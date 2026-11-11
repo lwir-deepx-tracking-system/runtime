@@ -82,7 +82,32 @@ namespace config_parser {
 // yaml-cpp 예외가 파일 경로를 잃지 않도록 runtime 오류로 변환한다.
 YAML::Node load_yaml(const std::string& path)
 {
-    try { return YAML::LoadFile(path); }
+    try {
+        YAML::Node root=YAML::LoadFile(path);
+        // Optional explicit resource root. Legacy external YAML without this key
+        // retains its working-directory semantics; shipped configs declare it.
+        if (root["path_base"]) {
+            const std::string declared=root["path_base"].as<std::string>();
+            if (declared.empty()) throw std::runtime_error("path_base must not be empty");
+            const fs::path base=(fs::absolute(path).parent_path()/declared).lexically_normal();
+            const auto resolve=[&](YAML::Node owner,const char* key) {
+                if (!owner || !owner[key]) return;
+                const std::string value=owner[key].as<std::string>();
+                if (!value.empty()) owner[key]=(base/fs::path(value)).lexically_normal().string();
+            };
+            resolve(root["model"],"path");
+            resolve(root["detection"],"config");
+            resolve(root["reid"],"config");
+            resolve(root["reid"],"matcher_config");
+            for (const char* key:{"detection_catalog","tracking_catalog"}) {
+                if (root[key] && root[key].IsSequence())
+                    for (auto item:root[key]) resolve(item,"config");
+            }
+            // Preserve the meaning if a caller writes this resolved node elsewhere.
+            root["path_base"]=base.string();
+        }
+        return root;
+    }
     catch (const YAML::Exception& e) {
         throw std::runtime_error("cannot read configuration " + path + ": " + e.what());
     }
@@ -158,8 +183,29 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         c.type = TrackerType::ByteTrack;
     else if (type == "botsort")
         c.type = TrackerType::BotSort;
+    else if (type == "ocsort") { c.type = TrackerType::OcSort; c.oru=true; c.ocr=true; c.ocm_weight=.2F; }
+    else if (type == "sort") c.type = TrackerType::Sort;
     else
         throw std::runtime_error("tracking.type is unsupported: " + type);
+    c.class_gate = optional_value<bool>(node,"class_gate","tracking",false);
+    c.confirmation_frames = optional_value<int>(node,"confirmation_frames","tracking",2);
+    c.edge_birth_threshold = optional_value<float>(node,"edge_birth_threshold","tracking",0.0F);
+    c.edge_margin_px = optional_value<float>(node,"edge_margin_px","tracking",4.0F);
+    c.frame.person_class_id = optional_value<int>(node,"person_class_id","tracking",0);
+    c.frame.warmth_min = optional_value<int>(node,"warmth_min","tracking",0);
+    c.frame.warmth_max = optional_value<int>(node,"warmth_max","tracking",0);
+    c.frame.gmc = optional_value<bool>(node,"gmc","tracking",false);
+    c.frame.gmc_downscale = optional_value<int>(node,"gmc_downscale","tracking",2);
+    c.frame.gmc_max_corners = optional_value<int>(node,"gmc_max_corners","tracking",300);
+    c.frame.gmc_min_distance = optional_value<double>(node,"gmc_min_distance","tracking",5.0);
+    if(c.confirmation_frames<1 || c.frame.person_class_id<0 ||
+       !std::isfinite(c.edge_birth_threshold) || c.edge_birth_threshold<0 || c.edge_birth_threshold>1 ||
+       !std::isfinite(c.edge_margin_px) || c.edge_margin_px<0 ||
+       c.frame.warmth_min<0 || c.frame.warmth_min>65535 || c.frame.warmth_max<0 || c.frame.warmth_max>65535 ||
+       (c.frame.warmth_max>0 && c.frame.warmth_min>c.frame.warmth_max) ||
+       c.frame.gmc_downscale<1 || c.frame.gmc_downscale>16 || c.frame.gmc_max_corners<5 || c.frame.gmc_max_corners>10000 ||
+       !std::isfinite(c.frame.gmc_min_distance) || c.frame.gmc_min_distance<1)
+        throw std::runtime_error("tracking frame/confirmation policy is out of range");
     c.post_reid = optional_value<bool>(node, "post_reid", "tracking", false);
     if (c.type == TrackerType::BotSort && c.post_reid)
         throw std::runtime_error("tracking.post_reid is only valid for bytetrack");

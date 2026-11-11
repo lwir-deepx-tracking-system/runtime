@@ -1,3 +1,5 @@
+path_base: ../..
+
 model:
   name: yolov8n
   path: models/yolov8-n_640x640.dxnn

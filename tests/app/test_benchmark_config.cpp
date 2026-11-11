@@ -11,12 +11,21 @@
 int main()
 {
     const BenchmarkConfig config = load_benchmark_config("config/benchmark.yaml");
+    const auto cwd=std::filesystem::current_path();
+    struct RestoreCwd {std::filesystem::path path;~RestoreCwd(){std::filesystem::current_path(path);}} restore{cwd};
+    std::filesystem::current_path(std::filesystem::temp_directory_path());
+    const auto relocated=load_benchmark_config((cwd/"config/benchmark.yaml").string());
+    std::filesystem::current_path(cwd);
+    if (relocated.detection.model.path!=config.detection.model.path ||
+        relocated.reid.model.path!=config.reid.model.path ||
+        relocated.tracking_catalog.at(1).config_path!=config.tracking_catalog.at(1).config_path)
+        return 4;
     if (config.detection.model.postprocess.type != "yolo26" ||
         config.detection.inference.max_inflight != 1 ||
         !config.reid_enabled ||
-        config.reid.config_path != "config/reid/repvgg.yaml" ||
+        config.reid.config_path != std::filesystem::absolute("config/reid/repvgg.yaml").lexically_normal().string() ||
         config.reid.model.name != "repvgg" ||
-        config.reid.matcher_config_path != "config/reid/matcher.yaml" ||
+        config.reid.matcher_config_path != std::filesystem::absolute("config/reid/matcher.yaml").lexically_normal().string() ||
         config.reid.matcher.similarity_threshold < 0.59F ||
         config.reid.inference.max_inflight != 1 ||
         config.reid.inference.buffer_count != 0 ||
@@ -25,7 +34,7 @@ int main()
         config.tracking.track_threshold != 0.5F ||
         config.tracking.match_threshold != 0.8F ||
         config.tracking_catalog.at(1).config_path !=
-            "config/tracking/bytetrack.yaml")
+            std::filesystem::absolute("config/tracking/bytetrack.yaml").lexically_normal().string())
         return 1;
 
     const auto root = config_parser::load_yaml("config/benchmark.yaml");

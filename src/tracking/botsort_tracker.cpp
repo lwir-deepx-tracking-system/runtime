@@ -1,3 +1,4 @@
+#include "tracking/tracking_policy.hpp"
 #include "tracking/botsort_tracker.hpp"
 
 #include <algorithm>
@@ -120,7 +121,7 @@ BotSortTracker::BotSortTracker(TrackingConfig config,
     if(config_.kalman_format!="xywh") throw std::invalid_argument("BoT-SORT requires xywh Kalman format");
 }
 
-void BotSortTracker::reset() { targets_.clear();frame_=0;next_id_=0; }
+void BotSortTracker::reset() { targets_.clear();frame_=0;next_id_=0;motion_={}; }
 
 std::vector<Track> BotSortTracker::track(const std::vector<Detection>& detections)
 {
@@ -182,17 +183,20 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
         if(targets_[i].state==State::Lost && frame_-targets_[i].last_frame>config_.track_buffer) {
             targets_[i].state=State::Removed;continue;
         }
-        if(!targets_[i].confirmed) { unconfirmed.push_back(i);continue; }
+        if(!targets_[i].confirmed) { apply_camera_motion(targets_[i].kf,motion_); unconfirmed.push_back(i);continue; }
         if(targets_[i].state==State::Lost) { targets_[i].kf.mean[6]=0;targets_[i].kf.mean[7]=0; }
         kalman_.predict(targets_[i].kf);
+        apply_camera_motion(targets_[i].kf,motion_);
         active.push_back(i);
     }
+    motion_={};
     std::vector<bool> used(detections.size());
     std::vector<bool> matched(targets_.size());
     auto update=[&](size_t ti,size_t di,const char* stage) {
         auto& t=targets_[ti];const auto& d=detections[di];
         kalman_.update(t.kf,measure(d));
-        t.observation=d;t.last_frame=frame_;t.state=State::Tracked;t.confirmed=true;
+        t.observation=d;t.last_frame=frame_;t.state=State::Tracked;
+        ++t.hits;t.confirmed=t.confirmed || t.hits>=config_.confirmation_frames;
         const auto f=normalized(features[di]);
         if(!f.empty()) {
             if(t.feature.empty() || t.feature.size()!=f.size()) t.feature=f;
@@ -208,10 +212,10 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
     };
     auto stage=[&](const std::vector<size_t>& rows,const std::vector<size_t>& cols,
                    bool appearance,float limit,const char* label) {
-        std::vector<std::vector<float>> costs(rows.size(),std::vector<float>(cols.size(),1));
+        std::vector<std::vector<float>> costs(rows.size(),std::vector<float>(cols.size(),2));
         for(size_t r=0;r<rows.size();++r) for(size_t c=0;c<cols.size();++c) {
             const auto& t=targets_[rows[r]];const auto& d=detections[cols[c]];
-            if(t.observation.class_id!=d.class_id) {
+            if(config_.class_gate ? !tracking_classes_match(t.observation.class_id,d.class_id,config_) : t.observation.class_id!=d.class_id) {
                 result.association_events.push_back(std::to_string(frame_)+",class_gate,"+
                     std::to_string(t.id)+","+std::to_string(cols[c]));
                 continue;
@@ -256,8 +260,10 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
     const float new_threshold=config_.new_track_threshold>0?config_.new_track_threshold:
         std::min(1.0F,config_.track_threshold+0.1F);
     for(size_t i:high) if(!used[i] && detections[i].confidence>=new_threshold) {
+        const auto& d=detections[i];
+        if(!edge_birth_allowed(d.x,d.y,d.width,d.height,d.confidence,width_,height_,config_)) continue;
         Target t;t.id=++next_id_;t.last_frame=frame_;t.observation=detections[i];
-        t.confirmed=(frame_==1);
+        t.confirmed=(frame_==1 || config_.confirmation_frames==1);
         t.kf=kalman_.initiate(measure(detections[i]));t.feature=normalized(features[i]);
         targets_.push_back(std::move(t));
         result.association_events.push_back(std::to_string(frame_)+",new,"+

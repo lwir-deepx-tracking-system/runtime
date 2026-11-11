@@ -1,0 +1,23 @@
+# Optional Python live tracking policies. Does not enable the unported LR judge/GRU gate.
+# Warmth thresholds are camera-specific; this file never changes runtime.yaml defaults.
+tracking:
+  type: bytetrack
+  post_reid: true
+  track_threshold: 0.25
+  match_threshold: 0.8
+  track_buffer: 30
+  low_threshold: 0.1
+  new_track_threshold: 0.35
+  kalman_format: xywh
+  fuse_score: true
+  confirmation_frames: 3
+  class_gate: true
+  person_class_id: 0
+  warmth_min: 45000
+  warmth_max: 0
+  edge_birth_threshold: 0.5
+  edge_margin_px: 4
+  gmc: true
+  gmc_downscale: 2
+  gmc_max_corners: 300
+  gmc_min_distance: 5

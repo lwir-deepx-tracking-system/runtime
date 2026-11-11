@@ -1,3 +1,5 @@
+path_base: ../..
+
 model:
   name: yolo26s
   path: models/yolo26s_finetuned.dxnn

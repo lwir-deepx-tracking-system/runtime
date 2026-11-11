@@ -3,20 +3,37 @@
 #include <yaml-cpp/yaml.h>
 #include <stdexcept>
 #include <fstream>
+#include <filesystem>
 #include <unistd.h>
 
 // 공용 YAML이 runtime에서 지원하는 Detection 및 LWIR 계약으로 파싱되는지 확인한다.
 int main()
 {
-    const auto yaml = YAML::LoadFile("config/runtime.yaml");
+    const auto yaml = config_parser::load_yaml("config/runtime.yaml");
     const RuntimeConfig config = load_runtime_config("config/runtime.yaml");
+    // Absolute top-level YAML must resolve the same models from another CWD.
+    const auto original_cwd=std::filesystem::current_path();
+    struct RestoreCwd {
+        std::filesystem::path path;
+        ~RestoreCwd() {std::filesystem::current_path(path);}
+    } restore_cwd{original_cwd};
+    std::filesystem::current_path(std::filesystem::temp_directory_path());
+    const auto relocated=load_runtime_config((original_cwd/"config/runtime.yaml").string());
+    std::filesystem::current_path(original_cwd);
+    if (relocated.detection.model.path!=config.detection.model.path ||
+        relocated.reid.model.path!=config.reid.model.path ||
+        relocated.tracking_catalog.at(2).config_path!=config.tracking_catalog.at(2).config_path)
+        return 80;
+    if (config.detection.model.path!=(original_cwd/"models/yolov8-n_640x640.dxnn").string() ||
+        config.reid.model.path!=(original_cwd/"../model-bank/final_tracker/tracker/models/RVGGA0_REID2C256.dxnn").lexically_normal().string())
+        return 81;
 
     // runtime.yaml의 모델 경로와 고정 Detection 실행 설정 검증.
-    if (config.detection.config_path != "config/detection/yolov8n.yaml" ||
-        config.reid.config_path != "config/reid/repvgg.yaml" ||
+    if (config.detection.config_path != std::filesystem::absolute("config/detection/yolov8n.yaml").lexically_normal().string() ||
+        config.reid.config_path != std::filesystem::absolute("config/reid/repvgg.yaml").lexically_normal().string() ||
         config.reid.model.name != "repvgg" || config.reid.model.input_width != 64 ||
         config.reid.model.input_height != 128 || config.reid.model.output_dimensions != 128 ||
-        config.reid.matcher_config_path != "config/reid/matcher.yaml" ||
+        config.reid.matcher_config_path != std::filesystem::absolute("config/reid/matcher.yaml").lexically_normal().string() ||
         config.reid.matcher.gallery_size != 5 ||
         config.reid.matcher.max_lost_frames != 90 ||
         config.reid.inference.max_inflight != 1 ||
@@ -38,7 +55,7 @@ int main()
         config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
         config.tracking_catalog.size() != 3 ||
         config.tracking_catalog.at(1).config_path !=
-            "config/tracking/bytetrack.yaml" ||
+            std::filesystem::absolute("config/tracking/bytetrack.yaml").lexically_normal().string() ||
         config.tracking_catalog.at(2).config.type != TrackerType::BotSort ||
         !config.tracking_catalog.at(3).config.post_reid ||
         config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
@@ -170,7 +187,7 @@ int main()
     if (fd < 0) return 25;
     ::close(fd);
     struct RemoveConfig { const char* path; ~RemoveConfig() { ::unlink(path); } } cleanup{filename};
-    auto runtime = YAML::Clone(yaml);
+    auto runtime = config_parser::load_yaml("config/runtime.yaml");
     runtime["control"]["enabled"] = true;
     runtime["gui"]["enabled"] = true;
     runtime["gui"]["command"]["enabled"] = true;
@@ -238,7 +255,7 @@ int main()
     if (model_fd < 0) return 42;
     ::close(model_fd);
     RemoveConfig model_cleanup{model_filename};
-    auto alternate = YAML::LoadFile("config/detection/yolo26s.yaml");
+    auto alternate = config_parser::load_yaml("config/detection/yolo26s.yaml");
     alternate["camera_input"]["clip_max"] = 32000;
     { std::ofstream out(model_filename); out << alternate; }
     runtime["gui"]["command"]["handler"] = "deferred";

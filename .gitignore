@@ -17,3 +17,6 @@
 # 임시/코어 덤프
 core
 core.*
+
+# Local credentials and per-host configuration; never stage or upload.
+/.local/

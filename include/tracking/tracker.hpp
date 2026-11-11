@@ -4,6 +4,7 @@
 
 #include "common/detection.hpp"
 #include "common/track.hpp"
+#include "tracking/camera_motion.hpp"
 #include <cstdint>
 #include <chrono>
 #include <string>
@@ -54,4 +55,6 @@ public:
 
     // Tracker가 유지하는 내부 상태를 초기화한다.
     virtual void reset() = 0;
+    virtual void set_camera_motion(const CameraMotion&) {}
+    virtual void set_image_size(float, float) {}
 };

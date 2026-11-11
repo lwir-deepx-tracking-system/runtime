@@ -1,0 +1,16 @@
+# Observation-centric variant reusing the existing XYWH Kalman/OCM/OCR/ORU implementation.
+# The original OC-SORT repository uses a 7-state area/aspect filter; this is the Python-style variant.
+tracking:
+  type: ocsort
+  track_threshold: 0.25
+  match_threshold: 0.7
+  track_buffer: 30
+  low_threshold: 0.1
+  new_track_threshold: 0.35
+  kalman_format: xywh
+  class_gate: true
+  confirmation_frames: 3
+  oru: true
+  ocm_weight: 0.2
+  ocm_delta_t: 3
+  ocr: true

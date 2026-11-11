@@ -103,11 +103,11 @@ public:
 
     // 다음 track() 호출에 적용할 카메라 움직임(직전 프레임 → 현재 프레임)을 지정한다.
     // track()이 끝나면 지워지므로 프레임마다 다시 지정한다. 호출하지 않으면 보정하지 않는다.
-    void set_camera_motion(const CameraMotion& motion) { camera_motion_ = motion; }
+    void set_camera_motion(const CameraMotion& motion) override { camera_motion_ = motion; }
 
     // 영상 크기를 알려 준다. 지정하면 놓친 Track의 예측 박스가 화면 밖으로 나갔을 때
     // (보이는 넓이가 절반 미만) lost_output_frames 출력에서 제외한다. 지정하지 않으면 제외하지 않는다.
-    void set_image_size(float width, float height)
+    void set_image_size(float width, float height) override
     {
         image_width_ = width;
         image_height_ = height;
