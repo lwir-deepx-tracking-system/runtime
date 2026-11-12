@@ -3,10 +3,10 @@
 tracking:
   type: ocsort
 
-  det_threshold: 0.6   # 이 점수 초과 검출만 1차 매칭·새 Track에 사용 (공식 track_thresh)
-  iou_threshold: 0.3   # 매칭으로 인정하는 최소 IoU. ByteTrack의 match_threshold(1 - IoU)와 의미가 반대
+  det_threshold: 0.5   # 이 점수 초과 검출만 1차 매칭·새 Track에 사용 (공식 track_thresh)
+  iou_threshold: 0.2   # 매칭으로 인정하는 최소 IoU. ByteTrack의 match_threshold(1 - IoU)와 의미가 반대
   max_age: 30          # 이 프레임 수보다 오래 매칭되지 않은 Track을 지움
-  min_hits: 3          # 연속 매칭이 이 횟수 이상인 Track만 출력
-  delta_t: 3           # OCM 방향을 계산할 관측 간격(프레임)
-  inertia: 0.2         # OCM 방향 일치도 가중치
-  use_byte: false      # 0.1 ~ det_threshold 검출로 ByteTrack식 2차 매칭
+  min_hits: 1          # 연속 매칭이 이 횟수 이상인 Track만 출력
+  delta_t: 5           # OCM 방향을 계산할 관측 간격(프레임)
+  inertia: 0.3         # OCM 방향 일치도 가중치
+  use_byte: true      # 0.1 ~ det_threshold 검출로 ByteTrack식 2차 매칭

@@ -265,19 +265,16 @@ TrackingConfig load_config(const std::string& path)
 OCSortConfig load_ocsort_file(const std::string& path)
 {
     const YAML::Node root = config_parser::load_yaml(path);
-    if (!root["ocsort"] && root["tracking"])
-        throw std::runtime_error(path + ": ocsort: 섹션이 없습니다 (tracking: 섹션은 ByteTrack 설정입니다)");
+    if (root["tracking"])
+    {
+        const TrackingConfig c = config_parser::load_tracking_config(root["tracking"]);
+        if (c.type != TrackerType::OCSort)
+            throw std::runtime_error(path + ": tracking.type이 ocsort가 아닙니다 (ByteTrack 설정 파일)");
+        return c.ocsort;
+    }
     const YAML::Node node = root["ocsort"] ? root["ocsort"] : root;
     if (!node.IsMap())
         throw std::runtime_error(path + ": ocsort 설정이 key: value 형식이 아닙니다");
-    static const std::set<std::string> known = {"det_threshold", "iou_threshold", "max_age", "min_hits",
-                                                "delta_t", "inertia", "use_byte"};
-    for (const auto& kv : node)
-    {
-        const std::string key = kv.first.as<std::string>();
-        if (!known.count(key))
-            throw std::runtime_error(path + ": 알 수 없는 OC-SORT 키 '" + key + "'");
-    }
     return config_parser::load_ocsort_config(node);
 }
 
