@@ -255,5 +255,13 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   CTest **38/38 통과**. 실제 카메라·짐벌 실행은 하지 않았다.
 - 이 단계의 수정 파일: `config/runtime.yaml`, 위 테스트 2개,
   `docs/ARCHITECTURE.md`, 이 진행 문서, `docs/TEST_RESULTS.md`.
-  Orange Pi에서는 Runtime **빌드만** 확인할 예정이다. 카메라 사용 전에는
-  현재 카메라 소유 프로그램 중지 여부를 사용자와 먼저 조율한다.
+  호스트 커밋 `885f99acc105acd9661a73a05ca6b2fd499fbdd8`을 Push했다.
+- Orange Pi의 **기존** `/home/orangepi/workspace/runtime`를 동일 브랜치/SHA로
+  fast-forward하고 I3 카메라 SDK·DXRT 활성 Release 구성에서 `lwir_runtime`
+  **빌드 성공**. 바이너리 `/tmp/lwir-runtime-build-20261112/lwir_runtime`는
+  실행하지 않았다. 기존 Python 추적 서버·짐벌·DXRT 서비스는 정지하지 않았다.
+  테스트 전후 원래 브랜치 `feat/runtime-telemetry`, SHA
+  `71eb9c84922723176ca8312a5b87bddff82d2387`, 미추적
+  `tests/tracking/lwir_to_mot.py`가 동일함을 확인했다.
+- 다음 단계는 카메라 소유 프로그램을 중지해야 하는 Runtime 실행 검증이다.
+  사용자에게 중지 대상과 복원 절차를 먼저 설명하고 승인받기 전까지 수행하지 않는다.

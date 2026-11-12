@@ -170,4 +170,23 @@ ctest --test-dir /tmp/lwir-integration-build --output-on-failure
   **38/38 통과**. 중간 실행에서 기존 `multitracker_config`의 카탈로그 크기 3
   가정으로 1개 실패했고, 새 ID 4~6 검증으로 갱신한 후 전체 재실행했다.
 - 이 검증은 호스트 CPU/Stub 빌드다. 카메라, 짐벌, DXNN 로딩과 NPU 추론,
-  실제 Runtime 실행은 수행하지 않았다. Orange Pi에서는 빌드만 별도 확인한다.
+  실제 Runtime 실행은 수행하지 않았다.
+
+### Orange Pi 빌드 전용 검증
+
+- 호스트 커밋/원격 테스트 SHA:
+  `885f99acc105acd9661a73a05ca6b2fd499fbdd8`.
+  기존 `/home/orangepi/workspace/runtime`를 같은 브랜치/SHA로 전환해
+  `cmake -G Ninja -S /home/orangepi/workspace/runtime
+  -B /tmp/lwir-runtime-build-20261112 -DCMAKE_BUILD_TYPE=Release
+  -DBUILD_TESTING=OFF -DLWIR_BUILD_RUNTIME=ON -DLWIR_BUILD_BENCHMARK=OFF
+  -DLWIR_BUILD_CAPTURE=OFF -DLWIR_ENABLE_I3_CAMERA=ON
+  -DLWIR_ENABLE_DX_APP=ON`, 이어 `cmake --build
+  /tmp/lwir-runtime-build-20261112 --target lwir_runtime --parallel 2` 실행.
+  컴파일·링크 **52/52 성공**, 실행 가능한 바이너리 확인.
+- `lwir_runtime`을 **실행하지 않았으므로** 카메라 open, DXNN 로딩/추론,
+  짐벌·GUI/LAN 동작과 FPS는 미검증이다. 기존 카메라 관련 프로그램을 중지하지 않았다.
+- 원래 checkout은 `feat/runtime-telemetry` /
+  `71eb9c84922723176ca8312a5b87bddff82d2387`로 복원했고,
+  사전 미추적 `tests/tracking/lwir_to_mot.py`와 동일한 작업 트리,
+  Python 추적 서버·짐벌 실행 및 `dxrt.service active`를 확인했다.
