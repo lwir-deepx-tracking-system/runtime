@@ -4,7 +4,7 @@ path_base: ../..
 # runtime은 계약을 검증하고, benchmark가 RepVGG 추론에 사용한다.
 model:
   name: repvgg
-  path: ../model-bank/final_tracker/tracker/models/RVGGA0_REID2C256.dxnn
+  path: models/imported/reid/repvgg_tmot_camel_reid.dxnn
 
 input:
   width: 64

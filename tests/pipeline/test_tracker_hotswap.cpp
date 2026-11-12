@@ -82,7 +82,7 @@ int main()
     RuntimeControl control;
     TrackerManager manager(std::move(catalog), 1,
         [state](const TrackingConfig& config) -> std::shared_ptr<Tracker> {
-            if (config.track_buffer == 3)
+            if (config.track_buffer == 3 || config.frame.warmth_min == 900)
                 throw std::runtime_error("construction failed");
             return std::make_shared<ProbeTracker>(config.track_buffer, state);
         }, &control.tracker_epoch);
@@ -152,5 +152,24 @@ int main()
         std::lock_guard<std::mutex> lock(state->mutex);
         if (state->events != std::vector<int>({1, 2, -1})) return 10;
     }
+    const auto epoch_before_policy = manager.active_epoch();
+    TrackerPolicyUpdate policy;
+    policy.warmth_min = 800;
+    policy.confirmation_ms = 130;
+    manager.update_active_policy(policy);
+    if (manager.active_id() != 2 || manager.active_epoch() == epoch_before_policy ||
+        manager.active_config().frame.warmth_min != 800 ||
+        manager.active_config().frame.confirmation_ms != 130 ||
+        control.tracker_epoch.load() != manager.active_epoch()) return 11;
+    const auto epoch_after_policy = manager.active_epoch();
+    policy.warmth_min = 900;
+    try { manager.update_active_policy(policy); return 12; }
+    catch (const std::runtime_error&) {}
+    if (manager.active_epoch() != epoch_after_policy ||
+        manager.active_config().frame.warmth_min != 800) return 13;
+    policy.warmth_min = 70000;
+    try { manager.update_active_policy(policy); return 14; }
+    catch (const std::invalid_argument&) {}
+    if (manager.active_epoch() != epoch_after_policy) return 15;
     return 0;
 }

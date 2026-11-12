@@ -190,3 +190,160 @@ ctest --test-dir /tmp/lwir-integration-build --output-on-failure
   `71eb9c84922723176ca8312a5b87bddff82d2387`로 복원했고,
   사전 미추적 `tests/tracking/lwir_to_mot.py`와 동일한 작업 트리,
   Python 추적 서버·짐벌 실행 및 `dxrt.service active`를 확인했다.
+
+## 2026-11-12 PC GUI Tracker/HOME 진단 검증
+
+- PC 소스: `/workspace/lwir-deepx-tracking-system/pc-application`, 브랜치
+  `feat/python-runtime-integration`, 커밋 `a4fa282` (Push 완료).
+- 호스트 정식 의존성은 미달(CMake 3.22.1, Qt 6.2.4,
+  GStreamer 1.20.3). `/tmp/lwir-pc-source` 사본에서만 CMake 4.3.1을
+  사용하고 GStreamer 최소 버전·yaml-cpp 최소 버전·Qt setup 명령을
+  호스트 호환 값으로 대체했다. 이 빌드는 **정식 요구 환경 검증이 아니다**.
+- 진단 빌드 `cmake --build /tmp/lwir-pc-compat-build --parallel 4` 성공.
+  `QT_QPA_PLATFORM=offscreen ctest --test-dir /tmp/lwir-pc-compat-build
+  -R '^control$' --output-on-failure`는 **1/1 통과**. 새 Tracker 조회,
+  변경 완료·실패·타임아웃·재접속과 HOME 버튼 Mock 사례 포함.
+- 전체 CTest는 **1/4 대상 통과**. `runtime-telemetry`/`performance`는
+  호스트 `powershell` 부재, `video-integration`은 기존 Linux SIGTERM
+  종료 코드 가정 4건과 GStreamer 1.20 JPEG 수신 사례 2건이 실패했다.
+  영상 테스트의 H.264 사례는 통과했고 보드 연결 사례 2건은 건너뛰었다.
+- PC GUI 검증 중에는 Orange Pi를 사용하지 않았다. 뒤이어 Runtime
+  빌드 스크립트만 원격 실행했으며 카메라/DXRT/LAN 시험은 하지 않았다.
+
+### Orange Pi의 기존 Runtime 빌드 스크립트 확인
+
+- 사전 기본 경로 `/home/orangepi/workspace/runtime`:
+  `feat/runtime-telemetry` / `71eb9c84922723176ca8312a5b87bddff82d2387`,
+  기존 미추적 `tests/tracking/lwir_to_mot.py`.
+  보존 worktree `/home/orangepi/workspace/runtime-integration-test`:
+  `feat/python-runtime-integration` / `87ddb436acb28410e7789ad861836882aa37aad9`, 깨끗함.
+- 같은 브랜치를 두 worktree에 동시에 Checkout할 수 없어 보존 worktree를
+  잠시 detach하고 기본 경로를 호스트 브랜치/SHA로 전환했다.
+  `BUILD_DIR=/tmp/lwir-runtime-build-20261112 CMAKE_BUILD_PARALLEL_LEVEL=2
+  ./scripts/build_runtime.sh`를 실행했다. 로그
+  `/tmp/lwir-runtime-build-script-20261112.log`에 Ninja **40/40** 링크 완료,
+  실행 가능한 `lwir_runtime` 파일을 확인했다. `SCRIPT_BUILD_OK`까지 출력했다.
+- 원격 래퍼의 종료 코드는 **1**이어서 전체 원격 절차를 exit 0으로 보고하지
+  않는다. 별도 읽기 전용 SSH에서 기본 경로의 원래 브랜치/SHA/미추적 상태,
+  보존 worktree의 브랜치/SHA/깨끗한 상태, 바이너리를 재확인했다.
+  래퍼 종료 코드 원인은 미확인이다.
+- 이 검증은 컴파일/링크만 포함한다. 카메라, 짐벌, DXNN 로딩·추론,
+  PC LAN 연결은 실행하지 않았고 기존 카메라 소유 프로그램을 정지하지 않았다.
+  사후 SSH에서 Python tracking server PID 22887, cam_pipe PID 22914,
+  gimbal bridge PID 22921 및 `dxrt.service active`를 확인했다.
+
+## 2026-11-12 Orange Pi 실제 카메라 Runtime 시험
+
+- 시험 직전 기본 경로: `/home/orangepi/workspace/runtime`,
+  `feat/runtime-telemetry` / `71eb9c84922723176ca8312a5b87bddff82d2387`,
+  기존 `?? tests/tracking/lwir_to_mot.py` 보존.
+  보존 worktree: `/home/orangepi/workspace/runtime-integration-test`,
+  `feat/python-runtime-integration` / `87ddb436acb28410e7789ad861836882aa37aad9`, 깨끗함.
+- 시험 직전 Python tracking server, `cam_pipe`, gimbal bridge는 모두 중지 상태였다.
+  USB 카메라 점유 PID 없음. 기존 `~/lwir_keepalive.pause`는 사용자가 다른
+  작업자를 위해 만들어 둔 파일이며, 크기·수정 시각을 보존했다.
+- 두 시험 모두 보존 worktree를 잠시 detach하고 기본 경로를 호스트와 같은
+  SHA로 전환했다. `cmake --build /tmp/lwir-runtime-build-20261112
+  --target lwir_runtime -j2`에서 매번 Ninja 40/40 링크 성공.
+  `/tmp/lwir-runtime-build-20261112/lwir_runtime <임시 YAML>`을
+  `timeout --preserve-status -s INT -k 20s 30s`로 실행했다.
+  임시 YAML은 `control.enabled=false`, `gui.enabled=false`, 별도 `/tmp`
+  측정 출력 경로를 사용했다. 실제 짐벌 이동과 LAN 통신은 수행하지 않았다.
+
+| 구성 | 종료 코드 | Detection 프레임 | NPU processing 평균 | Detection latency 평균 | Tracking 처리 평균 | Tracking E2E 평균 | 결과 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| ID 1 ByteTrack | 0 | 651 | 3.805 ms | 20.353 ms | 0.040 ms | 39.343 ms | `/tmp/lwir-runtime-camera-test-20261112-091533/results/core/20261112_091639/` |
+| ID 4 Filter/GMC/Post-ReID | 0 | 648 | 3.805 ms | 19.063 ms | 10.399 ms | 48.438 ms | `/tmp/lwir-runtime-camera-test-20261112-091901/results/core/20261112_092007/` |
+
+- ID 1 Detection `detection_timing.csv` 651행, `metrics.csv` 1953행.
+  ID 4는 각각 648행, 1944행. 각 실행에서 Camera/Detection/Tracking
+  단계가 프레임 수만큼 기록됐고 카메라 닫기 및 측정 저장 로그가 있다.
+- ID 4 시험에 쓰인 RepVGG 파일은
+  `/home/orangepi/workspace/model-bank/tracking_server/models/reid/repvgg_tmot_camel_reid.dxnn`,
+  SHA-256 `dc19d7862a77ffa1d7c7f71f84283e86c33267d9e741b59070b839cb1921ff53`.
+  `parse_model -m ... -v`에서 입력 `images [1,128,64,3] uint8`, 출력
+  `embedding [1,128] float32`를 확인했다. 현재 저장소 YAML의
+  `../model-bank/final_tracker/tracker/models/RVGGA0_REID2C256.dxnn`은
+  **현재 보드에 없음**. 따라서 ID 4는 같은 SHA 모델을 가리키는 별도
+  `/tmp/.../reid.yaml`을 사용했다. ReID 모델 생성은 통과했지만, 이
+  카메라 장면에서 실제 crop 및 Embedding 추론 호출 여부는 계측되지 않았다.
+- 두 실행의 정리 후 독립 SSH 확인: 기본 경로는 사전 브랜치/SHA/미추적
+  파일 그대로, 보존 worktree는 테스트 브랜치/SHA로 복귀하고 깨끗함.
+  keepalive pause 크기·수정 시각 동일, Python/cam_pipe/gimbal 프로세스는
+  사전처럼 중지 상태, `dxrt.service active`. 시험 프로세스 없음.
+- 이번 시험은 현재 기본 Detection 모델 YOLOv8n의 실제 카메라 추론이다.
+  Tracker 변경 TCP 명령, ReID 실제 매칭, GUI·LAN, 짐벌 동작은 검증하지 않았다.
+
+## 2026-11-12 카탈로그·디자인 작업 검증
+
+| 명령/확인 | 결과 | 범위 |
+| --- | --- | --- |
+| `python3 scripts/import_model_bank.py --source /tmp/lwir-model-bank-current` | 첫 실행 18개 복사, 재실행 18개 SHA 일치로 건너뜀 | 호스트 Runtime `models/imported/`, Manifest 전체 해시 |
+| 보드 `/tmp/lwir-import-model-bank.py --source /home/orangepi/workspace/model-bank/tracking_server/models --target /home/orangepi/workspace/runtime/models/imported` | 18개 복사, 약 219 MB | 파일 배치만; 소스·서비스 전환 없음 |
+| 보드 `parse_model -m <각 DXNN> -v` | 18/18 메타데이터 파싱 성공 | 실제 DXRT 로딩/추론은 포함하지 않음 |
+| `cmake --build /tmp/lwir-integration-build -j4 --target lwir_runtime test_app_config test_gui_pipeline_commands` | 성공 | 호스트 CPU / DXRT 비활성 구성 |
+| `ctest --test-dir /tmp/lwir-integration-build -R 'app_config\|gui_pipeline_commands' --output-on-failure` | 2/2 통과 | YAML과 TCP 카탈로그 wire 계약 |
+| `/tmp` PC 소스 사본의 호환성 CMake 빌드 | `pc-application`, `control-test` 링크 성공 | 호스트 Qt 6.2/GStreamer 1.20/yaml-cpp 0.7에 맞춘 **진단 빌드** |
+| `QT_QPA_PLATFORM=offscreen ctest --test-dir /tmp/lwir-pc-compat-build -R '^control$' --output-on-failure` | 1/1 통과 | 로컬 TCP, 카탈로그 이름/활성/설치 상태, 기존 제어 회귀 |
+| `model-gui.png` 시각 확인 | 어두운 영상 영역, 회색 패널, 주황 AUTO 확인 | `/tmp/lwir-pc-compat-build/model-gui.png`, 실제 LAN 프레임 아님 |
+
+첫 Qt CTest는 네트워크 샌드박스 때문에 `QTcpServer::listen()`이 실패했다.
+동일 바이너리를 로컬 소켓 허용 환경에서 재실행해 1/1 통과했다. DXNN
+카탈로그 새 모델은 실제 보드 로딩·추론 시험 전이며, 복사·메타데이터 검사만
+완료했다. 이번 단계에서 보드 Runtime의 브랜치는 전환하지 않았다. 사후
+`feat/runtime-telemetry` / `71eb9c84922723176ca8312a5b87bddff82d2387`,
+기존 미추적 파일 1개를 확인했다.
+# 2026-11-12 최신 model-bank 시간 기준 확인 정책 (호스트)
+
+- 구성: CMake Debug, `LWIR_ENABLE_DX_APP=OFF`, Runtime/Benchmark 실행 파일 비활성,
+  CPU 단위 테스트 활성. 빌드 위치 `/tmp/lwir-runtime-confirm-debug`.
+- `cmake --build /tmp/lwir-runtime-confirm-debug --target test_frame_policy -j4` 성공.
+  `ctest --test-dir /tmp/lwir-runtime-confirm-debug -R '^frame_policy$' --output-on-failure`
+  1/1 통과. 130 ms 기준의 30 FPS 4프레임 확인을 ByteTrack/BoT-SORT 모두 시험했다.
+- 전체 Debug CPU 테스트 빌드 성공. `ctest -j4`는 32/38 통과, 소켓 bind가
+  제한된 환경에서 6개 실패. 실패 6개만 포트 사용이 가능한 환경에서 재실행해
+  6/6 통과 (`auto_control_e2e`, `gui_receiver`, `gui_sender`,
+  `gui_sender_jpeg`, `gui_sender_bypass`, `gui_sender_bypass_jpeg`).
+- 이전 uncommitted 카탈로그 필드 변경으로 `test_multitracker_runtime.cpp`가
+  전체 빌드에서 컴파일되지 않아 표시 이름 인자를 추가했다. 이후 전체 빌드 성공.
+- NPU/DXRT 로딩, 실카메라 FPS에서 시간 정책, 원본 Python GUI, PC↔Orange Pi
+  LAN은 이번 작업에서 검증하지 않았다. Orange Pi Git/서비스 상태도 변경하지 않았다.
+
+## 2026-11-12 정책 조회 및 PC Python 데스크톱 브리지 (호스트)
+
+| 실행 명령 | 결과 | 검증 범위 |
+| --- | --- | --- |
+| `cmake -S . -B /tmp/lwir-runtime-desktop-build -DCMAKE_BUILD_TYPE=Debug -DLWIR_ENABLE_DX_APP=OFF -DLWIR_BUILD_RUNTIME=ON -DLWIR_BUILD_BENCHMARK=ON -DLWIR_BUILD_CAPTURE=OFF -DBUILD_TESTING=OFF` 후 `cmake --build /tmp/lwir-runtime-desktop-build --target lwir_runtime lwir_benchmark -j4` | 두 실행 파일 링크 성공 | 호스트 CPU/stub 빌드, DXRT 및 I3 카메라 제외 |
+| `ctest --test-dir /tmp/lwir-runtime-confirm-debug -R '^(gui_pipeline_commands|app_config|frame_policy)$' --output-on-failure` | 3/3 통과 | `0x87` wire payload, YAML, 시간 확인 정책 |
+| `ctest --test-dir /tmp/lwir-runtime-confirm-debug -E '^(auto_control_e2e|gui_receiver|gui_sender|gui_sender_jpeg|gui_sender_bypass|gui_sender_bypass_jpeg)$' --output-on-failure` | 32/32 통과 | 호스트 Debug CPU 비소켓 전체 테스트 |
+| 위 제외 6개만 `ctest -R`로 포트 사용 허용 환경에서 실행 | 6/6 통과 | TCP/UDP 회귀 |
+| PC `PYTHONPATH=python_gui python3 -m unittest -v python_gui/test_lan_protocol.py python_gui/test_desktop_routes.py` | 10/10 통과 | Python TCP/UDP 파서, 카탈로그, 정책, 라우트, 실패 반환 |
+| PC `python3 page/build_page.py --check` | 121179바이트, 31개 원본 조각과 일치 | 원본 model-bank HTML/CSS/JS 보존 |
+| PC `PYTHONDONTWRITEBYTECODE=1 timeout 5s python3 python_gui/desktop_gui.py --board 127.0.0.1 --video-port 55000 --metadata-port 55001 --command-port 55002` | 5초 후 timeout 종료, Python 예외 없음 | Gtk/WebKit2/GStreamer 창 시작만 확인, Runtime 연결 없음 |
+
+처음 GUI smoke 실행은 샌드박스의 UDP 소켓 생성 금지로 실패했다. 포트 사용
+허용 환경에서 동일한 실행을 다시 수행했다. `py_compile`을 PC 저장소에서
+직접 실행한 시도는 읽기 전용 `__pycache__` 생성 때문에 실패했으나,
+`/tmp` 사본 컴파일과 PC 단위 테스트의 Python import는 통과했다.
+영상 디코딩, 실제 프레임 오버레이, PC↔보드 LAN, 새 명령의 보드 빌드,
+DXRT/NPU 및 짐벌 동작은 검증되지 않았다. 이번 단계에서 Orange Pi에
+접속하거나 브랜치·서비스를 변경하지 않았다.
+
+### 같은 날 동적 Tracker 정책 변경
+
+- `cmake --build /tmp/lwir-runtime-confirm-debug --target
+  test_gui_pipeline_commands test_tracker_change_service test_tracker_hotswap -j4`:
+  빌드 성공. 이어 `ctest --test-dir /tmp/lwir-runtime-confirm-debug -R
+  '^(tracker_change_service|tracker_hotswap|gui_pipeline_commands)$'
+  --output-on-failure`: 3/3 통과.
+- `cmake --build /tmp/lwir-runtime-desktop-build --target lwir_runtime
+  lwir_benchmark -j4`: 호스트 CPU 두 실행 파일 링크 성공.
+- PC 복사본 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python_gui python3 -m
+  unittest -v python_gui/test_lan_protocol.py python_gui/test_desktop_routes.py`:
+  12/12 통과. 정책 변경의 Accepted/Completed 및 필터 호출을 검증했다.
+- 첫 Tracker 서비스 테스트는 기존 지연 생성 fixture의 promise를 정책
+  교체에서 다시 만족시키려 해 실패했다. fixture를 첫 호출에만 지연하도록
+  수정하고 재실행해 통과했다. 실제 Runtime 코드의 실패는 아니었다.
+- Orange Pi 카메라는 연결되지 않았다. 현재 표시 중인 Chrome 창은 검증된
+  model-bank 원본 페이지 파일이며 새 LAN 브리지 GUI가 아니다. 실장비 실행,
+  영상 프레임 동기화, 정책 변경 시 DXRT 자원은 아직 검증하지 않았다.

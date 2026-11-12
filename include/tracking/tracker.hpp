@@ -57,4 +57,7 @@ public:
     virtual void reset() = 0;
     virtual void set_camera_motion(const CameraMotion&) {}
     virtual void set_image_size(float, float) {}
+    virtual void set_confirmation_frames(int) {}
+    // A frame policy may adjust this at runtime; zero means use catalog config.
+    virtual int current_confirmation_frames() const { return 0; }
 };

@@ -37,8 +37,8 @@ int main()
     TrackingConfig bot;bot.type=TrackerType::BotSort;bot.kalman_format="xywh";
     bot.appearance_min_crop_height=1;
     std::map<int,TrackingCatalogEntry> catalog;
-    catalog.emplace(1,TrackingCatalogEntry{1,"",byte});
-    catalog.emplace(2,TrackingCatalogEntry{2,"",bot});
+    catalog.emplace(1,TrackingCatalogEntry{1,"ByteTrack","",byte});
+    catalog.emplace(2,TrackingCatalogEntry{2,"BoT-SORT","",bot});
     std::atomic<int> calls{0};
     RuntimeControl control;
     TrackerManager manager(catalog,1,[&](const TrackingConfig& c)->std::shared_ptr<Tracker> {

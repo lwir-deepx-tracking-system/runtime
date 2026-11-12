@@ -63,8 +63,10 @@ std::unique_ptr<Tracker> TrackerFactory::create_configured(
 {
     auto factory=for_type(tracking.type);
     auto wrap=[&](std::unique_ptr<Tracker> tracker) -> std::unique_ptr<Tracker> {
-        if(tracking.frame.gmc || tracking.frame.warmth_min || tracking.frame.warmth_max || tracking.edge_birth_threshold>0)
-            return std::make_unique<FramePolicyTracker>(std::move(tracker),tracking.frame);
+        if(tracking.frame.gmc || tracking.frame.warmth_min || tracking.frame.warmth_max ||
+           tracking.frame.confirmation_ms>0 || tracking.edge_birth_threshold>0)
+            return std::make_unique<FramePolicyTracker>(std::move(tracker),tracking.frame,
+                tracking.confirmation_frames);
         return tracker;
     };
     if(tracking.type!=TrackerType::BotSort && !tracking.post_reid)

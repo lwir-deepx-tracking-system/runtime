@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <stdexcept>
 
 namespace {
@@ -45,6 +46,9 @@ public:
             // control strategy exists. HOME must not report fake completion.
             if (command.command == static_cast<std::uint8_t>(GuiGimbalCommand::Home))
                 replies.push_back(ack(command, GuiResult::NotReady));
+            else if (command.command == static_cast<std::uint8_t>(GuiGimbalCommand::Position) &&
+                     command.payload.empty())
+                replies.push_back({GuiCategory::Gimbal, 0x84, std::vector<std::uint8_t>(9, 0)});
         } else {
             return false;
         }
@@ -93,13 +97,45 @@ public:
         if (command.category != GuiCategory::Pipeline) return control_->handle(command, replies);
         replies.clear();
         const auto code = command.command;
-        if (code < 1 || code > 4 || command.payload.size() != (code <= 2 ? 4u : 8u))
+        if (code < 1 || code > 8 || command.payload.size() !=
+            (code == 8 ? 28u : ((code <= 2 || code == 7) ? 4u : 8u)))
             return false; // 보드 응답을 PC가 보내는 경우도 거부한다.
         const auto request_id = read32(command.payload, 0);
+        if (code == 7) {
+            const auto policy = requests_ ? requests_->tracker_policy() : PipelineTrackerPolicy{};
+            GuiCommand reply{GuiCategory::Pipeline, 0x87, {}};
+            write32(reply.payload, request_id);
+            write32(reply.payload, policy.tracker_id);
+            write32(reply.payload, policy.warmth_min);
+            write32(reply.payload, policy.warmth_max);
+            std::uint32_t edge_bits = 0;
+            static_assert(sizeof(edge_bits) == sizeof(policy.edge_birth));
+            std::memcpy(&edge_bits, &policy.edge_birth, sizeof(edge_bits));
+            write32(reply.payload, edge_bits);
+            write32(reply.payload, policy.confirmation_frames);
+            write32(reply.payload, policy.confirmation_ms);
+            write32(reply.payload, policy.flags);
+            replies.push_back(std::move(reply));
+            return true;
+        }
         if (code <= 2) {
             GuiCommand reply{GuiCategory::Pipeline, std::uint8_t(code | 0x80), {}};
             write32(reply.payload, request_id);
             write32(reply.payload, requests_ ? (code == 1 ? requests_->model_count() : requests_->tracker_count()) : 0);
+            replies.push_back(std::move(reply));
+            return true;
+        }
+        if (code == 5 || code == 6) {
+            const auto id = read32(command.payload, 4);
+            const auto item = requests_ ? (code == 5 ? requests_->model_info(id) : requests_->tracker_info(id))
+                                        : PipelineCatalogItem{};
+            GuiCommand reply{GuiCategory::Pipeline, std::uint8_t(code | 0x80), {}};
+            write32(reply.payload, request_id);
+            write32(reply.payload, item.id);
+            write32(reply.payload, (item.available ? 1u : 0u) | (item.active ? 2u : 0u));
+            const auto length = std::min(item.name.size(), std::size_t{63});
+            reply.payload.insert(reply.payload.end(), item.name.begin(), item.name.begin() + length);
+            reply.payload.resize(76, 0);
             replies.push_back(std::move(reply));
             return true;
         }
@@ -111,8 +147,31 @@ public:
         }
         PipelineChangeTicket ticket;
         if (requests_) {
-            const auto id = read32(command.payload, 4);
-            ticket = code == 3 ? requests_->request_model_change(id) : requests_->request_tracker_change(id);
+            if (code == 8) {
+                const auto mask = read32(command.payload, 4);
+                const auto flags = read32(command.payload, 24);
+                if (!mask || (mask & ~63u) || (flags & ~3u)) {
+                    replies.push_back(response(code, request_id, GuiPipelinePhase::Completed,
+                        GuiPipelineResult::InvalidConfiguration));
+                    return true;
+                }
+                TrackerPolicyUpdate update;
+                if (mask & 1u) update.warmth_min = static_cast<int>(read32(command.payload, 8));
+                if (mask & 2u) update.warmth_max = static_cast<int>(read32(command.payload, 12));
+                if (mask & 4u) {
+                    const auto bits = read32(command.payload, 16);
+                    float value = 0;
+                    std::memcpy(&value, &bits, sizeof(value));
+                    update.edge_birth = value;
+                }
+                if (mask & 8u) update.confirmation_ms = static_cast<int>(read32(command.payload, 20));
+                if (mask & 16u) update.gmc = (flags & 1u) != 0;
+                if (mask & 32u) update.class_gate = (flags & 2u) != 0;
+                ticket = requests_->request_policy_change(update);
+            } else {
+                const auto id = read32(command.payload, 4);
+                ticket = code == 3 ? requests_->request_model_change(id) : requests_->request_tracker_change(id);
+            }
         }
         if (ticket.result != GuiPipelineResult::Ok || !ticket.completion.valid()) {
             replies.push_back(response(code, request_id, GuiPipelinePhase::Completed,

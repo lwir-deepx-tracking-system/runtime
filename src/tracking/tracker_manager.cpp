@@ -1,6 +1,7 @@
 #include "tracking/tracker_manager.hpp"
 
 #include <stdexcept>
+#include <cmath>
 #include <utility>
 
 #include "tracking/tracker_factory.hpp"
@@ -38,6 +39,7 @@ void TrackerManager::activate(int id, const std::function<void()>& before_commit
         previous = std::move(active_.tracker);
         active_.tracker = std::move(candidate);
         active_.id = id;
+        active_config_ = entry->second.config;
         ++active_.epoch;
         if (published_epoch_) published_epoch_->store(active_.epoch);
     }
@@ -45,10 +47,60 @@ void TrackerManager::activate(int id, const std::function<void()>& before_commit
     previous.reset();
 }
 
+void TrackerManager::update_active_policy(const TrackerPolicyUpdate& update,
+    const std::function<void()>& before_commit)
+{
+    std::lock_guard<std::mutex> switch_lock(switch_mutex_);
+    TrackingConfig config;
+    {
+        std::lock_guard<std::mutex> active_lock(active_mutex_);
+        if (!active_.tracker) throw std::runtime_error("No active tracker");
+        config = active_config_;
+    }
+    if (update.warmth_min) config.frame.warmth_min = *update.warmth_min;
+    if (update.warmth_max) config.frame.warmth_max = *update.warmth_max;
+    if (update.edge_birth) config.edge_birth_threshold = *update.edge_birth;
+    if (update.confirmation_ms) config.frame.confirmation_ms = *update.confirmation_ms;
+    if (update.gmc) config.frame.gmc = *update.gmc;
+    if (update.class_gate) config.class_gate = *update.class_gate;
+    if (config.frame.warmth_min < 0 || config.frame.warmth_min > 65535 ||
+        config.frame.warmth_max < 0 || config.frame.warmth_max > 65535 ||
+        (config.frame.warmth_max > 0 && config.frame.warmth_min > config.frame.warmth_max) ||
+        !std::isfinite(config.edge_birth_threshold) || config.edge_birth_threshold < 0 ||
+        config.edge_birth_threshold > 1 || config.frame.confirmation_ms < 0 ||
+        config.frame.confirmation_ms > 1000)
+        throw std::invalid_argument("Invalid tracker policy update");
+    std::shared_ptr<Tracker> candidate = creator_(config);
+    if (!candidate) throw std::runtime_error("Tracker factory returned null");
+    if (before_commit) before_commit();
+    std::shared_ptr<Tracker> previous;
+    {
+        std::lock_guard<std::mutex> active_lock(active_mutex_);
+        previous = std::move(active_.tracker);
+        active_.tracker = std::move(candidate);
+        active_config_ = std::move(config);
+        ++active_.epoch;
+        if (published_epoch_) published_epoch_->store(active_.epoch);
+    }
+    previous.reset();
+}
+
 TrackerManager::Snapshot TrackerManager::snapshot() const
 {
     std::lock_guard<std::mutex> lock(active_mutex_);
     return active_;
+}
+
+TrackingConfig TrackerManager::active_config() const
+{
+    std::lock_guard<std::mutex> lock(active_mutex_);
+    return active_config_;
+}
+
+std::pair<TrackerManager::Snapshot, TrackingConfig> TrackerManager::policy_snapshot() const
+{
+    std::lock_guard<std::mutex> lock(active_mutex_);
+    return {active_, active_config_};
 }
 
 int TrackerManager::active_id() const

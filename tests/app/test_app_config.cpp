@@ -26,7 +26,7 @@ int main()
         relocated.tracking_catalog.at(6).config_path!=config.tracking_catalog.at(6).config_path)
         return 80;
     if (config.detection.model.path!=(original_cwd/"models/yolov8-n_640x640.dxnn").string() ||
-        config.reid.model.path!=(original_cwd/"../model-bank/final_tracker/tracker/models/RVGGA0_REID2C256.dxnn").lexically_normal().string())
+        config.reid.model.path!=(original_cwd/"models/imported/reid/repvgg_tmot_camel_reid.dxnn").lexically_normal().string())
         return 81;
 
     // runtime.yaml의 모델 경로와 고정 Detection 실행 설정 검증.
@@ -116,6 +116,13 @@ int main()
         return 7;
     if (config.detection_catalog.at(2).model.postprocess.type != "yolo26")
         return 44;
+    if (config.detection_catalog.size() != 11 ||
+        config.detection_catalog.at(3).display_name != "YOLO26m FLIR 640x480" ||
+        config.detection_catalog.at(3).model.input.height != 480 ||
+        config.detection_catalog.at(3).model.postprocess.output_format != PostprocessOutputFormat::SplitHead ||
+        config.detection_catalog.at(11).model.postprocess.output_format != PostprocessOutputFormat::EndToEndXyxy ||
+        config.tracking_catalog.at(2).display_name != "BoT-SORT + Appearance ReID")
+        return 54;
     if (!YAML::LoadFile("config/detection/yolov8n.yaml")["postprocess"] ||
         !YAML::LoadFile("config/detection/yolo26s.yaml")["postprocess"])
         return 47;
@@ -279,7 +286,7 @@ int main()
     runtime["tracking"]["track_threshold"] = 0.9;
     if (!invalid_combination()) return 48;
     runtime = YAML::Clone(yaml);
-    runtime["detection_catalog"][1]["id"] = 3;
+    runtime["detection_catalog"][1]["id"] = 99;
     if (!invalid_combination()) return 49;
     runtime = YAML::Clone(yaml);
     runtime["tracking_catalog"][0]["id"] = 2;

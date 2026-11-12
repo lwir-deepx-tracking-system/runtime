@@ -13,6 +13,7 @@ struct Observer : Tracker {
     FrameContextPtr frame;
     std::vector<Detection> seen;
     CameraMotion motion;
+    int confirmation_frames = 0;
     std::vector<Track> track(const std::vector<Detection>& d) override {seen=d;return {};}
     TrackingStep process(const DetectionResult& d) override {
         frame=d.frame;seen=d.detections;
@@ -27,6 +28,7 @@ struct Observer : Tracker {
     }
     void reset() override {motion={};}
     void set_camera_motion(const CameraMotion& m) override {motion=m;}
+    void set_confirmation_frames(int frames) override {confirmation_frames=frames;}
 };
 DetectionResult input(cv::Mat image) {
     auto f=std::make_shared<FrameContext>(); f->image=std::move(image);
@@ -93,7 +95,59 @@ int main()
     gmc.reset();gmc.process(input(moved));assert(observed->motion.is_identity());
     gmc.process(input(cv::Mat(80,100,CV_16UC1,cv::Scalar(0))));assert(observed->motion.is_identity());
 
-    for(const char* key:{"warmth_min: -1","warmth_max: 70000","gmc_downscale: 0","confirmation_frames: 0","edge_birth_threshold: 2"}) {
+    // Python reference: 130 ms starts at nominal 25 fps (3 frames), then
+    // follows the median of 50 valid capture intervals with hysteresis.
+    observer=std::make_unique<Observer>();observed=observer.get();
+    policy={};policy.confirmation_ms=130;
+    FramePolicyTracker timed(std::move(observer),policy,3);
+    assert(observed->confirmation_frames==3);
+    assert(timed.current_confirmation_frames()==3);
+    for(int i=0;i<=50;++i) {
+        auto frame=input(cv::Mat(8,8,CV_16UC1,cv::Scalar(0)));
+        auto mutable_frame=std::const_pointer_cast<FrameContext>(frame.frame);
+        mutable_frame->metadata.captured_at=std::chrono::steady_clock::time_point(
+            std::chrono::seconds(1)+std::chrono::milliseconds(33*i));
+        timed.process(frame);
+    }
+    assert(observed->confirmation_frames==4);
+    assert(timed.current_confirmation_frames()==4);
+    timed.reset();assert(observed->confirmation_frames==3);
+    assert(timed.current_confirmation_frames()==3);
+    for(int i=0;i<=50;++i) {
+        auto frame=input(cv::Mat(8,8,CV_16UC1,cv::Scalar(0)));
+        auto mutable_frame=std::const_pointer_cast<FrameContext>(frame.frame);
+        mutable_frame->metadata.captured_at=std::chrono::steady_clock::time_point(
+            std::chrono::seconds(1)+std::chrono::milliseconds(50*i));
+        timed.process(frame);
+    }
+    assert(observed->confirmation_frames==3); // Never below the configured base.
+
+    for (const TrackerType type : {TrackerType::ByteTrack, TrackerType::BotSort}) {
+        TrackingConfig timed_config;
+        timed_config.type=type;
+        timed_config.track_threshold=.25F;
+        timed_config.new_track_threshold=.35F;
+        if(type==TrackerType::BotSort) timed_config.kalman_format="xywh";
+        std::unique_ptr<Tracker> base = type==TrackerType::BotSort ?
+            std::unique_ptr<Tracker>(std::make_unique<BotSortTracker>(timed_config)) :
+            std::unique_ptr<Tracker>(std::make_unique<ByteTrackTracker>(timed_config));
+        FramePolicyTracker pipeline(std::move(base),policy,3);
+        const auto feed=[&](int i, bool detect) {
+            auto frame=input(cv::Mat(80,100,CV_16UC1,cv::Scalar(0)));
+            auto mutable_frame=std::const_pointer_cast<FrameContext>(frame.frame);
+            mutable_frame->metadata.captured_at=std::chrono::steady_clock::time_point(
+                std::chrono::seconds(1)+std::chrono::milliseconds(33*i));
+            if(detect) frame.detections={box(10)};
+            return pipeline.process(frame).tracks;
+        };
+        for(int i=0;i<=50;++i) assert(feed(i,false).empty());
+        assert(feed(51,true).empty());
+        assert(feed(52,true).empty());
+        assert(feed(53,true).empty());
+        assert(feed(54,true).size()==1);
+    }
+
+    for(const char* key:{"warmth_min: -1","warmth_max: 70000","gmc_downscale: 0","confirmation_frames: 0","confirmation_ms: 1001","edge_birth_threshold: 2"}) {
         rejected=false;
         try {config_parser::load_tracking_config(YAML::Load(std::string("track_threshold: .5\nmatch_threshold: .8\ntrack_buffer: 30\n")+key));}
         catch(const std::runtime_error&) {rejected=true;} assert(rejected);

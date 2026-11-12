@@ -265,3 +265,202 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   `tests/tracking/lwir_to_mot.py`가 동일함을 확인했다.
 - 다음 단계는 카메라 소유 프로그램을 중지해야 하는 Runtime 실행 검증이다.
   사용자에게 중지 대상과 복원 절차를 먼저 설명하고 승인받기 전까지 수행하지 않는다.
+
+## 2026-11-12 PC GUI 선행 연결
+
+- 사용자의 최신 순서 변경에 따라 카메라 Runtime 실행 전에 호스트
+  `pc-application`의 `main`/`8e91e3eb`에서 같은 이름의
+  `feat/python-runtime-integration` 브랜치를 만들었다. PC 커밋
+  `a4fa282`를 Push했고 작업 트리는 깨끗하다.
+- 기존 TCP Pipeline TrackerCount/ChangeTracker/TrackerResult를
+  `ControlClient → ApplicationController → MainWindow`에 연결했다.
+  개수는 보드에서 조회하고, 완료 전에는 현재 Tracker로 표시하지 않는다.
+  HOME 버튼도 기존 Gimbal Home 명령에 연결했다. Mock과 제어 테스트를 확장했다.
+- PC 정식 빌드 요구 조건은 이 호스트에 없다(CMake 3.22, Qt 6.2,
+  GStreamer 1.20, yaml-cpp 0.7). `/tmp` 소스 사본에서 의존성 버전
+  요구만 낮춘 **진단 빌드**로 `pc-application` 전체 컴파일과 제어 CTest
+  1/1 통과를 확인했다. 원본 CMakeLists는 변경하지 않았다.
+- 전체 PC CTest의 나머지 세 대상은 실패했다. PowerShell 부재로
+  계측 분석 테스트 2개가 실패했고, 영상 통합 테스트는 기존 Linux
+  SIGTERM 기대값 및 지원 버전 미만 GStreamer의 JPEG 사례가 실패했다.
+  H.264 사례와 새 Tracker/HOME 사례는 통과했다.
+- PC 단계 후 Orange Pi의 기존 Checkout에서 **빌드 전용**으로
+  `./scripts/build_runtime.sh`를 직접 실행해 Ninja 40/40과 바이너리
+  생성을 확인했다. 카메라 소유 Python/짐벌 프로세스는 중지하지 않았고
+  Runtime 바이너리는 실행하지 않았다. 앞선 `./scripts/build_benchmark.sh`
+  실행도 성공했다. 빌드 후 기본 경로와 보존 worktree의 브랜치·SHA·
+  작업 트리 상태를 별도 SSH 조회로 확인했다.
+- 남은 작업: Runtime에 ReID/필터/측정·원본 녹화/카메라 관리 명령과
+  동적 모델·Tracker 이름/활성 ID 조회를 먼저 구현한 뒤 PC UI를 연결한다.
+  정식 PC 의존성 환경과 실제 LAN 연결은 미검증이다. 카메라 실행 시험
+  전에는 사용 중인 프로그램 중지 절차를 사용자에게 알린다.
+
+## 2026-11-12 Orange Pi 카메라 Runtime 실행 검증
+
+- 사용자 승인 후 실제 실행 직전에 재조회하니 Python 추적 서버·`cam_pipe`·
+  짐벌 브리지는 이미 중지돼 있었다. 사용자 요청으로 다른 작업자가 만든
+  `~/lwir_keepalive.pause`가 존재했으며, 이를 변경하거나 삭제하지 않았다.
+  카메라 USB 점유 프로세스가 없는 것도 확인했다.
+- 호스트 브랜치 `feat/python-runtime-integration` / `87ddb436acb28410e7789ad861836882aa37aad9`를
+  Orange Pi 기본 경로에서 빌드·실행했다. 기존 보존 worktree를 잠시 detach한 뒤
+  메인 경로를 동일 브랜치로 전환했고, 두 번의 시험 후 각각 원래 상태로 돌렸다.
+- 짐벌과 GUI를 비활성화한 임시 YAML로 30초씩 두 구성 실행: ID 1 ByteTrack
+  651프레임, ID 4 필터·GMC·Post-ReID 648프레임. 두 실행 모두 종료 코드 0,
+  카메라 open/close 및 Detection/Tracking CSV 기록을 확인했다.
+- 보드의 현재 `model-bank`에는 기존 `config/reid/repvgg.yaml` 경로가 없다.
+  동일 SHA-256의 실재 RepVGG DXNN을 가리키는 임시 YAML로 ID 4를 시험했다.
+  따라서 저장소 기본 ReID 경로 그대로의 ID 4 동작은 검증되지 않았고,
+  실제 ReID crop/Embedding 생성 여부도 이 실행에서 확인되지 않았다.
+- 사후 독립 SSH 조회에서 기본 경로 `feat/runtime-telemetry` /
+  `71eb9c84922723176ca8312a5b87bddff82d2387`, 원래 미추적 파일,
+  보존 worktree의 테스트 브랜치/SHA, 기존 keepalive pause, 중지된 Python
+  프로세스 상태와 `dxrt.service active`를 확인했다. 자세한 수치와 경로는
+  [`TEST_RESULTS.md`](TEST_RESULTS.md)에 기록했다.
+- 다음 순서: 보드·호스트에서 공통으로 유효한 ReID 모델 경로 설정을 정리하고,
+  ReID 실제 Embedding 발생을 검증한다. 이후 Runtime 명령 확장과 LAN 검증을 진행한다.
+
+## 2026-11-12 단일 LAN 호스트 Qt GUI와 카탈로그 작업
+
+- 시작 상태: 호스트 Runtime `feat/python-runtime-integration` HEAD `87ddb436`,
+  기존 문서 4개의 미커밋 변경을 보존했다. PC 저장소도 같은 이름의 브랜치
+  HEAD `a4fa282`에서 시작했다. 현재 소스 변경은 미커밋이다.
+- 보드의 최신 Python `live_page.html`은 ZIP보다 새 버전이며 짙은 회색·주황색
+  팔레트를 사용한다. Qt 기존 프로젝트의 색상·상단 바·영상/우측 패널 배치를
+  여기에 맞췄다. 방향 패드와 STOP은 기존 MOVE/MANUAL TCP 경로에 연결했다.
+- Runtime YAML 카탈로그에 표시 이름을 넣고 기존 TCP Pipeline에
+  ModelInfo/TrackerInfo 요청 5/6, 응답 0x85/0x86을 추가했다. Qt는 이름,
+  설치 여부, 활성 ID를 조회한다. 적용 완료 전에는 현재 선택으로 표시하지 않는다.
+- Manifest SHA 검증 후 model-bank DXNN 18개를 호스트와 보드 Runtime의
+  Git 제외 `models/imported/`에 복사했다. 새 Detection YAML 9개는
+  `parse_model`로 확인한 YOLO26 Tensor 계약을 사용한다. ReID 기본 경로는
+  동일 SHA의 복사본으로 수정했다. 기본 실행 모델 ID 1은 그대로다.
+- 호스트 Runtime CPU 빌드 및 관련 CTest 2/2, Qt 호환성 진단 빌드와
+  Control CTest 1/1 통과. 정식 PC 의존성 버전은 이 호스트에서 부족하다.
+  새 코드의 보드 빌드·DXRT 추론·LAN 재시험은 아직 수행하지 않았다.
+- 보드 소스 브랜치는 전환하지 않았다. 복사 후 원래
+  `feat/runtime-telemetry` / `71eb9c84922723176ca8312a5b87bddff82d2387`
+  및 기존 `?? tests/tracking/lwir_to_mot.py` 표시를 확인했다. 카메라·
+  Runtime 프로세스는 시작하지 않았다.
+- 다음 단계: 새 모델의 DXRT 추론 확인, ReID 모델 전환 수명 관리,
+  남은 필터·측정 명령과 Qt 연결, 단일 호스트 LAN 실기 검증.
+
+## 2026-11-12 최신 model-bank 재조사와 GUI 방향 변경
+
+- 현재 호스트 Runtime 브랜치는 `feat/python-runtime-integration`, HEAD
+  `87ddb436acb28410e7789ad861836882aa37aad9`. 시작 전 Runtime과
+  `pc-application`의 기존 미커밋 변경을 확인하고 보존했다. model-bank는
+  독립 `main` / `3897aaf572fae1d87f9c8cc3d7db85028cc79501`로 깨끗했다.
+- 사용자 최신 지시는 Orange Pi의 C++ Runtime/Benchmark 설계를 유지하면서
+  PC GUI는 model-bank의 원본 Python 프로젝트 HTML/CSS/JS 화면을 사용하고
+  기존 단일 호스트 LAN만 쓰는 것이다. Python 서버 자체는 이식하지 않는다.
+  현재 페이지는 `/stream`과 여러 HTTP 경로에 의존하므로 원본 화면을
+  그대로 표시하려면 PC 데스크톱 LAN 브리지가 필요하다. 아직 구현되지 않았다.
+- `docs/MODEL_BANK_DELTA_20261112.md`에 최신 기능의 배치·현재 상태·검증
+  목록을 추가하고 기존 `PYTHON_FEATURE_MAP.md`의 오래된 Edge Birth 상태를
+  바로잡았다.
+- `confirmation_ms` 시간 기준 새 Track 확인을 AppConfig/FramePolicyTracker/
+  공통 Tracker hook에 추가했다. Python의 25 FPS 시작, 최근 50개 간격 중앙값,
+  1초 끊김 제외, 0.15장 hysteresis와 기존 확인 장수 하한을 사용한다.
+  `bytetrack_filtered.yaml`에 130 ms를 설정하고 기본 Runtime ID 1은 유지했다.
+  `test_frame_policy`가 ByteTrack과 BoT-SORT의 30 FPS 4장 확인, 느린 FPS 하한,
+  reset, 범위 검증을 수행했다.
+- 수정 파일: `include/config/app_config.hpp`, `src/config/app_config.cpp`,
+  `include/tracking/{tracker,bytetrack_tracker,botsort_tracker,post_reid_tracker,frame_policy_tracker}.hpp`,
+  `src/tracking/{tracker_factory,frame_policy_tracker}.cpp`,
+  `config/tracking/bytetrack_filtered.yaml`, `tests/tracking/test_frame_policy.cpp`.
+  기존 미커밋 카탈로그의 `display_name` 필드 때문에 전체 빌드가 실패하던
+  `tests/pipeline/test_multitracker_runtime.cpp`의 생성자도 맞췄다.
+- 호스트 Debug CPU 빌드 성공. `frame_policy` 1/1 통과. 전체 38개 테스트 중
+  샌드박스 포트 제한으로 6개가 실패했고, 그 6개를 포트 사용이 가능한 환경에서
+  재실행하여 6/6 통과했다. 따라서 실행 증거는 비소켓 32/32 + 소켓 6/6이다.
+  NPU/DXRT·실카메라·LAN·PC Python GUI는 이번 단계에서 실행하지 않았다.
+- 다음 단계: Runtime의 측정·재생·짐벌 상태·동적 정책 명령과 모델 계약을
+  단계별 구현/검증한 뒤 PC 원본 화면을 데스크톱 브리지에 연결한다. 보드 테스트
+  전에는 원래 브랜치/SHA/작업 트리/서비스를 다시 기록하고 테스트 후 복원한다.
+
+### 같은 단계의 PC 원본 화면 확보
+
+- 기존 `pc-application`의 미커밋 Qt 변경은 덮어쓰지 않았다.
+  `python_gui/page/`에 최신 model-bank 페이지의 31개 HTML/CSS/JS 조각과
+  빌드된 `live_page.html`을 바이트 그대로 복사했다. 원본과 `cmp`가 일치하고
+  `python3 page/build_page.py --check`가 121179바이트 일치를 확인했다.
+- `python_gui/lan_protocol.py`에 기존 TCP 프레이밍, Runtime의 모델·Tracker
+  catalog/query/change 완료 구분, 모드·짐벌 명령, UDP 메타데이터와 선택적
+  LWTM 텔레메트리 파서를 추가했다. 별도 HTTP 서버나 소켓 리스너는 없다.
+  `PYTHONPATH=python_gui python3 -m unittest -v python_gui/test_lan_protocol.py`
+  3/3 통과. 이 테스트는 실제 Runtime 연결이나 영상 수신 시험이 아니다.
+- 원본 페이지가 기대하는 `/stream`, `/rules`, `/measure`, `/perf`, `/replay`,
+  `/gimbal` 전체를 연결하는 데스크톱 브리지와 해당 Runtime 기능은 아직 없다.
+  따라서 Python GUI는 **현재 실행 가능한 완성 앱이 아니며**, 기능 없는
+  화면을 완료로 표시하지 않는다. `pc-application/python_gui/README.md`에
+  이 경계를 적었다.
+
+### 이어서 구현한 LAN 정책 조회와 Python 데스크톱 브리지
+
+- Runtime Pipeline TCP에 읽기 전용 Tracker 정책 조회 `0x07`/`0x87`을
+  추가했다. 응답에는 활성 Tracker ID, warmth 범위, edge birth 임계값,
+  기본 확인 프레임·시간, class gate/GMC/post-ReID 설정이 들어간다.
+  `apps/runtime/runtime.cpp`, `include/app/pipeline_requests.hpp`,
+  `include/gui/gui_protocol.hpp`, `src/gui/{gui_protocol,gui_command_handler}.cpp`,
+  `tests/gui/test_gui_pipeline_commands.cpp`, `docs/pc_communication.md`를 수정했다.
+- PC 저장소 `python_gui/lan_protocol.py`가 이 응답을 검증해 읽는다.
+  `desktop_routes.py`는 원본 페이지의 모델·Tracker 목록/변경, 정책 조회,
+  대상 클릭, 수동 이동·정지, 상태·사람 목록을 기존 LAN 명령으로 연결한다.
+  미지원 필터 변경 등은 명시적 실패로 응답한다.
+- `desktop_gui.py`는 원본 페이지 파일을 WebKit2에서 열고 기존 UDP 5000
+  H.264/RTP와 UDP 5001 메타데이터를 받아 영상에 ID 상자를 그린다.
+  TCP 5002 명령에는 별도 HTTP/WebSocket 서버를 두지 않는다. PC 의존성,
+  실행 명령, 미지원 기능은 `pc-application/python_gui/README.md`에 기록했다.
+- 호스트 Debug Runtime CTest: 비소켓 32/32, 포트 허용 환경의 소켓 6/6 통과.
+  DXRT 비활성 호스트 구성에서 `lwir_runtime`과 `lwir_benchmark` 실행 파일도
+  빌드했다. 장치 전용 `scripts/build_runtime.sh`/`build_benchmark.sh`는
+  기존 경로를 유지하며 이번 호스트에서는 실행하지 않았다.
+  PC Python LAN·라우트 단위 테스트 10/10 통과. 원본 페이지 31개 조각과
+  빌드된 HTML의 바이트 일치 확인. 데스크톱 실행기는 로컬 루프백에서
+  5초 동안 예외 없이 실행됐고 timeout으로 종료했다. 이 확인은 실제
+  영상 수신·Orange Pi 연결·짐벌 조작 검증이 아니다.
+- 남은 일: Runtime 동적 필터/ReID/측정·재생/카메라·시스템 관리 명령,
+  원본 페이지 전체 조작 연결, 영상·메타데이터 RTP 시각 동기화와 지속 성능
+  검증, Orange Pi 실기 및 LAN 통합 검증. 보드 브랜치/서비스는 건드리지 않았다.
+
+### 동적 Tracker 정책 변경과 원본 GUI 표시 유지
+
+- 사용자 요청대로 화면에는 수정하지 않은
+  `model-bank/tracking_server/page/live_page.html`을 Chrome 앱 창으로 열었다.
+  카메라는 연결되지 않았고 이 원본 화면의 영상·제어는 작동 검증 대상이 아니다.
+  새 통합 구현은 별도 `pc-application/python_gui/` 복사본에서 수정한다.
+  개발 중 GUI를 완성본으로 교체하지 않았다.
+- Runtime TCP `0x08`/`0x88`에 활성 Tracker의 warmth 최소·최대,
+  edge birth, confirmation ms, GMC, class gate 변경을 추가했다.
+  `TrackerChangeService`가 기존 `TrackerManager`로 후보 생성/교체를 수행해
+  실패 시 이전 정책을 보존하고 성공 시 epoch를 증가시킨다. 사용 중인
+  Track/Kalman/Gallery는 재생성으로 초기화된다. 기본 YAML은 바뀌지 않는다.
+- PC 작업 복사본의 원본 화면 `/rules/set` 중 숫자 필터와 확인 시간은
+  수락·완료 응답을 기다린 뒤 적용 상태를 다시 조회한다. 미지원 GMC 화면
+  토글 등은 실패를 반환한다. `0x07` 응답은 현재 적응된 확인 장수를 반환한다.
+- 관련 수정: `include/tracking/tracker_policy_update.hpp`,
+  `include/tracking/{tracker_manager,frame_policy_tracker,tracker}.hpp`,
+  `src/tracking/{tracker_manager,frame_policy_tracker}.cpp`,
+  `include/pipeline/tracker_change_service.hpp`,
+  `src/pipeline/tracker_change_service.cpp`, `include/app/{pipeline_requests,pipeline_result}.hpp`,
+  `include/gui/gui_protocol.hpp`, `src/gui/{gui_protocol,gui_command_handler}.cpp`,
+  `apps/runtime/runtime.cpp`, 관련 Tracker/GUI 테스트, PC Python LAN/route 코드.
+- 호스트 CPU: Runtime·Benchmark 실행 파일 링크 성공,
+  `tracker_change_service`, `tracker_hotswap`, `gui_pipeline_commands` 3/3 통과,
+  PC Python LAN·route 12/12 통과. 새 정책의 Orange Pi DXRT 로딩 및 실카메라
+  전환은 미검증. 원본 Chrome GUI는 카메라 없는 디자인 표시용으로만 유지한다.
+
+### 최신 model-bank 변경분만 적용: 짐벌 화면 추정 위치
+
+- `GimbalCommandExecutor`가 실제 전송에 성공한 명령의 방향·속도·경과 시간으로
+  화면용 pan/tilt 백분율을 추정한다. 제어 판단에는 쓰지 않는다. 새 TCP
+  Gimbal `4`/`0x84` 조회는 최근 실시간 영상이 없으면 valid=0을 보낸다.
+  PC 작업 복사본은 영상·메타데이터가 둘 다 최근일 때만 원본 페이지의
+  `position_estimate`에 표시한다. 현재 열어 둔 원본 디자인 화면은 교체하지 않았다.
+- 관련 변경: `include/control/gimbal_position_estimate.hpp`,
+  `include/control/gimbal_command_executor.hpp`, `src/control/gimbal_command_executor.cpp`,
+  `src/control/tracking_command_handler.cpp`, `include/gui/gui_protocol.hpp`,
+  `src/gui/gui_command_handler.cpp`, `tests/control/test_auto_control.cpp`,
+  PC `python_gui/{lan_protocol,desktop_routes,desktop_gui,test_lan_protocol,test_desktop_routes}.py`.
+- 호스트 DXRT 비활성 `lwir_runtime` 빌드 성공, `auto_control` 1/1,
+  PC Python LAN·route 14/14 통과. 실제 장비의 위치 표시·방향은 미검증.

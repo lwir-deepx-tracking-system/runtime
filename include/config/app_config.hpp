@@ -30,6 +30,7 @@ enum class TrackerType { ByteTrack, BotSort, OcSort, Sort };
 struct TrackingFrameConfig {
     int person_class_id = 0;
     int warmth_min = 0, warmth_max = 0;
+    int confirmation_ms = 0; // 0 keeps the configured confirmation_frames unchanged.
     bool gmc = false;
     int gmc_downscale = 2, gmc_max_corners = 300;
     double gmc_min_distance = 5.0;
@@ -366,6 +367,7 @@ struct CaptureConditionConfig
 struct ModelCatalogEntry
 {
     int id = 0;
+    std::string display_name;
     std::string config_path;
     ModelConfig model;
 };
@@ -390,6 +392,7 @@ struct ReidSettings
 struct TrackingCatalogEntry
 {
     int id = 0;
+    std::string display_name;
     std::string config_path;
     TrackingConfig config;
 };

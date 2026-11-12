@@ -17,16 +17,17 @@ constexpr std::uint32_t kGuiFrameWidth = 640;
 constexpr std::uint32_t kGuiFrameHeight = 480;
 
 enum class GuiCategory : std::uint8_t { System = 1, Mode = 2, Gimbal = 3, Pipeline = 4 };
-// Pipeline 요청은 1..4, 보드 응답은 해당 요청 번호에 0x80을 더한다.
+// Pipeline 응답은 요청 번호에 0x80을 더한다. 기존 1..4 계약은 유지한다.
 enum class GuiPipelineCommand : std::uint8_t {
-    ModelCount = 1, TrackerCount = 2, ChangeModel = 3, ChangeTracker = 4
+    ModelCount = 1, TrackerCount = 2, ChangeModel = 3, ChangeTracker = 4,
+    ModelInfo = 5, TrackerInfo = 6, TrackerPolicy = 7, ChangeTrackerPolicy = 8
 };
 enum class GuiPipelinePhase : std::uint8_t { Accepted = 1, Completed = 2 };
 // 기존 PC 프로토콜의 결과 코드 값을 공용 요청 결과와 동일하게 유지한다.
 using GuiPipelineResult = PipelineResult;
 enum class GuiSystem : std::uint8_t { Ack = 1, Init = 2, Status = 3, Ping = 4 };
 enum class GuiModeCommand : std::uint8_t { Auto = 1, Manual = 2 };
-enum class GuiGimbalCommand : std::uint8_t { Move = 1, Home = 3 };
+enum class GuiGimbalCommand : std::uint8_t { Move = 1, Home = 3, Position = 4 };
 enum class GuiResult : std::uint8_t {
     Ok, InvalidCommand, InvalidPayload, InvalidState, InvalidTarget, NotReady
 };

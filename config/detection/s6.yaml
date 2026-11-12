@@ -1,0 +1,32 @@
+# Tensor contract checked with parse_model on Orange Pi; DXRT execution still needs testing.
+path_base: ../..
+model:
+  name: s6
+  path: models/imported/detect/yolo26s/yolo26s_nms_640x640.dxnn
+camera_input:
+  opencv_type: CV_16UC1
+  width: 640
+  height: 480
+  clip_min: 0
+  clip_max: 65535
+  channel_mode: replicate_gray_to_rgb
+input:
+  width: 640
+  height: 640
+preprocess:
+  type: lwir_letterbox
+  resize: letterbox
+  normalize: false
+  pad_value: 114
+postprocess:
+  type: yolo26
+  output_format: split_head
+  split_output_levels: 3
+  split_regression_bins: 1
+  split_class_score_activation: sigmoid
+  nms_mode: enabled
+  class_agnostic_nms: false
+  confidence_threshold: 0.001
+  nms_threshold: 0.7
+  num_classes: 16
+  class_names: [ "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat" ]

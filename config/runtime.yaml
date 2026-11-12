@@ -46,12 +46,23 @@ reid:
     use_ort: false
     npu_cores: all
 
-# Internal model catalog. The PC wire protocol does not define model selection.
+# Runtime catalog names are sent to the single LAN-connected PC over TCP.
 detection_catalog:
   - id: 1
+    name: YOLOv8n
     config: config/detection/yolov8n.yaml
   - id: 2
+    name: YOLO26s
     config: config/detection/yolo26s.yaml
+  - {id: 3, name: 'YOLO26m FLIR 640x480', config: config/detection/newmrw480.yaml}
+  - {id: 4, name: 'YOLO26s 640x480', config: config/detection/s480.yaml}
+  - {id: 5, name: 'YOLO26m FLIR 640x640', config: config/detection/m640.yaml}
+  - {id: 6, name: 'YOLO26s 640x640', config: config/detection/s6.yaml}
+  - {id: 7, name: 'YOLO26m inside 20261110 1742', config: config/detection/yolo26m_inside_1742.yaml}
+  - {id: 8, name: 'YOLO26m inside 20261110 2020', config: config/detection/yolo26m_inside_2020.yaml}
+  - {id: 9, name: 'YOLO26m inside patch 20261111', config: config/detection/yolo26m_inside_patch.yaml}
+  - {id: 10, name: 'YOLO26m outside patch 20261110', config: config/detection/yolo26m_outside_patch.yaml}
+  - {id: 11, name: 'YOLO26s NMS-free 640x640', config: config/detection/yolo26s_nmsfree.yaml}
 
 
 # ============================================================
@@ -63,16 +74,22 @@ tracking:
 
 tracking_catalog:
   - id: 1
+    name: ByteTrack
     config: config/tracking/bytetrack.yaml
   - id: 2
+    name: BoT-SORT + Appearance ReID
     config: config/tracking/botsort.yaml
   - id: 3
+    name: ByteTrack + Post-ReID
     config: config/tracking/bytetrack_post_reid.yaml
   - id: 4
+    name: ByteTrack + Filters + GMC + Post-ReID
     config: config/tracking/bytetrack_filtered.yaml
   - id: 5
+    name: OC-SORT
     config: config/tracking/ocsort.yaml
   - id: 6
+    name: SORT
     config: config/tracking/sort.yaml
 
 

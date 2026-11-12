@@ -11,5 +11,6 @@ enum class PipelineResult : std::uint8_t
     CreationFailed = 3,
     Restored       = 4,
     RestoreFailed  = 5,
-    NotReady       = 6
+    NotReady       = 6,
+    InvalidConfiguration = 7
 };

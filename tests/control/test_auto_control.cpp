@@ -23,6 +23,17 @@ template<class F> void until(F f, const char* message) {
         std::this_thread::sleep_for(2ms);
     }
 }
+void position_estimate_contract() {
+    GimbalPositionEstimate p;
+    const auto t = GimbalPositionEstimate::Clock::time_point{} + 1s;
+    p.command(t, 1, -1, 5);
+    p.advance(t + 1s);
+    check(std::abs(p.pan() - 52.5) < 1e-6, "command based pan scale");
+    check(std::abs(p.tilt() - (50.0 - 100.0 / 14.0)) < 1e-6, "command based tilt scale");
+    p.command(t + 1s, 0, 0, 0);
+    p.advance(t + 2s);
+    check(std::abs(p.pan() - 52.5) < 1e-6, "STOP must freeze position estimate");
+}
 Track track(float cx = 480, float cy = 240) {
     Track t;
     t.track_id = 7; t.x = cx - 10; t.y = cy - 10; t.width = t.height = 20;
@@ -163,6 +174,15 @@ void state_and_watchdog() {
     check(executor.select(0xffffffffU) == ControlResult::InvalidTarget, "uint32 truncation");
     executor.publish(frame(1));
     check(executor.select(7) == ControlResult::Ok, "AUTO rejected fresh target");
+    check(executor.snapshot().position_valid, "fresh live frame did not expose position estimate");
+    TrackingCommandHandler handler(executor, c.poll_interval_ms);
+    std::vector<GuiCommand> replies;
+    check(handler.handle({GuiCategory::Gimbal,
+                         static_cast<std::uint8_t>(GuiGimbalCommand::Position), {}}, replies),
+          "position query rejected");
+    check(!replies.empty() && replies.front().category == GuiCategory::Gimbal &&
+          replies.front().command == 0x84 && replies.front().payload.size() == 9 &&
+          replies.front().payload.front() == 1, "position query wire response");
     until([&] { return executor.snapshot().moving; }, "AUTO did not move");
     // No further frames: independent watchdog must STOP and wait for reacquisition.
     until([&] { auto s = executor.snapshot(); return s.lost && !s.moving; }, "no-frame watchdog STOP");
@@ -188,6 +208,7 @@ void state_and_watchdog() {
     executor.publish(frame(5)); std::this_thread::sleep_for(20ms);
     check(log->read().size() == count, "AUTO replay after manual override");
     executor.disconnected(); check(log->read().back().stop, "disconnect STOP");
+    check(!executor.snapshot().position_valid, "disconnected position still valid");
     executor.connected(); check(!executor.snapshot().moving, "reconnect replay");
     executor.publish(frame(6)); check(executor.select(7) == ControlResult::Ok, "model test selection");
     until([&] { return executor.snapshot().moving; }, "model test move");
@@ -264,6 +285,6 @@ void invalid_inputs_and_error() {
 }
 }
 int main() try {
-    calculations(); yaml_contract(); startup_failure_and_independent_poll(); state_and_watchdog(); ramp_reversal_and_bypass(); invalid_inputs_and_error();
+    position_estimate_contract(); calculations(); yaml_contract(); startup_failure_and_independent_poll(); state_and_watchdog(); ramp_reversal_and_bypass(); invalid_inputs_and_error();
     return 0;
 } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

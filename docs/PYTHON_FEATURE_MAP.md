@@ -4,6 +4,11 @@
 Python 경로는 `live_server/tracker/` 기준이다. 표의 상태는 코드 분석 결과이며 실기 통과를 뜻하지 않는다.
 Runtime 개발 브랜치는 `feat/python-runtime-integration`. PC는 Phase 3 전까지 읽기 전용이다.
 
+2026-11-12의 최신 `model-bank/tracking_server/` 추가분과 현재 구현 상태는
+[`MODEL_BANK_DELTA_20261112.md`](MODEL_BANK_DELTA_20261112.md)를 우선 확인한다.
+GUI 방향도 기존 Qt 화면 재구현에서 **원본 Python 프로젝트의 HTML/CSS/JS 화면 유지와
+호스트 PC 데스크톱 LAN 브리지**로 변경됐다. 이 문서의 PC 열은 과거 스냅샷이다.
+
 ## 실제 실행 분기
 
 `run/run_real_gui.sh`는 `lwir_tracker_m1.py main()`에 w480, ByteTrack, no-vit,
@@ -34,7 +39,7 @@ RepVGG relabel, async refresh, gate JSON, judge JSON, judge-crops 2를 전달한
 | GMC `GMC.apply`, GKF, gmc_warp | 기본 ON | FramePolicyTracker sparse flow 추정 및 ByteTrack/BoT warp 연결 | 미연결 | translation/reset/textureless CPU 통과; Python percentile 영상 매핑 미반영 |
 | Class Gate `Tracker._cg` | 기본 ON, 사람 대 비사람 그룹 | 선택적 person-group gate 추가, 기존 기본값 유지 | 미연결 | 클래스 변경 및 최대 match threshold CPU 검증 |
 | Warmth `main` raw_i_ percentile 분기 | live 45000 기본 | FramePolicyTracker raw16 stride2 p95 min/max | 미연결 | percentile/타 class/중복 detection source index CPU 검증 |
-| Edge Birth `edge_ok` | .5 기본 | 없음 | 미연결 | 신규 birth만 차단, 기존 low-score match 유지 |
+| Edge Birth `edge_ok` | .5 기본 | ByteTrack/BoT-SORT의 신규 birth만 차단 | 미연결 | 기존 low-score match 유지 CPU 검증; 장치 재검증 필요 |
 | Lost/Kalman `Tracker.update`, KF | 기본 | KalmanFilter, track_buffer, lost_output_frames | predicted flag 표시 | gap/reset 상태 검증, 기존 동작 유지 |
 | Motion GRU `PosGRU.step`, pos_predict | 선택, 기본 Kalman | 없음 | 미연결 | 16 features→hidden40→4 residual; NPZ 변환/동등성/상태 reset |
 | Motion Mamba `PosMamba.step`, pos_predict | 선택, 기본 Kalman | 없음 | 미연결 | recurrent conv/SSM→4 residual; NPZ 변환/동등성 |

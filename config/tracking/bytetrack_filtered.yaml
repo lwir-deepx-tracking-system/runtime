@@ -11,6 +11,7 @@ tracking:
   kalman_format: xywh
   fuse_score: true
   confirmation_frames: 3
+  confirmation_ms: 130  # Python reference: 25 fps -> 3 frames, 30 fps -> 4.
   class_gate: true
   person_class_id: 0
   warmth_min: 45000

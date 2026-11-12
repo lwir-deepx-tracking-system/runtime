@@ -17,6 +17,7 @@ public:
     std::vector<Track> track(const std::vector<Detection>& detections) override;
     TrackingStep process(const DetectionResult& input) override;
     void reset() override;
+    void set_confirmation_frames(int frames) override { base_->set_confirmation_frames(frames); }
     void set_camera_motion(const CameraMotion& motion) override { base_->set_camera_motion(motion); }
     void set_image_size(float width, float height) override { base_->set_image_size(width, height); }
 private:

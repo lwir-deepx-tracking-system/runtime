@@ -57,11 +57,12 @@ int main()
     std::promise<void>     entered;
     auto                   entered_future = entered.get_future();
     std::thread::id        creator_thread;
+    std::atomic<bool>      block_once{true};
     std::atomic<int>       commits{0};
     TrackerManager         manager(catalog, 1, [&](const TrackingConfig &config) -> std::shared_ptr<Tracker>
                                    {
         if (config.track_buffer == 4) throw std::runtime_error("expected creation failure");
-        if (config.track_buffer == 2) {
+        if (config.track_buffer == 2 && block_once.exchange(false)) {
             creator_thread = std::this_thread::get_id();
             entered.set_value();
             released.wait();
@@ -108,5 +109,16 @@ int main()
     catch(const std::logic_error &)
     {
     }
+    TrackerChangeService policy_service(manager);
+    policy_service.start();
+    TrackerPolicyUpdate update;
+    update.warmth_min = 8000;
+    if (!completed(policy_service.request_policy_change(update), PipelineResult::Ok) ||
+        manager.active_config().frame.warmth_min != 8000) return 13;
+    update.warmth_min = 70000;
+    if (!completed(policy_service.request_policy_change(update), PipelineResult::InvalidConfiguration) ||
+        manager.active_config().frame.warmth_min != 8000) return 14;
+    policy_service.close();
+    policy_service.join();
     return 0;
 }

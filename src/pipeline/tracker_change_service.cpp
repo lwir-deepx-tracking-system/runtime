@@ -33,8 +33,21 @@ PipelineChangeTicket TrackerChangeService::request_change(std::uint32_t id)
     std::lock_guard<std::mutex> lock(mutex_);
     if(!started_ || closed_) return {PipelineResult::NotReady, {}};
     if(busy_) return {PipelineResult::Busy, {}};
-    Request request{static_cast<int>(id), {}};
+    Request request{static_cast<int>(id), std::nullopt, {}};
     auto    future = request.completion.get_future().share();
+    pending_.emplace(std::move(request));
+    busy_ = true;
+    wake_.notify_one();
+    return {PipelineResult::Ok, std::move(future)};
+}
+
+PipelineChangeTicket TrackerChangeService::request_policy_change(const TrackerPolicyUpdate& policy)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!started_ || closed_) return {PipelineResult::NotReady, {}};
+    if (busy_) return {PipelineResult::Busy, {}};
+    Request request{0, policy, {}};
+    auto future = request.completion.get_future().share();
     pending_.emplace(std::move(request));
     busy_ = true;
     wake_.notify_one();
@@ -75,8 +88,18 @@ void TrackerChangeService::run()
         auto result = PipelineResult::Ok;
         try
         {
-            manager_.activate(request->id, before_commit_);
-            Logger::info("[TrackerChangeService] active tracker id=" + std::to_string(request->id));
+            if (request->policy) {
+                manager_.update_active_policy(*request->policy, before_commit_);
+                Logger::info("[TrackerChangeService] updated active tracker policy");
+            } else {
+                manager_.activate(request->id, before_commit_);
+                Logger::info("[TrackerChangeService] active tracker id=" + std::to_string(request->id));
+            }
+        }
+        catch(const std::invalid_argument &error)
+        {
+            result = PipelineResult::InvalidConfiguration;
+            Logger::error("[TrackerChangeService] invalid tracker policy: " + std::string(error.what()));
         }
         catch(const std::exception &error)
         {

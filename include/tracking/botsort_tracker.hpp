@@ -21,6 +21,7 @@ public:
     TrackingStep track_with_features(const std::vector<Detection>& detections,
         const std::vector<std::vector<float>>& features);
     void reset() override;
+    void set_confirmation_frames(int frames) override { config_.confirmation_frames = frames; }
     void set_camera_motion(const CameraMotion& motion) override { motion_ = motion; }
     void set_image_size(float width, float height) override { width_ = width; height_ = height; }
 

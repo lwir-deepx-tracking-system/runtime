@@ -1,5 +1,7 @@
 #include "control/tracking_command_handler.hpp"
 
+#include <cstring>
+
 namespace {
 GuiCommand ack(const GuiCommand& c, GuiResult result)
 {
@@ -11,6 +13,16 @@ GuiResult result_code(ControlResult r)
     if (r == ControlResult::Ok) return GuiResult::Ok;
     if (r == ControlResult::InvalidTarget) return GuiResult::InvalidTarget;
     return GuiResult::NotReady;
+}
+void append_float(std::vector<std::uint8_t>& out, float value)
+{
+    std::uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value));
+    std::memcpy(&bits, &value, sizeof(bits));
+    out.push_back(std::uint8_t(bits >> 24));
+    out.push_back(std::uint8_t(bits >> 16));
+    out.push_back(std::uint8_t(bits >> 8));
+    out.push_back(std::uint8_t(bits));
 }
 }
 GuiCommand TrackingCommandHandler::initial_state() const
@@ -53,6 +65,13 @@ bool TrackingCommandHandler::handle(const GuiCommand& c, std::vector<GuiCommand>
         // PC clears keys for HOME. Release manual motion as well as AUTO.
         executor_.halt();
         replies.push_back(ack(c, GuiResult::NotReady));
+    } else if (c.category == GuiCategory::Gimbal &&
+               c.command == static_cast<std::uint8_t>(GuiGimbalCommand::Position) && c.payload.empty()) {
+        const auto state = executor_.snapshot();
+        GuiCommand reply{GuiCategory::Gimbal, 0x84, {std::uint8_t(state.position_valid)}};
+        append_float(reply.payload, static_cast<float>(state.pan_estimate));
+        append_float(reply.payload, static_cast<float>(state.tilt_estimate));
+        replies.push_back(std::move(reply));
     } else return false;
     report(replies);
     return true;

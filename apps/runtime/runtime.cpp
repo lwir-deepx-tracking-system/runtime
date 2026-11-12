@@ -120,9 +120,13 @@ public:
     // Pipeline Worker 실행
     std::uint32_t model_count() const override { return config_.detection_catalog.size(); }
     std::uint32_t tracker_count() const override { return config_.tracking_catalog.size(); }
+    PipelineCatalogItem model_info(std::uint32_t id) const override;
+    PipelineCatalogItem tracker_info(std::uint32_t id) const override;
+    PipelineTrackerPolicy tracker_policy() const override;
     PipelineChangeTicket request_model_change(std::uint32_t model_id) override;
     // 트래커 변경 서비스에 요청을 위임한다.
     PipelineChangeTicket request_tracker_change(std::uint32_t tracker_id) override;
+    PipelineChangeTicket request_policy_change(const TrackerPolicyUpdate& policy) override;
     void run();
 };
 
@@ -274,6 +278,44 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
 }
 
 // GUI 수신 스레드에서 요청을 접수하고 모델 매니저의 완료 결과와 future를 연결한다.
+PipelineCatalogItem RuntimeApplication::model_info(std::uint32_t id) const
+{
+    const auto it = config_.detection_catalog.find(static_cast<int>(id));
+    if (it == config_.detection_catalog.end()) return {};
+    const auto& entry = it->second;
+    return {id, entry.display_name.empty() ? entry.model.name : entry.display_name,
+            std::filesystem::is_regular_file(entry.model.path),
+            model_manager_thread_ && model_manager_thread_->active_model_id() == static_cast<int>(id)};
+}
+
+PipelineCatalogItem RuntimeApplication::tracker_info(std::uint32_t id) const
+{
+    const auto it = config_.tracking_catalog.find(static_cast<int>(id));
+    if (it == config_.tracking_catalog.end()) return {};
+    const auto& entry = it->second;
+    const bool needs_reid = entry.config.post_reid || entry.config.type == TrackerType::BotSort;
+    const bool available = !needs_reid || std::filesystem::is_regular_file(config_.reid.model.path);
+    return {id, entry.display_name.empty() ? "Tracker " + std::to_string(id) : entry.display_name,
+            available, tracker_manager_ && tracker_manager_->active_id() == static_cast<int>(id)};
+}
+
+PipelineTrackerPolicy RuntimeApplication::tracker_policy() const
+{
+    if (!tracker_manager_) return {};
+    const auto [active, c] = tracker_manager_->policy_snapshot();
+    const auto id = active.id;
+    if (id <= 0) return {};
+    const auto effective_frames = active.tracker ? active.tracker->current_confirmation_frames() : 0;
+    return {static_cast<std::uint32_t>(id),
+            static_cast<std::uint32_t>(c.frame.warmth_min),
+            static_cast<std::uint32_t>(c.frame.warmth_max),
+            c.edge_birth_threshold,
+            static_cast<std::uint32_t>(effective_frames > 0 ? effective_frames : c.confirmation_frames),
+            static_cast<std::uint32_t>(c.frame.confirmation_ms),
+            (c.class_gate ? 1u : 0u) | (c.frame.gmc ? 2u : 0u) |
+                (c.post_reid ? 4u : 0u)};
+}
+
 PipelineChangeTicket RuntimeApplication::request_model_change(std::uint32_t model_id)
 {
     if (model_id == 0 || model_id > model_count()) return {GuiPipelineResult::InvalidId, {}};
@@ -309,6 +351,13 @@ PipelineChangeTicket RuntimeApplication::request_tracker_change(std::uint32_t tr
     if (!pipeline_ready_.load() || runtime_control_.stop_requested.load())
         return {PipelineResult::NotReady, {}};
     return tracker_changes_->request_change(tracker_id);
+}
+
+PipelineChangeTicket RuntimeApplication::request_policy_change(const TrackerPolicyUpdate& policy)
+{
+    if (!pipeline_ready_.load() || runtime_control_.stop_requested.load())
+        return {PipelineResult::NotReady, {}};
+    return tracker_changes_->request_policy_change(policy);
 }
 
 void RuntimeApplication::run()

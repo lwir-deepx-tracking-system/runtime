@@ -100,6 +100,7 @@ public:
 
     // ByteTrack 내부 상태를 초기화한다.
     void reset() override;
+    void set_confirmation_frames(int frames) override { config_.confirmation_frames = frames; }
 
     // 다음 track() 호출에 적용할 카메라 움직임(직전 프레임 → 현재 프레임)을 지정한다.
     // track()이 끝나면 지워지므로 프레임마다 다시 지정한다. 호출하지 않으면 보정하지 않는다.

@@ -16,6 +16,7 @@ class TrackerChangeService
     struct Request
     {
         int                          id;
+        std::optional<TrackerPolicyUpdate> policy;
         std::promise<PipelineResult> completion;
     };
     TrackerManager         &manager_;
@@ -36,6 +37,7 @@ class TrackerChangeService
     void start();
     // 접수와 완료를 분리하며 동시에 한 건만 허용한다.
     PipelineChangeTicket request_change(std::uint32_t id);
+    PipelineChangeTicket request_policy_change(const TrackerPolicyUpdate& policy);
     // 신규·미실행 요청은 NotReady로 종료하고 이미 실행 중인 요청은 완료시킨다.
     void close();
     // close 후 실행 중인 생성·교체가 끝날 때까지 기다린다.

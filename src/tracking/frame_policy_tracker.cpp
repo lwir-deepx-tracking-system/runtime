@@ -25,19 +25,65 @@ double warmth_percentile(const cv::Mat& raw, const cv::Rect& roi)
     return lower+(pos-lo)*(values[hi]-lower);
 }
 
-FramePolicyTracker::FramePolicyTracker(std::unique_ptr<Tracker> base, TrackingFrameConfig config)
-    : base_(std::move(base)), config_(config)
+FramePolicyTracker::FramePolicyTracker(std::unique_ptr<Tracker> base, TrackingFrameConfig config,
+                                       int base_confirmation_frames)
+    : base_(std::move(base)), config_(config), base_confirmation_frames_(base_confirmation_frames)
 {
-    if (!base_) throw std::invalid_argument("Frame policy requires a tracker");
+    if (!base_ || base_confirmation_frames_ < 1)
+        throw std::invalid_argument("Frame policy requires a tracker and confirmation base");
+    effective_confirmation_frames_.store(base_confirmation_frames_);
+    if (config_.confirmation_ms > 0) {
+        time_confirmation_frames_ = std::max(1, (config_.confirmation_ms * 25 + 500) / 1000);
+        const auto frames = std::max(base_confirmation_frames_, time_confirmation_frames_);
+        base_->set_confirmation_frames(frames);
+        effective_confirmation_frames_.store(frames);
+    }
 }
 
-void FramePolicyTracker::reset() { base_->reset();previous_.release();points_.clear(); }
+void FramePolicyTracker::reset() {
+    base_->reset();previous_.release();points_.clear();
+    confirmation_intervals_.clear();last_confirmation_frame_={};
+    if (config_.confirmation_ms > 0) {
+        time_confirmation_frames_ = std::max(1, (config_.confirmation_ms * 25 + 500) / 1000);
+        const auto frames = std::max(base_confirmation_frames_, time_confirmation_frames_);
+        base_->set_confirmation_frames(frames);
+        effective_confirmation_frames_.store(frames);
+    }
+}
 
 std::vector<Track> FramePolicyTracker::track(const std::vector<Detection>& detections)
 {
-    if (config_.gmc || config_.warmth_min || config_.warmth_max)
+    if (config_.gmc || config_.warmth_min || config_.warmth_max || config_.confirmation_ms)
         throw std::logic_error("Configured image policies require Tracker::process(frame)");
     return base_->track(detections);
+}
+
+void FramePolicyTracker::update_confirmation(std::chrono::steady_clock::time_point captured_at)
+{
+    if (config_.confirmation_ms <= 0) return;
+    if (captured_at == std::chrono::steady_clock::time_point{})
+        captured_at = std::chrono::steady_clock::now();
+    if (last_confirmation_frame_ != std::chrono::steady_clock::time_point{}) {
+        const double seconds = std::chrono::duration<double>(captured_at-last_confirmation_frame_).count();
+        if (seconds > 0 && seconds <= 1.0) {
+            confirmation_intervals_.push_back(seconds);
+            if (confirmation_intervals_.size() > 50) confirmation_intervals_.pop_front();
+        }
+    }
+    last_confirmation_frame_ = captured_at;
+    if (confirmation_intervals_.size() < 50) return;
+    std::vector<double> sorted(confirmation_intervals_.begin(),confirmation_intervals_.end());
+    std::sort(sorted.begin(),sorted.end());
+    const double median = (sorted[24]+sorted[25])/2.0;
+    const double wanted = config_.confirmation_ms/(1000.0*median);
+    // Match the Python rule's 0.15-frame hysteresis around normal rounding.
+    if (wanted > time_confirmation_frames_ + 0.65 ||
+        wanted < time_confirmation_frames_ - 0.65) {
+        time_confirmation_frames_ = std::max(1,static_cast<int>(wanted+0.5));
+        const auto frames = std::max(base_confirmation_frames_,time_confirmation_frames_);
+        base_->set_confirmation_frames(frames);
+        effective_confirmation_frames_.store(frames);
+    }
 }
 
 CameraMotion FramePolicyTracker::estimate(const cv::Mat& raw)
@@ -75,6 +121,7 @@ TrackingStep FramePolicyTracker::process(const DetectionResult& input)
         throw std::invalid_argument("Tracking image policies require a CV_16UC1 frame");
     const auto started=std::chrono::steady_clock::now();
     const auto& image=input.frame->image;
+    update_confirmation(input.frame->metadata.captured_at);
     base_->set_image_size(image.cols,image.rows);
     if (config_.gmc) base_->set_camera_motion(estimate(image));
     DetectionResult filtered=input; // Shares FrameContext; only detection descriptors are copied.

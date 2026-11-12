@@ -194,6 +194,7 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
     c.frame.person_class_id = optional_value<int>(node,"person_class_id","tracking",0);
     c.frame.warmth_min = optional_value<int>(node,"warmth_min","tracking",0);
     c.frame.warmth_max = optional_value<int>(node,"warmth_max","tracking",0);
+    c.frame.confirmation_ms = optional_value<int>(node,"confirmation_ms","tracking",0);
     c.frame.gmc = optional_value<bool>(node,"gmc","tracking",false);
     c.frame.gmc_downscale = optional_value<int>(node,"gmc_downscale","tracking",2);
     c.frame.gmc_max_corners = optional_value<int>(node,"gmc_max_corners","tracking",300);
@@ -202,6 +203,7 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
        !std::isfinite(c.edge_birth_threshold) || c.edge_birth_threshold<0 || c.edge_birth_threshold>1 ||
        !std::isfinite(c.edge_margin_px) || c.edge_margin_px<0 ||
        c.frame.warmth_min<0 || c.frame.warmth_min>65535 || c.frame.warmth_max<0 || c.frame.warmth_max>65535 ||
+       c.frame.confirmation_ms<0 || c.frame.confirmation_ms>1000 ||
        (c.frame.warmth_max>0 && c.frame.warmth_min>c.frame.warmth_max) ||
        c.frame.gmc_downscale<1 || c.frame.gmc_downscale>16 || c.frame.gmc_max_corners<5 || c.frame.gmc_max_corners>10000 ||
        !std::isfinite(c.frame.gmc_min_distance) || c.frame.gmc_min_distance<1)
@@ -727,6 +729,7 @@ std::map<int, TrackingCatalogEntry> config_parser::load_tracking_catalog(
     {
         TrackingCatalogEntry entry;
         entry.id = required<int>(item, "id", "tracking_catalog");
+        entry.display_name = optional_value<std::string>(item, "name", "tracking_catalog", "");
         entry.config_path = required_string(item, "config", "tracking_catalog");
         if (entry.id <= 0 || entry.config_path.empty())
             throw std::runtime_error("tracking_catalog entries need a positive id and config path");
@@ -781,6 +784,7 @@ RuntimeConfig load_runtime_config(const std::string& path)
         {
             ModelCatalogEntry entry;
             entry.id = item["id"].as<int>();
+            entry.display_name = optional_value<std::string>(item, "name", "detection_catalog", "");
             entry.config_path = config_parser::required_string(
                 item, "config", "detection_catalog");
             if (entry.id <= 0 || entry.config_path.empty())

@@ -8,7 +8,8 @@ connects AUTO(ID) and keyboard MOVE to one Waveshare Serial executor, independen
 of tracking frame arrival for manual motion and watchdog checks. The default
 `deferred` handler remains communication-only; HOME completion is unimplemented.
 The wire contract has no version field or YAML protocol selector.
-The PC repository is not modified by this change.
+The PC Python LAN client uses this contract; the existing Qt client remains in
+the PC repository.
 
 ## Configuration and responsibilities
 
@@ -121,6 +122,7 @@ the client; the listener remains available for reconnection.
 | Mode (2) | MANUAL (2) | empty | ACK OK, already Manual with no target |
 | Gimbal (3) | MOVE (1) | signed x,y bytes (-1..1) | No operation; no ACK per PC contract |
 | Gimbal (3) | HOME (3) | empty | ACK NOT_READY |
+| Gimbal (3) | POSITION (4) | empty | Gimbal (3), `0x84`: valid:u8, pan:f32, tilt:f32 (big endian, display estimate 0..100 %) |
 
 On every connection the deferred handler sends STATUS (System command 3):
 `Manual / None / Idle / error 0 / selected ID 0`. No tracking or motion is active.
@@ -147,8 +149,8 @@ watchdog.
 This runtime adds category **Pipeline (4)** to the existing 8-byte header.
 PC software must implement this extension; older PC applications remain usable
 with the existing commands. All integers below are unsigned and big endian.
-Only counts and switch results are sent; no names, paths, model lists, or tracker
-configuration records are transmitted. AppConfig requires both catalogs to use
+Per-item names, installed-file status and active IDs are also transmitted;
+model paths and tracker configuration records stay on the board. AppConfig requires both catalogs to use
 consecutive IDs `1..count`. Request IDs retain all 32 bits, including zero.
 
 | Direction | Command | Payload |
@@ -157,10 +159,42 @@ consecutive IDs `1..count`. Request IDs retain all 32 bits, including zero.
 | PC → board | Tracker count `0x02` | request_id:u32 (4 bytes) |
 | PC → board | Change model `0x03` | request_id:u32, model_id:u32 (8 bytes) |
 | PC → board | Change tracker `0x04` | request_id:u32, tracker_id:u32 (8 bytes) |
+| PC → board | Model info `0x05` | request_id:u32, model_id:u32 (8 bytes) |
+| PC → board | Tracker info `0x06` | request_id:u32, tracker_id:u32 (8 bytes) |
+| PC → board | Active tracker policy `0x07` | request_id:u32 (4 bytes) |
+| PC → board | Change active tracker policy `0x08` | request_id:u32, field_mask:u32, warmth_min:u32, warmth_max:u32, edge_birth:f32, confirmation_ms:u32, flags:u32 (28 bytes) |
 | Board → PC | Model count `0x81` | request_id:u32, count:u32 (8 bytes) |
 | Board → PC | Tracker count `0x82` | request_id:u32, count:u32 (8 bytes) |
 | Board → PC | Model result `0x83` | request_id:u32, phase:u8, result:u8 (6 bytes) |
 | Board → PC | Tracker result `0x84` | request_id:u32, phase:u8, result:u8 (6 bytes) |
+| Board → PC | Model info `0x85` | request_id:u32, model_id:u32, flags:u32, UTF-8 name[64] (76 bytes) |
+| Board → PC | Tracker info `0x86` | request_id:u32, tracker_id:u32, flags:u32, UTF-8 name[64] (76 bytes) |
+| Board → PC | Active tracker policy `0x87` | request_id:u32, tracker_id:u32, warmth_min:u32, warmth_max:u32, edge_birth:f32, confirmation_frames:u32, confirmation_ms:u32, flags:u32 (32 bytes) |
+| Board → PC | Policy change result `0x88` | request_id:u32, phase:u8, result:u8 (6 bytes) |
+
+Info flags bit 0 means the referenced DXNN file is installed; bit 1 means the ID
+is active. Names are NUL-terminated within 64 bytes, with zero padding. An
+unknown catalog ID returns ID 0 and an empty name. The installed bit does not
+claim DXRT load or inference success; a change result confirms activation.
+Policy flags are bit 0 class gate, bit 1 GMC, and bit 2 post-tracking ReID.
+The policy reply is read-only and describes the active tracker's YAML settings,
+except `confirmation_frames`, which is the currently effective count after
+`confirmation_ms` adapts to the observed frame rate;
+tracker ID 0 and zeroed fields mean no active tracker. It does not report
+the measured frame rate or imply that filters can be changed by this command.
+An older Runtime may reject `0x07` and close the connection.
+
+For `0x08`, field mask bits 0..5 select warmth minimum, warmth maximum, edge
+birth, confirmation time, GMC, and class gate respectively. Flag bits 0 and 1
+carry the requested GMC and class gate values. Unselected fields are ignored.
+The mask must be nonzero and all values use the same ranges as the YAML loader.
+Result `7=InvalidConfiguration` reports a rejected mask or value. A successful
+request creates a replacement tracker through `TrackerChangeService` and
+`TrackerManager`, increments the epoch, and resets track/Gallery state. Candidate
+creation failure keeps the previous tracker and policy. The configured YAML
+catalog entry is unchanged; changing to another tracker or restarting Runtime
+returns to that entry's YAML policy. The accepted/completed response sequence
+matches model and tracker changes. An older Runtime may reject `0x08`.
 
 Phase is `1=Accepted`, `2=Completed`. Results are `0=OK`, `1=InvalidId`,
 `2=Busy`, `3=CreationFailed`, `4=Restored` (previous model),

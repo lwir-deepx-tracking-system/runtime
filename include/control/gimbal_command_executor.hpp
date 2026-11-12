@@ -7,6 +7,7 @@
 #include <thread>
 #include "control/auto_tracking_controller.hpp"
 #include "control/gimbal_device.hpp"
+#include "control/gimbal_position_estimate.hpp"
 #include "pipeline/runtime_control.hpp"
 
 enum class ControlResult { Ok, InvalidTarget, NotReady };
@@ -17,6 +18,10 @@ struct ControlSnapshot {
     bool error = false;
     std::uint32_t selected_id = 0;
     std::uint64_t command_generation = 0;
+    // Command-based display estimate; valid only while a fresh live frame exists.
+    bool position_valid = false;
+    double pan_estimate = 50.0;
+    double tilt_estimate = 50.0;
 };
 
 // One worker owns device I/O and every mutable control decision. GUI requests
@@ -27,6 +32,7 @@ class GimbalCommandExecutor {
     RuntimeControl& runtime_;
     std::unique_ptr<IGimbalDevice> device_;
     AutoTrackingController controller_;
+    GimbalPositionEstimate position_estimate_;
     std::mutex mutex_;
     std::condition_variable wake_;
     std::deque<std::packaged_task<void()>> requests_;

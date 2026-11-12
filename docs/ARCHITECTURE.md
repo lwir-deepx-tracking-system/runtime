@@ -97,8 +97,11 @@ GMC history는 Tracker reset/교체 시 함께 초기화한다.
 현재 `config/runtime.yaml`은 H.264/RTP 영상 UDP 5000, Tracking Metadata
 UDP 5001, 명령·응답 TCP 5002를 설정한다. 프로토콜의 실제 바이트 계약은
 [`pc_communication.md`](pc_communication.md)에 있다. Python HTTP/MJPEG
-서버는 현재 Runtime 경로에 없다. PC Qt 앱 저장소는 인접 `pc-application`에 있으며 분석만 수행했다.
-PC 측 실제 연결·표시 검증 및 UI 확장은 아직 진행하지 않았다.
+서버는 현재 Runtime 경로에 없다. PC Qt 앱 저장소는 인접 `pc-application`에 있으며
+`feat/python-runtime-integration`에서 기존 TCP Tracker 변경과 HOME 버튼이
+연결됐다. PC는 TrackerCount로 ID 개수만 조회하며, 현재 프로토콜은 이름과
+활성 ID를 제공하지 않아 접속 직후 현재 Tracker를 Unknown으로 표시한다.
+실제 PC↔Orange Pi LAN 연결·표시 검증은 아직 수행하지 않았다.
 
 ## 측정과 검증 경계
 
@@ -129,3 +132,45 @@ Runtime/Benchmark는 `path_base: ..`, 하위 모델 YAML은 `path_base: ../..`�
 외부의 과거 YAML이 `path_base`를 생략하면 이전 CWD 기준 의미를 유지한다.
 설정 파일을 다른 위치에 복사할 때 base도 명시적으로 조정해야 한다.
 측정 결과 및 데이터셋 경로의 기존 해석 방식은 이번 변경 대상이 아니다.
+
+## 단일 LAN 호스트 GUI와 카탈로그 정보 (2026-11-12)
+
+기존 UDP 영상 5000·메타데이터 5001과 TCP 명령 5002를 유지한다. Qt GUI는
+직접 LAN으로 연결된 한 호스트 PC에서 실행한다. Python HTTP/MJPEG 서버를
+추가하지 않는다. TCP Pipeline 카테고리에 ModelInfo/TrackerInfo 요청 5/6,
+응답 0x85/0x86을 추가했다. Runtime YAML의 표시 이름, DXNN 파일 설치 여부,
+Manager의 현재 ID를 전달한다. 설치 여부는 DXRT 추론 성공과 구분한다.
+기존 명령 1..4, 스레드·Queue와 모델·Tracker 변경 정책은 그대로다.
+바이트 계약은 [`pc_communication.md`](pc_communication.md)에 기록한다.
+
+## 원본 Python 화면과 추가 Track 확인 정책 (2026-11-12)
+
+사용자 요청에 따라 최종 PC 화면은 `model-bank/tracking_server/page/`의
+HTML/CSS/JS 디자인·동작을 기준으로 한다. 이전 Qt 위젯 재구현은 최종 화면
+계약이 아니다. 화면의 HTTP 호출과 `/stream` 입력은 PC 데스크톱 프로세스의
+LAN 브리지로 대체하며, Runtime에는 Python 웹서버를 두지 않는다. 현재
+PC 브리지는 아직 구현되지 않았다. 기능별 이식 경계는
+[`MODEL_BANK_DELTA_20261112.md`](MODEL_BANK_DELTA_20261112.md)에 기록한다.
+
+선택형 `confirmation_ms`는 `AppConfig`가 0~1000 ms로 검증한다. 값이 0이면
+기존 `confirmation_frames` 정책을 그대로 쓴다. 켜진 Tracker는 Factory가
+`FramePolicyTracker`로 감싸며, 이 객체가 처리 프레임의 촬영 시각 간격
+최근 50개의 중앙값으로 FPS를 계산한다. 간격 1초 초과는 끊김으로 보고
+제외한다. 시작은 25 FPS 기준이고, 0.15장 hysteresis와 기존
+`confirmation_frames` 하한을 적용한다. 공통 `set_confirmation_frames()`가
+ByteTrack·BoT-SORT와 Post-ReID 내부 Tracker에 값을 전달한다.
+Tracker reset/교체 시 시간 창도 초기화된다. 기본 Runtime Tracker에는
+이 옵션을 설정하지 않았고 Python 참고 필터 프리셋에서만 130 ms를 켰다.
+
+Pipeline TCP 명령 `0x07`은 활성 Tracker의 YAML 정책을 읽기 전용으로
+반환한다. 모델·Tracker 변경에는 기존 Manager와 완료 응답 경로를 사용한다.
+`0x08` 정책 변경은 `TrackerChangeService`가 후보 Tracker를 생성한 뒤
+`TrackerManager`에 commit한다. 성공 시 기존 Track/Kalman/Gallery는
+초기화되고 epoch가 증가한다. 실패 시 이전 인스턴스와 YAML 설정을 유지한다.
+설정값은 현재 실행의 활성 Tracker에만 적용되며 다른 Tracker 선택 또는
+Runtime 재시작 시 카탈로그 YAML로 돌아간다. `0x07`의 확인 장수는
+현재 프레임 속도 보정을 거친 값을 원자적으로 읽는다.
+PC의 Python 데스크톱 프로세스는 원본 model-bank 페이지를 WebKit에 로드하고
+기존 UDP H.264/RTP·메타데이터 및 TCP 명령에 직접 연결한다. 화면의 아직
+지원하지 않는 조작은 실패 응답을 보낸다. 현재 영상 오버레이는 PC에 도착한
+최신 메타데이터를 쓰며 RTP timestamp에 의한 프레임 동기화는 남아 있다.
