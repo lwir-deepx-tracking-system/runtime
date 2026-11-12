@@ -31,10 +31,17 @@ int main()
         config.reid.inference.buffer_count != 0 ||
         config.reid_options.max_crops_per_frame != 2 ||
         config.tracking.type != TrackerType::ByteTrack ||
-        config.tracking.track_threshold != 0.5F ||
+        config.tracking.track_threshold != 0.25F ||
         config.tracking.match_threshold != 0.8F ||
-        config.tracking_catalog.at(1).config_path !=
-            std::filesystem::absolute("config/tracking/bytetrack.yaml").lexically_normal().string())
+        !config.tracking.post_reid ||
+        !config.tracking.frame.gmc ||
+        !config.tracking.class_gate ||
+        config.tracking_catalog.size() != 4 ||
+        config.sequence.start != "seq_004" ||
+        config.sequence.end != "seq_004" ||
+        config.path.output_root != "/mnt/lwir_data/results/benchmark" ||
+        config.tracking_catalog.at(4).config_path !=
+            std::filesystem::absolute("config/tracking/bytetrack_filtered.yaml").lexically_normal().string())
         return 1;
 
     const auto root = config_parser::load_yaml("config/benchmark.yaml");

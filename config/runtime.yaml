@@ -40,7 +40,7 @@ reid:
   min_crop_height: 32
   max_crops_per_frame: 2
   inference:
-    # runtime ReID 스레드는 후속 작업이며, 설정값은 미리 검증한다.
+    # Tracker가 선택되면 해당 구성 객체가 ReID 추론을 수행한다.
     max_inflight: 1
     buffer_count: 0
     use_ort: false
@@ -68,6 +68,12 @@ tracking_catalog:
     config: config/tracking/botsort.yaml
   - id: 3
     config: config/tracking/bytetrack_post_reid.yaml
+  - id: 4
+    config: config/tracking/bytetrack_filtered.yaml
+  - id: 5
+    config: config/tracking/ocsort.yaml
+  - id: 6
+    config: config/tracking/sort.yaml
 
 
 # ============================================================

@@ -46,7 +46,8 @@ reid:
 # ============================================================
 
 tracking:
-  id: 1
+  # 이식된 Class/Warmth/Edge/GMC + ByteTrack 사후 ReID 통합 정책.
+  id: 4
 
 tracking_catalog:
   - id: 1
@@ -55,6 +56,8 @@ tracking_catalog:
     config: config/tracking/botsort.yaml
   - id: 3
     config: config/tracking/bytetrack_post_reid.yaml
+  - id: 4
+    config: config/tracking/bytetrack_filtered.yaml
 
 
 # ============================================================
@@ -67,8 +70,8 @@ sequence:
   range_enabled: true
 
   # 숫자 순서와 문자열 정렬 순서가 같도록 seq_001 형식의 zero-padding을 사용한다.
-  start: seq_001
-  end: seq_001
+  start: seq_004
+  end: seq_004
 
 
 # ============================================================

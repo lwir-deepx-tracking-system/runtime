@@ -124,7 +124,12 @@ Detection 전체, Tracking, ReID 전체, ReID crop 수, Matching, 프레임 전�
 제출 직전부터 Matching 완료까지의 실제 경과 시간입니다. 이미지 읽기와 결과 파일 쓰기
 시간은 제외합니다. 터미널과 `timing/<sequence>_profiler_summary.txt`의
 `FRAME STAGES`에는 각 단계의 평균과 P95가 표시됩니다. ReID를 실행하지 않은 프레임도
-ReID 시간 0 ms와 crop 수 0개로 집계합니다.
+ReID 시간 0 ms와 crop 수 0개로 집계합니다. 기본 `config/benchmark.yaml`은
+`seq_004`에서 이식된 Class/Warmth/Edge/GMC 및 ByteTrack 사후 ReID 정책을
+검증합니다. 기존 출력 방식대로 터미널에 DXRT profiler 및 단계별 평균/P95를
+표시하고, `path.output_root/<model>_<tracker>/<실행시각>/timing/`에
+`seq_004.csv`와 `seq_004_profiler_summary.txt`를 저장합니다. 실행 시각별
+디렉터리에는 Detection·Track·ReID 결과와 당시 YAML 사본도 함께 저장됩니다.
 
 `config/benchmark.yaml`의 `sequence.range_enabled`가 `false`이면 모든 sequence를 처리합니다.
 `true`이면 `sequence.start`부터 `sequence.end`까지 양끝을 포함해 처리합니다. 숫자 순서와

@@ -22,7 +22,8 @@ int main()
     std::filesystem::current_path(original_cwd);
     if (relocated.detection.model.path!=config.detection.model.path ||
         relocated.reid.model.path!=config.reid.model.path ||
-        relocated.tracking_catalog.at(2).config_path!=config.tracking_catalog.at(2).config_path)
+        relocated.tracking_catalog.at(2).config_path!=config.tracking_catalog.at(2).config_path ||
+        relocated.tracking_catalog.at(6).config_path!=config.tracking_catalog.at(6).config_path)
         return 80;
     if (config.detection.model.path!=(original_cwd/"models/yolov8-n_640x640.dxnn").string() ||
         config.reid.model.path!=(original_cwd/"../model-bank/final_tracker/tracker/models/RVGGA0_REID2C256.dxnn").lexically_normal().string())
@@ -53,11 +54,18 @@ int main()
         config.tracking.kalman_format != "xywh" || config.tracking.lost_output_frames != 0 ||
         config.tracking.oru || config.tracking.ocm_weight != 0.0F ||
         config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
-        config.tracking_catalog.size() != 3 ||
+        config.tracking_catalog.size() != 6 ||
         config.tracking_catalog.at(1).config_path !=
             std::filesystem::absolute("config/tracking/bytetrack.yaml").lexically_normal().string() ||
         config.tracking_catalog.at(2).config.type != TrackerType::BotSort ||
         !config.tracking_catalog.at(3).config.post_reid ||
+        !config.tracking_catalog.at(4).config.post_reid ||
+        !config.tracking_catalog.at(4).config.class_gate ||
+        !config.tracking_catalog.at(4).config.frame.gmc ||
+        config.tracking_catalog.at(4).config.frame.warmth_min != 45000 ||
+        config.tracking_catalog.at(4).config.edge_birth_threshold != 0.5F ||
+        config.tracking_catalog.at(5).config.type != TrackerType::OcSort ||
+        config.tracking_catalog.at(6).config.type != TrackerType::Sort ||
         config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
         !config.measurement.enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")

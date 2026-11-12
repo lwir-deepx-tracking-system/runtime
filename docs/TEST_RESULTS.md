@@ -120,3 +120,54 @@ ctest --test-dir /tmp/lwir-integration-build --output-on-failure
 `dxrt.service` active, 기존 `gimbal_bridge_v` PID 30416 유지.
 이번 작업에서는 원격 테스트 브랜치 전환·서비스 변경을 하지 않았다.
 이 확인은 실기 테스트 후 복원 검증을 대신하지 않는다.
+
+## 2026-11-11 동일 브랜치의 기존 Runtime checkout에서 Benchmark 검증
+
+- 호스트 브랜치/HEAD: `feat/python-runtime-integration` /
+  `bef2e5471451d3ed298d554cb60d76fc78fdeea4`; 로컬 변경 5개 파일은
+  미커밋 상태. `config/benchmark.yaml`의 기본 Tracker id 4와 `seq_004`를
+  설정 테스트로 확인했다. 호스트 전체 CTest **38/38 통과**.
+- Orange Pi 사전 상태: `/home/orangepi/workspace/runtime`,
+  `feat/runtime-telemetry` / `71eb9c84922723176ca8312a5b87bddff82d2387`,
+  `?? tests/tracking/lwir_to_mot.py`, Python 서버 PID 30367, 짐벌 PID 30416,
+  DXRT 서비스 active. 기존 작업 파일과 프로세스를 변경하지 않았다.
+- 기존 checkout을 호스트와 동일한 `feat/python-runtime-integration` /
+  `bef2e5471451d3ed298d554cb60d76fc78fdeea4`로 `git switch`하고,
+  호스트에서 수정한 설정/CMake/테스트/README를 전송했다.
+  `./scripts/build_benchmark.sh` 빌드 성공;
+  `./build/benchmark/lwir_benchmark config/benchmark.yaml` 종료 **0**.
+  실제 DXNN/DXRT에서 `seq_004` **281프레임** 처리.
+- 표준 결과:
+  `/mnt/lwir_data/results/benchmark/yolo26s_bytetrack/20261111_224205/`.
+  `timing/seq_004.csv` 285줄(헤더·푸터 포함),
+  `timing/seq_004_profiler_summary.txt`, `detections/seq_004.txt`,
+  `tracks/seq_004.txt` 1512줄, 실행 YAML 사본 확인.
+  터미널에도 같은 DXRT profiler와 `FRAME STAGES` 표가 출력됐다.
+
+| 단계 | 평균 ms | P95 ms |
+| --- | ---: | ---: |
+| Detection | 28.556 | 38.906 |
+| Tracking (GMC 포함) | 13.896 | 18.232 |
+| ReID | 5.178 | 6.498 |
+| Matching | 0.032 | 0.043 |
+| Frame total | 48.023 | 60.107 |
+
+- 동시 실행 중인 Python 추적 서버가 NPU를 사용하므로, 이 단일 실행만으로
+  독립 실행 성능이나 알고리즘 우열을 판단하지 않는다.
+- 테스트에서 전송한 네 파일만 원격 브랜치 상태로 복원하고
+  `feat/runtime-telemetry` / `71eb9c84922723176ca8312a5b87bddff82d2387`로
+  전환했다. 미추적 파일, Python/짐벌 프로세스, `dxrt.service active` 확인.
+  이미 만든 재시험용 worktree는 삭제하지 않았다.
+
+## 2026-11-12 Runtime 카탈로그 호스트 검증
+
+- `cmake -S . -B /tmp/lwir-runtime-host -DCMAKE_BUILD_TYPE=Debug
+  -DBUILD_TESTING=ON -DLWIR_BUILD_RUNTIME=ON -DLWIR_BUILD_BENCHMARK=OFF
+  -DLWIR_BUILD_CAPTURE=OFF -DLWIR_ENABLE_I3_CAMERA=OFF
+  -DLWIR_ENABLE_DX_APP=OFF` 성공. `cmake --build /tmp/lwir-runtime-host -j 4`에서
+  `lwir_runtime`과 테스트 대상 빌드 성공.
+- `ctest --test-dir /tmp/lwir-runtime-host --output-on-failure`: 최종
+  **38/38 통과**. 중간 실행에서 기존 `multitracker_config`의 카탈로그 크기 3
+  가정으로 1개 실패했고, 새 ID 4~6 검증으로 갱신한 후 전체 재실행했다.
+- 이 검증은 호스트 CPU/Stub 빌드다. 카메라, 짐벌, DXNN 로딩과 NPU 추론,
+  실제 Runtime 실행은 수행하지 않았다. Orange Pi에서는 빌드만 별도 확인한다.

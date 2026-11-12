@@ -215,3 +215,45 @@ Orange Pi의 기존 작업 트리를 유지하고 격리된 worktree에서 이 S
 성능 개선·재검증이 필요하다. 사후 ReID는 이 시퀀스에서 raw Track과 결과가
 동일해 ID 개선을 주장하지 않는다. Phase 1의 Gate/Judge/Motion 및 실제
 ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았다.
+
+## 2026-11-11 기존 Benchmark 기본 설정 통합 검증
+
+- PC 호스트 `feat/python-runtime-integration` (`bef2e5471451d3ed298d554cb60d76fc78fdeea4`)에서
+  기존 `config/benchmark.yaml`을 Class/Warmth/Edge/GMC + ByteTrack 사후
+  ReID 정책(id 4), `seq_004`로 변경했다. 모델과 결과 root는 기존 값을 유지한다.
+  별도 Benchmark 실행 파일이나 최종 YAML을 추가하지 않았다.
+- 출력 구현은 기존 `apps/benchmark/benchmark.cpp`와 `result_writer.cpp`를 재사용한다.
+  터미널의 DXRT profiler 표와 `FRAME STAGES` 평균/P95, 결과 root의 프레임별
+  timing CSV 및 profiler summary 파일을 Orange Pi에서 실제 확인했다.
+- 호스트 전체 CTest 38/38 통과. Orange Pi의 **기존**
+  `/home/orangepi/workspace/runtime`를 PC와 같은 `feat/python-runtime-integration`
+  브랜치/HEAD로 전환하고, 호스트 수정 파일을 전송해 빌드·Benchmark를 실행했다.
+  `seq_004` 281프레임, 종료 0. 결과:
+  `/mnt/lwir_data/results/benchmark/yolo26s_bytetrack/20261111_224205/`.
+  Detection 28.556 ms, Tracking 13.896 ms, ReID 5.178 ms,
+  Frame total 48.023 ms 평균. 기존 Python 서버가 동시에 NPU를 사용 중이었다.
+- 테스트 후 원래 `feat/runtime-telemetry` /
+  `71eb9c84922723176ca8312a5b87bddff82d2387`로 복원했다.
+  원래 미추적 파일과 Python/짐벌/DXRT 상태는 유지됐다.
+  사용자 재시험용 기존 worktree `/home/orangepi/workspace/runtime-integration-test`는
+  삭제하지 않았고 PC와 같은 브랜치로 전환했다.
+- 이번 변경은 호스트에서 **미커밋·미푸시** 상태다. 테스트에서 검증한 것은
+  기존 통합 소스 커밋과 전송한 YAML/테스트 변경이다. 다음 단계는 남은 Python
+  정책과 Runtime/PC 통합이며, 현재 Benchmark 결과만으로 전체 기능 완료를 주장하지 않는다.
+
+## 2026-11-12 Runtime Tracker 정책 선택 연결
+
+- 현재 호스트 브랜치 `feat/python-runtime-integration`, 시작 HEAD `bef2e547`.
+  기존 미커밋 Benchmark 설정·테스트·문서 변경을 보존하고 Runtime 작업을 이어갔다.
+- `config/runtime.yaml`의 기존 기본 Tracker ID 1을 유지하면서 ID 4
+  `bytetrack_filtered.yaml`, ID 5 `ocsort.yaml`, ID 6 `sort.yaml`을
+  `tracking_catalog`에 추가했다. 기존 `TrackerFactory`/`TrackerManager`/
+  `TrackerChangeService`와 GUI TrackerCount/ChangeTracker 경로가 이를 사용한다.
+  스레드, Queue, 결과 게시 및 ReID 실행 순서는 변경하지 않았다.
+- `tests/app/test_app_config.cpp`와 `tests/tracking/test_multitracker_config.cpp`에서
+  새 ID, 정책, 경로 해석과 기존 기본값을 검증한다. 호스트 CPU Runtime 빌드 성공,
+  CTest **38/38 통과**. 실제 카메라·짐벌 실행은 하지 않았다.
+- 이 단계의 수정 파일: `config/runtime.yaml`, 위 테스트 2개,
+  `docs/ARCHITECTURE.md`, 이 진행 문서, `docs/TEST_RESULTS.md`.
+  Orange Pi에서는 Runtime **빌드만** 확인할 예정이다. 카메라 사용 전에는
+  현재 카메라 소유 프로그램 중지 여부를 사용자와 먼저 조율한다.

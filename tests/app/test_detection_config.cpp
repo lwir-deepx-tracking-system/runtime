@@ -42,8 +42,8 @@ int main()
         config_parser::load_benchmark_sequence_config(
             benchmark_root["sequence"]);
     if (!configured_range.range_enabled ||
-        configured_range.start != "seq_001" ||
-        configured_range.end != "seq_001")
+        configured_range.start != "seq_004" ||
+        configured_range.end != "seq_004")
         return 3;
 
     const YAML::Node selected_range = YAML::Load(

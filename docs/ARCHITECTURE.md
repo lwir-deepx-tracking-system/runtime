@@ -49,7 +49,9 @@ TrackingThread ------------------------TrackingResultPtr-----------------------+
   Manager의 `activate()`를 호출한다.
 
 현재 Runtime 카탈로그는 ID 1 ByteTrack, ID 2 BoT-SORT, ID 3 ByteTrack+
-Post-ReID다. `tracking.id`가 초기 모드를 선택한다. Benchmark의 기존
+Post-ReID, ID 4 필터·GMC + Post-ReID, ID 5 OC-SORT형 설정, ID 6 SORT형
+설정이다. `tracking.id`가 초기 모드를 선택하며 Runtime 기본값은 ID 1이다.
+기존 `TrackerChangeService`가 이 카탈로그의 새 ID도 교체한다. Benchmark의 기존
 `reid.enabled: true`는 ID 1에서도 사후 ReID를 켜는 호환 동작이다.
 세부 설정과 출력 파일 의미는 [`multitracker.md`](multitracker.md)에 있다.
 
