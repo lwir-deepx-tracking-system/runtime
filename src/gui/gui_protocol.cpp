@@ -48,6 +48,8 @@ int payload_size(GuiCategory category, std::uint8_t command)
     case GuiCategory::Gimbal:
         if (command == static_cast<std::uint8_t>(GuiGimbalCommand::Move)) return 2;
         if (command == static_cast<std::uint8_t>(GuiGimbalCommand::Home)) return 0;
+        if (command == static_cast<std::uint8_t>(GuiGimbalCommand::Position)) return 0;
+        if (command == 0x84) return 9;
         break;
     case GuiCategory::Pipeline:
         if (command == 1 || command == 2 || command == 7) return 4;

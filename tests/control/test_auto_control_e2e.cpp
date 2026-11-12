@@ -137,6 +137,13 @@ void tcp_auto_serial() {
     Worker worker(receiver);
     Fd client{connect_to(tcp.port)};
     check(message(client.value).payload == std::vector<std::uint8_t>(8,0), "initial tracking STATUS");
+    send_command(client.value, {GuiCategory::Gimbal,
+        static_cast<std::uint8_t>(GuiGimbalCommand::Position), {}});
+    auto position = response(client.value, [](const GuiCommand& m) {
+        return m.category == GuiCategory::Gimbal && m.command == 0x84;
+    });
+    check(position.payload.size() == 9 && position.payload[0] == 0,
+          "no live frame must hide position estimate");
     send_command(client.value, {GuiCategory::Mode,1,{255,255,255,255}});
     ack_result(client.value,GuiResult::InvalidTarget);
     queue.push(target_frame(1,120)); // above-center target uses the same +Y as manual UP

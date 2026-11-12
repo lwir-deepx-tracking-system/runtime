@@ -464,3 +464,19 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   PC `python_gui/{lan_protocol,desktop_routes,desktop_gui,test_lan_protocol,test_desktop_routes}.py`.
 - 호스트 DXRT 비활성 `lwir_runtime` 빌드 성공, `auto_control` 1/1,
   PC Python LAN·route 14/14 통과. 실제 장비의 위치 표시·방향은 미검증.
+
+### 2026-11-12 Orange Pi 첫 실행과 LAN wire 수정
+
+- 호스트 `08c1c6b`를 보드 기존 Runtime 체크아웃의 같은 브랜치에 적용했다.
+  `scripts/build_runtime.sh`, `scripts/build_benchmark.sh` 성공. 모델 18개 SHA
+  재확인(복사 0). `seq_004` Benchmark 281프레임 정상 완료, 프레임 총 지연
+  평균 49.688 ms/p95 55.213 ms. 결과는 보드
+  `/tmp/lwir-runtime-live-08c1c6b/benchmark-results/`에 분리해 저장했다.
+- 실 Runtime에서 PC UDP 영상 1245패킷·메타데이터 109패킷/5초, TCP 상태·모델
+  11개·Tracker 6개·활성 정책 조회를 확인했다. 신규 짐벌 위치 조회는
+  `gui_protocol.cpp`의 payload 계약 누락으로 TCP 연결이 닫혀 실패했다.
+  보드 Runtime을 멈춘 뒤 원래 `feat/runtime-telemetry` / `71eb9c8`과 기존
+  미추적 파일을 복원했고 테스트 프로세스가 없는 것을 확인했다.
+- 호스트에서 Gimbal 4/0x84의 요청·응답 길이 계약과 실제 TCP 회귀 테스트를
+  추가했다. 관련 테스트 3/3 및 호스트 Runtime 링크 통과. 수정 커밋의
+  보드 재적용·실 GUI 검증은 다음 단계다.
