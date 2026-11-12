@@ -51,10 +51,12 @@ int main()
     
     {
         const TrackingConfig oc = load_tracker_config("config/tracking/ocsort.yaml");
-        if (oc.type != TrackerType::OCSort || oc.ocsort.det_threshold != 0.6F ||
-            oc.ocsort.iou_threshold != 0.3F || oc.ocsort.max_age != 30 ||
-            oc.ocsort.min_hits != 3 || oc.ocsort.delta_t != 3 ||
-            oc.ocsort.inertia != 0.2F || oc.ocsort.use_byte)
+        if (oc.type != TrackerType::OCSort || oc.ocsort.det_threshold != 0.5F ||
+            oc.ocsort.iou_threshold != 0.2F || oc.ocsort.max_age != 30 ||
+            oc.ocsort.min_hits != 1 || oc.ocsort.delta_t != 3 ||
+            oc.ocsort.inertia != 0.2F || !oc.ocsort.use_byte ||
+            oc.ocsort.buffer_scale != 0.0F || oc.ocsort.buffer_max_px != 0.0F ||
+            oc.ocsort.buffer_small_size != 0.0F || oc.ocsort.lost_output_frames != 0)
             return 54;
 
         auto oc_node = YAML::LoadFile("config/tracking/ocsort.yaml")["tracking"];

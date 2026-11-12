@@ -432,6 +432,18 @@ void warp_state(Vec7& x, Mat7& P, const CameraMotion& m)
     P = out;
 }
 
+// Buffered IoU용: 각 변을 폭·높이 × scale만큼 넓힌다 (max_px > 0이면 한 변당 그 px까지만)
+std::array<double, 4> buffered(const double* b, double scale, double max_px)
+{
+    double dw = (b[2] - b[0]) * scale, dh = (b[3] - b[1]) * scale;
+    if (max_px > 0.0)
+    {
+        dw = std::min(dw, max_px);
+        dh = std::min(dh, max_px);
+    }
+    return {b[0] - dw, b[1] - dh, b[2] + dw, b[3] + dh};
+}
+
 }  // namespace
 
 
@@ -441,7 +453,10 @@ OCSortTracker::OCSortTracker(const OCSortConfig& config) : config_(config)
     values << "det_threshold=" << config_.det_threshold << ", iou_threshold=" << config_.iou_threshold
            << ", max_age=" << config_.max_age << ", min_hits=" << config_.min_hits
            << ", delta_t=" << config_.delta_t << ", inertia=" << config_.inertia
-           << ", use_byte=" << (config_.use_byte ? "true" : "false");
+           << ", use_byte=" << (config_.use_byte ? "true" : "false")
+           << ", buffer_scale=" << config_.buffer_scale << ", buffer_max_px=" << config_.buffer_max_px
+           << ", buffer_small_size=" << config_.buffer_small_size
+           << ", lost_output_frames=" << config_.lost_output_frames;
     Logger::info("[Tracking] OCSortTracker 생성 완료");
     Logger::debug("[Tracking] OC-SORT 설정 값: " + values.str());
 }
@@ -719,6 +734,47 @@ std::vector<Track> OCSortTracker::track(const std::vector<Detection>& detections
         }
     }
 
+    // Buffered IoU (공식 구현에 없는 추가 단계): 남은 Track의 예측 박스 ↔ 남은 high 검출을 둘 다 넓혀 매칭한다.
+    // buffer_small_size > 0이면 예측 박스의 짧은 변이 그 이하인 Track만 대상이다.
+    if (config_.buffer_scale > 0.0F && !unmatched_dets.empty() && !unmatched_trks.empty())
+    {
+        std::vector<std::vector<double>> iou_left(unmatched_dets.size(), std::vector<double>(unmatched_trks.size(), 0.0));
+        double best = -1.0;
+        for (size_t j = 0; j < unmatched_trks.size(); ++j)
+        {
+            const auto& tb = trks[unmatched_trks[j]];
+            const double short_side = std::min(tb[2] - tb[0], tb[3] - tb[1]);
+            if (config_.buffer_small_size > 0.0F && short_side > config_.buffer_small_size)
+                continue;
+            const auto bt = buffered(tb.data(), config_.buffer_scale, config_.buffer_max_px);
+            for (size_t i = 0; i < unmatched_dets.size(); ++i)
+            {
+                const auto bd = buffered(dets[unmatched_dets[i]].data(), config_.buffer_scale, config_.buffer_max_px);
+                iou_left[i][j] = iou(bd.data(), bt.data());
+                best = std::max(best, iou_left[i][j]);
+            }
+        }
+        if (best > config_.iou_threshold)
+        {
+            std::vector<std::vector<double>> cost = iou_left;
+            for (auto& row : cost)
+                for (auto& v : row)
+                    v = -v;
+            std::vector<int> removed_d, removed_t;
+            for (const auto& [i, j] : assign_min_cost(cost))
+            {
+                if (iou_left[i][j] < config_.iou_threshold)
+                    continue;
+                const int d = unmatched_dets[i], t = unmatched_trks[j];
+                update(trackers_[t], &dets[d], det_cls[d]);
+                removed_d.push_back(d);
+                removed_t.push_back(t);
+            }
+            unmatched_dets = setdiff(unmatched_dets, removed_d);
+            unmatched_trks = setdiff(unmatched_trks, removed_t);
+        }
+    }
+
     for (int t : unmatched_trks)
         update(trackers_[t], nullptr, trackers_[t].class_id);
 
@@ -727,17 +783,23 @@ std::vector<Track> OCSortTracker::track(const std::vector<Detection>& detections
         trackers_.push_back(create_track(dets[d], det_cls[d]));
 
     // 출력: 이번 프레임에 매칭됐고 연속 매칭이 충분한 Track. 박스는 마지막 관측(없으면 Kalman 상태)
+    //       lost_output_frames > 0이면, 출력된 적 있는 Track은 놓친 뒤 그 프레임 수까지 Kalman 예측 박스로 낸다
     std::vector<Track> out;
     std::vector<OCTrack> alive;
     for (auto& t : trackers_)
     {
-        if (t.time_since_update < 1 && (t.hit_streak >= config_.min_hits || frame_count_ <= config_.min_hits))
+        const bool matched_now =
+            t.time_since_update < 1 && (t.hit_streak >= config_.min_hits || frame_count_ <= config_.min_hits);
+        const bool coasting = !matched_now && config_.lost_output_frames > 0 && t.reported &&
+                              t.time_since_update >= 1 && t.time_since_update <= config_.lost_output_frames;
+        if (matched_now || coasting)
         {
             std::array<double, 4> b;
-            if (t.has_last_observation)
+            if (matched_now && t.has_last_observation)
                 b = {t.last_observation[0], t.last_observation[1], t.last_observation[2], t.last_observation[3]};
             else
                 b = state_box(t.x);
+            t.reported = true;
             Track r;
             r.track_id = t.id + 1;
             r.x = static_cast<float>(b[0]);

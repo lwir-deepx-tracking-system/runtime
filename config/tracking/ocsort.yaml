@@ -1,5 +1,4 @@
 # Runtime과 Benchmark가 공유하는 단독 OC-SORT 추적 설정.
-# 공식 OC-SORT(noahcao/OC_SORT) 구현을 옮긴 것이며, 기본값은 공식 MOT17 실행 인자다.
 tracking:
   type: ocsort
 
@@ -7,6 +6,12 @@ tracking:
   iou_threshold: 0.2   # 매칭으로 인정하는 최소 IoU. ByteTrack의 match_threshold(1 - IoU)와 의미가 반대
   max_age: 30          # 이 프레임 수보다 오래 매칭되지 않은 Track을 지움
   min_hits: 1          # 연속 매칭이 이 횟수 이상인 Track만 출력
-  delta_t: 5           # OCM 방향을 계산할 관측 간격(프레임)
-  inertia: 0.3         # OCM 방향 일치도 가중치
+  delta_t: 3           # OCM 방향을 계산할 관측 간격(프레임)
+  inertia: 0.2         # OCM 방향 일치도 가중치
   use_byte: true      # 0.1 ~ det_threshold 검출로 ByteTrack식 2차 매칭
+
+  # ---- 공식 OC-SORT에 없는 추가 기능 (생략하거나 0이면 꺼짐, 꺼지면 공식 구현과 출력이 같다) ----
+  buffer_scale: 0.0        # Buffered IoU: 남은 Track·검출을 각 변 폭·높이의 이 비율만큼 넓혀 한 번 더 매칭 (0~2)
+  buffer_max_px: 0         # 한 변을 넓히는 최대 px (0: 제한 없음)
+  buffer_small_size: 0     # 예측 박스의 짧은 변이 이 px 이하일 때만 적용 (0: 크기 무관)
+  lost_output_frames: 1    # 놓친 Track을 Kalman 예측 박스로 이 프레임 수까지 더 출력 (0~max_age). 출력 박스는 예측이다

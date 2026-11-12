@@ -21,8 +21,13 @@
 //           박스는 Kalman 추정이 아니라 마지막으로 매칭된 검출 박스다
 //   - 새 Track: 매칭되지 않은 high 검출은 모두 새 Track이 된다 (별도 새 ID 임계값 없음)
 //
-// 공식 구현에 없는 것: 카메라 움직임 보정(CMC). set_camera_motion()을 부르지 않으면 공식 동작과 같다.
-// 부르면 Kalman 상태, ORU 저장 상태, 과거 관측 박스를 모두 현재 화면 좌표로 옮긴다.
+// 공식 구현에 없는 것 (모두 기본 꺼짐. 꺼져 있으면 공식 구현과 출력이 같다)
+//   - 카메라 움직임 보정(CMC): set_camera_motion()을 부르면 Kalman 상태, ORU 저장 상태, 과거 관측 박스를
+//     모두 현재 화면 좌표로 옮긴다.
+//   - Buffered IoU (buffer_scale > 0): OCR 뒤에 남은 Track의 예측 박스와 남은 high 검출을 둘 다 넓혀
+//     한 번 더 매칭한다. 작은 박스에서 예측이 몇 px 빗나가 IoU가 0이 되는 경우를 구제한다.
+//   - 놓친 프레임 출력 (lost_output_frames > 0): 출력된 적 있는 Track이 매칭을 놓치면 그 뒤 이 프레임 수까지
+//     Kalman 예측 박스로 같은 ID를 계속 낸다. 이 박스는 검출이 아니라 예측이다.
 namespace ocsort
 {
 using Vec7 = std::array<double, 7>;
@@ -62,6 +67,8 @@ struct OCTrack
     bool has_last_observation = false;
     Box5 last_observation{-1.0, -1.0, -1.0, -1.0, -1.0};
     std::deque<Observation> observations;  // OCM에 필요한 최근 delta_t 범위만 남긴다
+
+    bool reported = false;  // 한 번이라도 출력됐는지 (놓친 프레임 출력 대상 판단)
 
     bool has_velocity = false;
     double velocity_y = 0.0;  // 단위 방향 벡터 (공식 구현과 같은 (dy, dx) 순서)

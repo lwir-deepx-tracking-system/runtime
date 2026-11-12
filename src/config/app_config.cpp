@@ -152,7 +152,9 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
     {
         // 단독 OC-SORT: ByteTrack 키는 읽지 않는다. 오타를 막기 위해 모르는 키는 오류로 처리한다.
         static const std::set<std::string> known = {"type", "det_threshold", "iou_threshold", "max_age",
-                                                    "min_hits", "delta_t", "inertia", "use_byte"};
+                                                    "min_hits", "delta_t", "inertia", "use_byte",
+                                                    "buffer_scale", "buffer_max_px", "buffer_small_size",
+                                                    "lost_output_frames"};
         for (const auto& kv : node)
         {
             const std::string key = kv.first.as<std::string>();
@@ -241,6 +243,7 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
 }
 
 // ocsort: 섹션. 모든 키가 선택이며 생략하면 공식 OC-SORT 기본값을 쓴다.
+// ocsort: 섹션 또는 tracking.type: ocsort 설정. 모든 키가 선택이며 생략하면 공식 OC-SORT 기본값(추가 기능은 꺼짐)을 쓴다.
 OCSortConfig load_ocsort_config(const YAML::Node& node)
 {
     OCSortConfig c;
@@ -251,6 +254,10 @@ OCSortConfig load_ocsort_config(const YAML::Node& node)
     c.delta_t = optional_value<int>(node, "delta_t", "ocsort", c.delta_t);
     c.inertia = optional_value<float>(node, "inertia", "ocsort", c.inertia);
     c.use_byte = optional_value<bool>(node, "use_byte", "ocsort", c.use_byte);
+    c.buffer_scale = optional_value<float>(node, "buffer_scale", "ocsort", c.buffer_scale);
+    c.buffer_max_px = optional_value<float>(node, "buffer_max_px", "ocsort", c.buffer_max_px);
+    c.buffer_small_size = optional_value<float>(node, "buffer_small_size", "ocsort", c.buffer_small_size);
+    c.lost_output_frames = optional_value<int>(node, "lost_output_frames", "ocsort", c.lost_output_frames);
 
     if (c.det_threshold <= 0.0F || c.det_threshold > 1.0F)
         throw std::runtime_error("ocsort.det_threshold must be in (0, 1]");
@@ -266,6 +273,14 @@ OCSortConfig load_ocsort_config(const YAML::Node& node)
         throw std::runtime_error("ocsort.delta_t must be in [1, 30]");
     if (c.inertia < 0.0F || c.inertia > 1.0F)
         throw std::runtime_error("ocsort.inertia must be in [0, 1]");
+    if (!std::isfinite(c.buffer_scale) || c.buffer_scale < 0.0F || c.buffer_scale > 2.0F)
+        throw std::runtime_error("ocsort.buffer_scale must be in [0, 2]");
+    if (!std::isfinite(c.buffer_max_px) || c.buffer_max_px < 0.0F)
+        throw std::runtime_error("ocsort.buffer_max_px must not be negative");
+    if (!std::isfinite(c.buffer_small_size) || c.buffer_small_size < 0.0F)
+        throw std::runtime_error("ocsort.buffer_small_size must not be negative");
+    if (c.lost_output_frames < 0 || c.lost_output_frames > c.max_age)
+        throw std::runtime_error("ocsort.lost_output_frames must be in [0, max_age]");
     return c;
 }
 

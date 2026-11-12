@@ -41,6 +41,16 @@ struct OCSortConfig {
     float inertia = 0.2F;
     // 0.1 < 점수 <= det_threshold 검출로 ByteTrack식 2차 매칭을 한다 (공식 기본 꺼짐)
     bool use_byte = false;
+    // ---- 공식 OC-SORT에 없는 추가 기능 (모두 기본 꺼짐. 꺼져 있으면 공식 구현과 출력이 같다) ----
+    // Buffered IoU: OCR 뒤에 남은 Track의 예측 박스와 남은 high 검출을 둘 다 넓혀 한 번 더 매칭한다 (0: 끔).
+    // 각 변을 폭·높이 × buffer_scale만큼 넓힌다. 매칭 판단에만 쓰고 출력·Kalman에는 쓰지 않는다.
+    float buffer_scale = 0.0F;
+    // 한 변을 넓히는 최대 px (0: 제한 없음)
+    float buffer_max_px = 0.0F;
+    // 예측 박스의 짧은 변이 이 px 이하인 Track에만 적용 (0: 크기 무관)
+    float buffer_small_size = 0.0F;
+    // 출력된 적 있는 Track이 매칭을 놓치면 이 프레임 수까지 Kalman 예측 박스로 같은 ID를 낸다 (0: 끔)
+    int lost_output_frames = 0;
 };
 
 struct TrackingConfig {
