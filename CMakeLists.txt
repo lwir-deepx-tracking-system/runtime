@@ -391,6 +391,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_runtime_console PRIVATE lwir_app_support)
     add_test(NAME runtime_console COMMAND test_runtime_console)
 
+    add_executable(test_encoder_cpu_monitor tests/app/test_encoder_cpu_monitor.cpp)
+    target_include_directories(test_encoder_cpu_monitor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_encoder_cpu_monitor PRIVATE lwir_runtime_core)
+    add_test(NAME encoder_cpu_monitor COMMAND test_encoder_cpu_monitor)
+
     add_executable(test_benchmark_config
         tests/app/test_benchmark_config.cpp
         apps/benchmark/benchmark.cpp

@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "encoder_cpu_monitor.hpp"
 #include "app/pipeline_console.hpp"
 #include "app/metrics_writer.hpp"
 #include "app/shutdown.hpp"
@@ -73,6 +74,7 @@ private:
     std::string tracker_name_;
     bool measurement_enabled_ = false;
     bool console_enabled_ = false;
+    bool encoder_cpu_enabled_ = false;
     RuntimeControl runtime_control_;
     ActivePipelineSlot active_pipeline_;
     std::mutex model_change_mutex_;
@@ -115,7 +117,8 @@ private:
 
 public:
     // YAML 설정을 읽고 필요한 객체를 생성
-    explicit RuntimeApplication(const std::string& config_path, bool console_enabled = false);
+    explicit RuntimeApplication(const std::string& config_path, bool console_enabled = false,
+        bool encoder_cpu_enabled = false);
     RuntimeApplication(const RuntimeApplication&) = delete;
     RuntimeApplication& operator=(const RuntimeApplication&) = delete;
 
@@ -130,9 +133,14 @@ public:
 
 
 // YAML을 읽고 설정에 맞는 Component들을 생성한다.
-RuntimeApplication::RuntimeApplication(const std::string& config_path, bool console_enabled)
-    : config_(load_runtime_config(config_path)), config_path_(config_path), console_enabled_(console_enabled)
+RuntimeApplication::RuntimeApplication(const std::string& config_path, bool console_enabled,
+    bool encoder_cpu_enabled)
+    : config_(load_runtime_config(config_path)), config_path_(config_path),
+      console_enabled_(console_enabled), encoder_cpu_enabled_(encoder_cpu_enabled)
 {
+    if (encoder_cpu_enabled_ && (!config_.gui.enabled ||
+        config_.gui.video.codec != GuiVideoCodec::H264))
+        throw std::runtime_error("--encoder-cpu requires enabled H.264 GUI video");
     Logger::set_level(config_.logging.level);
     const bool telemetry_enabled = config_.gui.enabled && config_.gui.metadata.enabled &&
         config_.gui.metadata.telemetry_enabled;
@@ -355,6 +363,15 @@ void RuntimeApplication::run()
         std::unique_ptr<PipelineConsole> console;
         if (console_enabled_) console = std::make_unique<PipelineConsole>(*this, std::cout);
 
+        EncoderCpuMonitor encoder_cpu;
+        if (encoder_cpu_enabled_)
+            std::cout << "[EncoderCPU] encoder=" << config_.gui.video.encoder
+                      << " bitrate_kbps=" << config_.gui.video.bitrate_kbps
+                      << " fps=" << config_.gui.video.fps
+                      << " gop=" << config_.gui.video.keyframe_interval
+                      << " rtp_mtu=" << config_.gui.video.rtp_mtu
+                      << " warmup_s=10 window_s=60; waiting for first RTP frame\n";
+
         while (!camera_thread_->finished())
         {
             if (console && !console->poll()) app_shutdown::request_stop();
@@ -381,6 +398,36 @@ void RuntimeApplication::run()
                 break;
             }
 
+            if (encoder_cpu_enabled_)
+            {
+                timespec cpu{};
+                if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &cpu) != 0)
+                    throw std::runtime_error("Cannot read process CPU time");
+                const double wall = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                const auto sample = encoder_cpu.poll(wall,
+                    cpu.tv_sec + cpu.tv_nsec / 1e9, gui_sender_->stats());
+                if (sample)
+                {
+                    // Use one line, independently of the configured log level.
+                    // Capture with tee; no extra writer thread or disk I/O in workers.
+                    std::ostringstream line;
+                    line << std::fixed << std::setprecision(3)
+                         << "[EncoderCPU] encoder=" << config_.gui.video.encoder
+                         << " elapsed_s=" << sample->elapsed_seconds
+                         << " interval_s=" << sample->interval_seconds
+                         << " cpu_percent_one_core=" << sample->cpu_percent_one_core
+                         << " avg_cpu_percent_one_core=" << sample->average_cpu_percent_one_core
+                         << " submitted_fps=" << sample->submitted_fps
+                         << " tx_fps=" << sample->tx_fps
+                         << " avg_tx_fps=" << sample->average_tx_fps
+                         << " submitted=" << sample->submitted
+                         << " encoded=" << sample->encoded
+                         << " final=" << sample->final;
+                    std::cout << line.str() << std::endl;
+                    if (sample->final) encoder_cpu_enabled_ = false;
+                }
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
@@ -436,10 +483,10 @@ void RuntimeApplication::run()
     }
 }
 
-int run_runtime(const std::string& config_path, bool console_enabled)
+int run_runtime(const std::string& config_path, bool console_enabled, bool encoder_cpu_enabled)
 {
     try {
-        RuntimeApplication app(config_path, console_enabled);
+        RuntimeApplication app(config_path, console_enabled, encoder_cpu_enabled);
         app.run();
         return 0;
     } catch (const std::exception& error) {
