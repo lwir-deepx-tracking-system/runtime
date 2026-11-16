@@ -135,6 +135,7 @@ Runtime/Benchmark는 `path_base: ..`, 하위 모델 YAML은 `path_base: ../..`�
 
 ## 단일 LAN 호스트 GUI와 카탈로그 정보 (2026-11-12)
 
+
 기존 UDP 영상 5000·메타데이터 5001과 TCP 명령 5002를 유지한다. Qt GUI는
 직접 LAN으로 연결된 한 호스트 PC에서 실행한다. Python HTTP/MJPEG 서버를
 추가하지 않는다. TCP Pipeline 카테고리에 ModelInfo/TrackerInfo 요청 5/6,
@@ -174,3 +175,12 @@ PC의 Python 데스크톱 프로세스는 원본 model-bank 페이지를 WebKit�
 기존 UDP H.264/RTP·메타데이터 및 TCP 명령에 직접 연결한다. 화면의 아직
 지원하지 않는 조작은 실패 응답을 보낸다. 현재 영상 오버레이는 PC에 도착한
 최신 메타데이터를 쓰며 RTP timestamp에 의한 프레임 동기화는 남아 있다.
+
+## 원본 녹화 경로 (2026-11-16, 호스트 구현)
+
+`CameraThread`가 받은 640×480 `CV_16UC1` 프레임을 Detection 큐에 전달하기 전에
+`RawRecorder`의 최대 120장 큐에도 공유 포인터로 넣는다. 저장 스레드는
+`frames.raw.gz`와 `frames.csv`, `tracks.csv`를 기록한다. 큐가 차면 녹화만 프레임을 놓치고
+그 수를 LAN 상태로 보낸다. Tracker·Detection·Control 결과와 프레임 정책은
+녹화 경로에 의해 바뀌지 않는다. 단일 PC는 기존 TCP 5002의 카테고리 5로
+시작·종료·상태를 제어한다. 재생/파일 전송/측정 세션은 아직 연결되지 않았다.

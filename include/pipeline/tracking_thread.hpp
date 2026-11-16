@@ -13,6 +13,7 @@
 #include "common/threadsafequeue.hpp"
 #include "tracking/tracker_manager.hpp"
 #include "pipeline/runtime_control.hpp"
+class RawRecorder;
 
 // Detection을 Tracking하고 같은 결과를 GUI와 제어 경로에 분기한다.
 class TrackingThread
@@ -29,6 +30,7 @@ private:
     bool started_ = false;
     bool measurement_enabled_;
     IMeasurementSink* measurements_;
+    RawRecorder* recorder_ = nullptr;
     std::atomic<bool> failed_{false};
     std::string error_message_;
     std::vector<StageMetric> metrics_;
@@ -43,7 +45,8 @@ public:
         ThreadSafeQueue<DetectionResult>& input_queue,
         ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
         ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
-        bool measurement_enabled, IMeasurementSink* measurements = nullptr
+        bool measurement_enabled, IMeasurementSink* measurements = nullptr,
+        RawRecorder* recorder = nullptr
     );
 
     void start();

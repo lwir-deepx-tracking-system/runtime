@@ -26,6 +26,14 @@ struct PipelineTrackerPolicy
     std::uint32_t flags = 0;
 };
 
+struct PipelineRecordingStatus {
+    bool active = false;
+    bool failed = false;
+    std::uint32_t session = 0;
+    std::uint64_t frames = 0;
+    std::uint64_t dropped = 0;
+};
+
 // 접수 결과와 실제 전환 완료 future를 분리해 TCP 수신 스레드를 막지 않는다.
 struct PipelineChangeTicket
 {
@@ -43,6 +51,9 @@ class IPipelineRequests
     virtual PipelineCatalogItem model_info(std::uint32_t) const { return {}; }
     virtual PipelineCatalogItem tracker_info(std::uint32_t) const { return {}; }
     virtual PipelineTrackerPolicy tracker_policy() const { return {}; }
+    virtual PipelineRecordingStatus recording_status() const { return {}; }
+    virtual bool start_recording(const std::string&) { return false; }
+    virtual bool stop_recording() { return false; }
     virtual PipelineChangeTicket request_model_change(std::uint32_t id)   = 0;
     virtual PipelineChangeTicket request_tracker_change(std::uint32_t id) = 0;
     virtual PipelineChangeTicket request_policy_change(const TrackerPolicyUpdate&) {

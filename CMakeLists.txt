@@ -67,6 +67,7 @@ if(LWIR_OPENCV_COMPONENTS)
 endif()
 
 find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
 
 if(LWIR_NEEDS_RUNTIME_CORE)
     find_package(PkgConfig REQUIRED)
@@ -225,6 +226,7 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         src/gui/gui_protocol.cpp
         src/gui/gui_sender.cpp
         src/gui/gui_receiver.cpp
+        src/app/raw_recorder.cpp
         src/pipeline/camera_thread.cpp
         src/pipeline/tracker_change_service.cpp
         src/pipeline/model_manager_thread.cpp
@@ -251,6 +253,7 @@ if(LWIR_NEEDS_RUNTIME_CORE)
             Threads::Threads
             PkgConfig::GSTREAMER
             ${OpenCV_LIBS}
+            ZLIB::ZLIB
     )
 endif()
 
@@ -414,6 +417,9 @@ if(BUILD_TESTING)
         tests/app/test_runtime_metrics_writer.cpp)
     target_include_directories(test_runtime_metrics_writer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
     target_link_libraries(test_runtime_metrics_writer PRIVATE lwir_app_support)
+    add_executable(test_raw_recorder tests/app/test_raw_recorder.cpp)
+    target_link_libraries(test_raw_recorder PRIVATE lwir_runtime_core)
+    add_test(NAME raw_recorder COMMAND test_raw_recorder)
     add_test(NAME runtime_metrics_writer COMMAND test_runtime_metrics_writer)
 
     add_executable(test_runtime_shutdown tests/app/test_runtime_shutdown.cpp)

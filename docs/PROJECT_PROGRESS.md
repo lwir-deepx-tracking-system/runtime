@@ -480,3 +480,28 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
 - 호스트에서 Gimbal 4/0x84의 요청·응답 길이 계약과 실제 TCP 회귀 테스트를
   추가했다. 관련 테스트 3/3 및 호스트 Runtime 링크 통과. 수정 커밋의
   보드 재적용·실 GUI 검증은 다음 단계다.
+
+## 2026-11-16 model-bank 갱신 조사와 원본 녹화 1단계
+
+- 현재 호스트 Runtime은 `feat/python-runtime-integration` / `292142b`에서 시작했고
+  작업 전 Git 상태는 깨끗했다. PC는 같은 이름의 브랜치 / `4b8094b`에서
+  시작했으며 기존 미커밋 Qt 변경 15개를 보존했다.
+- `model-bank` 원격 `main`을 fetch해 `3897aaf` → `5ea5b64` 사이 244개 커밋을
+  확인했다. 신규 추적기·관절 모델·위치 기억·상자 표시·NPU 투입·카메라·재생·
+  화면·짐벌 변경이 있으며, 이 단계에 모두 이식한 것으로 간주하지 않는다.
+- Runtime에 `RawRecorder`를 추가했다. 카메라 원본 16비트 프레임을 별도
+  유한 큐로 받아 gzip과 프레임별 시각 CSV에 저장한다. 게시된 추적 결과도
+  `tracks.csv`에 frame ID로 기록한다. TCP Recording 5의
+  시작·종료·상태 명령을 추가했다. PC `python_gui`의 측정 버튼을 이 명령에
+  연결하고 표시를 실제 저장 파일에 맞췄다. HTTP/MJPEG 서버는 추가하지 않았다.
+- 변경 파일: `include/app/raw_recorder.hpp`, `src/app/raw_recorder.cpp`,
+  CameraThread, RuntimeApplication, PipelineRequests, GUI protocol/handler,
+  CMake, 관련 테스트·문서; PC `python_gui/lan_protocol.py`,
+  `desktop_routes.py`, `page/js/05_measure.js`, 생성 HTML, 테스트·README.
+- 호스트 DXRT 비활성 `lwir_runtime` 링크 성공. `raw_recorder` 원본 gzip 왕복,
+  `gui_pipeline_commands` 2/2 CTest 통과. PC LAN/route 21/21 통과,
+  페이지 조각 31개와 생성 HTML 바이트 일치. Orange Pi DXRT/실카메라,
+  PC 실 LAN, 장시간 디스크 기록은 미검증이다.
+- 다음: 원본 녹화의 추적 결과·파일 목록/재생·전송 계약, 신규 모델 Tensor와
+  관절 출력, 동적 정책 및 나머지 model-bank 시스템 기능을 순서대로 연결하고
+  각 기능의 보드/PC 통합을 검증한다. 기존 Qt 미커밋 변경은 건드리지 않는다.

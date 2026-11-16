@@ -75,6 +75,23 @@ class PipelineCommandHandler final : public IGuiCommandHandler {
     static void write32(std::vector<std::uint8_t>& p, std::uint32_t value) {
         for (int shift : {24, 16, 8, 0}) p.push_back(static_cast<std::uint8_t>(value >> shift));
     }
+    static void write64(std::vector<std::uint8_t>& p, std::uint64_t value) {
+        write32(p, static_cast<std::uint32_t>(value >> 32));
+        write32(p, static_cast<std::uint32_t>(value));
+    }
+    GuiCommand recording_reply(std::uint8_t code, std::uint32_t request_id, bool ok) const {
+        const auto status = requests_ ? requests_->recording_status() : PipelineRecordingStatus{};
+        GuiCommand reply{GuiCategory::Recording, std::uint8_t(code | 0x80), {}};
+        write32(reply.payload, request_id);
+        reply.payload.push_back(ok ? 0 : 1);
+        reply.payload.push_back(status.active ? 1 : 0);
+        reply.payload.push_back(status.failed ? 1 : 0);
+        reply.payload.push_back(0);
+        write32(reply.payload, status.session);
+        write64(reply.payload, status.frames);
+        write64(reply.payload, status.dropped);
+        return reply;
+    }
     static GuiCommand response(std::uint8_t command, std::uint32_t request_id,
         GuiPipelinePhase phase, GuiPipelineResult result) {
         GuiCommand reply{GuiCategory::Pipeline, std::uint8_t(command | 0x80), {}};
@@ -94,6 +111,24 @@ public:
     }
 
     bool handle(const GuiCommand& command, std::vector<GuiCommand>& replies) override {
+        if (command.category == GuiCategory::Recording) {
+            replies.clear();
+            const auto code = command.command;
+            if (code < 1 || code > 3 || command.payload.size() != (code == 2 ? 69u : 4u))
+                return false;
+            const auto request_id = read32(command.payload, 0);
+            bool ok = requests_ != nullptr;
+            if (code == 2) {
+                const auto first = command.payload.begin() + 5;
+                const auto end = std::find(first, command.payload.end(), 0);
+                const std::string name(first, end);
+                ok = ok && command.payload[4] == 1 && requests_->start_recording(name);
+            } else if (code == 3) {
+                ok = ok && requests_->stop_recording();
+            }
+            replies.push_back(recording_reply(code, request_id, ok));
+            return true;
+        }
         if (command.category != GuiCategory::Pipeline) return control_->handle(command, replies);
         replies.clear();
         const auto code = command.command;

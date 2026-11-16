@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "common/logger.hpp"
+#include "app/raw_recorder.hpp"
 
 // 활성 TrackerManager와 입출력 queue를 Tracking worker에 연결한다.
 TrackingThread::TrackingThread(
@@ -14,13 +15,13 @@ TrackingThread::TrackingThread(
     ThreadSafeQueue<DetectionResult>& input_queue,
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
-    bool measurement_enabled, IMeasurementSink* measurements)
+    bool measurement_enabled, IMeasurementSink* measurements, RawRecorder* recorder)
     : tracker_manager_(tracker_manager),
       runtime_control_(runtime_control),
       input_queue_(input_queue),
       control_output_queue_(control_output_queue),
       gui_output_queue_(gui_output_queue),
-      measurement_enabled_(measurement_enabled), measurements_(measurements)
+      measurement_enabled_(measurement_enabled), measurements_(measurements), recorder_(recorder)
 {
 }
 
@@ -121,6 +122,7 @@ void TrackingThread::run()
             if (!published) continue;
             if (!control_push_ok)
                 throw std::runtime_error("Tracking control result queue is closed");
+            if (recorder_) recorder_->submit_tracks(tracks);
         }
     }
     catch (const std::exception& e)

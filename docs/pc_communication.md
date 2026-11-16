@@ -234,6 +234,26 @@ Without an associated runtime request service, count queries return zero and
 switches return NotReady. Board-only Pipeline responses sent by a PC, unsupported
 commands, and incorrect declared payload lengths disconnect that client as before.
 
+## 원본 녹화 명령 — TCP 5002
+
+카테고리 `Recording (5)`는 단일 LAN PC의 녹화 제어에 사용한다. 모든 숫자는
+big endian이다. 요청 `1`(상태)과 `3`(종료)은 `request_id:u32`(4바이트),
+요청 `2`(시작)는 `request_id:u32, video:u8=1, name:utf8[64]`(69바이트)다.
+응답은 요청 코드에 `0x80`을 더하고 `request_id:u32, result:u8,
+active:u8, failed:u8, reserved:u8=0, session:u32, frames:u64, dropped:u64`
+(28바이트)를 돌려준다. `result=0`은 요청 수락이다.
+
+카메라 원본 `CV_16UC1` 프레임은 검출 큐에서 제외되기 전에 별도 120장
+유한 큐로 전달된다. 저장 스레드가 밀리면 `dropped`를 증가시키며 추론
+경로를 막지 않는다. 출력은 `measurement.output_root/recordings/MEASURE_*/`
+아래 `frames.raw.gz`(640×480, uint16 little endian 연속 프레임),
+`frames.csv`(저장 순번·카메라 frame ID·steady clock ns),
+`tracks.csv`(게시된 추적 결과의 frame ID·Track·박스), `recording.txt`다.
+`tracks.csv`에는 저장 큐가 놓친 프레임의 결과가 있을 수 있어 `frames.csv`의
+frame ID와 결합해야 한다. 종료 시점에 아직 처리 중인 마지막 프레임의 Track은
+포함되지 않을 수 있다. 이 명령은 녹화 재생이나 파일 전송을 제공하지 않는다.
+PC 페이지는 로컬 브리지에서 이 명령으로 시작·종료·상태를 조회한다.
+
 ## Verification scope
 
 Tests use PC source fixtures for exact metadata and control bytes, TCP loopback

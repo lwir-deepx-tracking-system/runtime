@@ -6,15 +6,16 @@
 #include <utility>
 
 #include "common/logger.hpp"
+#include "app/raw_recorder.hpp"
 
 
 CameraThread::CameraThread(
     Camera& camera,
     ThreadSafeQueue<FrameMessage>& output_queue,
-    bool measurement_enabled, bool retain_metrics)
+    bool measurement_enabled, bool retain_metrics, RawRecorder* recorder)
     : camera_(camera),
       output_queue_(output_queue),
-      measurement_enabled_(measurement_enabled), retain_metrics_(retain_metrics)
+      measurement_enabled_(measurement_enabled), retain_metrics_(retain_metrics), recorder_(recorder)
 {
 }
 
@@ -79,6 +80,7 @@ void CameraThread::run()
             // Camera에서 부여한 정보를 이후 모든 stage가 그대로 전달한다.
             frame->metadata.frame_id = next_frame_id++;
             frame->metadata.captured_at = finished_at;
+            if (recorder_) recorder_->submit(frame);
             if (measurement_enabled_)
                 frame->metadata.capture_processing_ms =
                     std::chrono::duration<double, std::milli>(finished_at - started_at).count();

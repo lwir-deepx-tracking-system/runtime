@@ -16,7 +16,10 @@ constexpr std::size_t kGuiTrackMetadataSize = 25;
 constexpr std::uint32_t kGuiFrameWidth = 640;
 constexpr std::uint32_t kGuiFrameHeight = 480;
 
-enum class GuiCategory : std::uint8_t { System = 1, Mode = 2, Gimbal = 3, Pipeline = 4 };
+enum class GuiCategory : std::uint8_t { System = 1, Mode = 2, Gimbal = 3, Pipeline = 4, Recording = 5 };
+// Recording requests: status(1), start(2), stop(3). Reply = command | 0x80.
+// Start includes request ID, video flag and a UTF-8 name padded to 64 bytes.
+enum class GuiRecordingCommand : std::uint8_t { Status = 1, Start = 2, Stop = 3 };
 // Pipeline 응답은 요청 번호에 0x80을 더한다. 기존 1..4 계약은 유지한다.
 enum class GuiPipelineCommand : std::uint8_t {
     ModelCount = 1, TrackerCount = 2, ChangeModel = 3, ChangeTracker = 4,

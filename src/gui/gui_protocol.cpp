@@ -61,6 +61,11 @@ int payload_size(GuiCategory category, std::uint8_t command)
         if (command == 0x85 || command == 0x86) return 76;
         if (command == 0x87) return 32;
         break;
+    case GuiCategory::Recording:
+        if (command == 1 || command == 3) return 4;
+        if (command == 2) return 69;
+        if (command == 0x81 || command == 0x82 || command == 0x83) return 28;
+        break;
     }
     return -1;
 }

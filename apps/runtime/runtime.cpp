@@ -1,6 +1,7 @@
 #include "runtime.hpp"
 #include "app/pipeline_console.hpp"
 #include "app/metrics_writer.hpp"
+#include "app/raw_recorder.hpp"
 #include "app/shutdown.hpp"
 #include "runtime_workers.hpp"
 #include "common/logger.hpp"
@@ -55,6 +56,7 @@ class RuntimeApplication : public IPipelineRequests
 private:
     RuntimeConfig config_;
     std::unique_ptr<MetricsWriter> metrics_writer_;
+    std::unique_ptr<RawRecorder> recorder_;
 
     // Camera의 shared FrameContext를 Detection으로 전달
     ThreadSafeQueue<FrameMessage> frame_queue_;
@@ -123,6 +125,9 @@ public:
     PipelineCatalogItem model_info(std::uint32_t id) const override;
     PipelineCatalogItem tracker_info(std::uint32_t id) const override;
     PipelineTrackerPolicy tracker_policy() const override;
+    PipelineRecordingStatus recording_status() const override;
+    bool start_recording(const std::string& name) override;
+    bool stop_recording() override;
     PipelineChangeTicket request_model_change(std::uint32_t model_id) override;
     // 트래커 변경 서비스에 요청을 위임한다.
     PipelineChangeTicket request_tracker_change(std::uint32_t tracker_id) override;
@@ -188,6 +193,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         Logger::info("[Measurement] 결과 경로: " + metrics_writer_->directory().string());
     }
     camera_ = std::make_unique<Camera>();
+    recorder_ = std::make_unique<RawRecorder>(
+        std::filesystem::path(config_.measurement.output_root) / "recordings");
 
     model_manager_thread_ = std::make_unique<ModelManagerThread>(
         config_.detection_catalog.at(config_.initial_detection_id),
@@ -216,7 +223,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         std::make_unique<CameraThread>(
             *camera_,
             frame_queue_,
-            measurement_enabled_, false
+            measurement_enabled_, false, recorder_.get()
         );
 
     detection_thread_ =
@@ -238,7 +245,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             control_track_queue_,
             gui_track_queue_,
-            measurement_enabled_, metrics_writer_.get()
+            measurement_enabled_, metrics_writer_.get(), recorder_.get()
         );
 
     // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
@@ -314,6 +321,23 @@ PipelineTrackerPolicy RuntimeApplication::tracker_policy() const
             static_cast<std::uint32_t>(c.frame.confirmation_ms),
             (c.class_gate ? 1u : 0u) | (c.frame.gmc ? 2u : 0u) |
                 (c.post_reid ? 4u : 0u)};
+}
+
+PipelineRecordingStatus RuntimeApplication::recording_status() const
+{
+    if (!recorder_) return {};
+    const auto s = recorder_->status();
+    return {s.active, s.failed, s.session, s.frames, s.dropped};
+}
+
+bool RuntimeApplication::start_recording(const std::string& name)
+{
+    return recorder_ && pipeline_ready_.load() && recorder_->start(name);
+}
+
+bool RuntimeApplication::stop_recording()
+{
+    return recorder_ && recorder_->stop();
 }
 
 PipelineChangeTicket RuntimeApplication::request_model_change(std::uint32_t model_id)

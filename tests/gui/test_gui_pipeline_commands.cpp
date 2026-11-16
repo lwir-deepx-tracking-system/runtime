@@ -17,6 +17,8 @@ public:
     std::promise<GuiPipelineResult> model, tracker, policy;
     TrackerPolicyUpdate policy_update;
     std::uint32_t model_id = 0, tracker_id = 0;
+    PipelineRecordingStatus rec{};
+    std::string rec_name;
     std::uint32_t model_count() const override { return 2; }
     std::uint32_t tracker_count() const override { return 1; }
     PipelineCatalogItem model_info(std::uint32_t id) const override {
@@ -28,6 +30,14 @@ public:
     PipelineTrackerPolicy tracker_policy() const override {
         return {1, 45000, 0, 0.5F, 3, 130, 7};
     }
+    PipelineRecordingStatus recording_status() const override { return rec; }
+    bool start_recording(const std::string& name) override {
+        rec_name = name;
+        rec.active = true;
+        rec.session = 1;
+        return true;
+    }
+    bool stop_recording() override { rec.active = false; rec.frames = 3; return true; }
     PipelineChangeTicket request_model_change(std::uint32_t id) override {
         model_id = id;
         if (id < 1 || id > 2) return {GuiPipelineResult::InvalidId, {}};
@@ -60,6 +70,21 @@ int main() {
     if (!handle("4c5749520402000487654321", "4c574952048200088765432100000001")) return 2;
     if (!handle("4c5749520407000400000005",
                 "4c5749520487002000000005000000010000afc8000000003f000000000000030000008200000007")) return 19;
+    {
+        GuiCommand start{GuiCategory::Recording, 2, std::vector<std::uint8_t>(69, 0)};
+        start.payload[3] = 11;
+        start.payload[4] = 1;
+        start.payload[5] = 'A';
+        const auto packet = encode_gui_command(start);
+        GuiCommand parsed;
+        if (!decode_gui_command(packet.data(), packet.size(), parsed) ||
+            !handler->handle(parsed, replies) || replies.size() != 1 ||
+            replies[0].command != 0x82 || replies[0].payload.size() != 28 ||
+            replies[0].payload[5] != 1 || requests.rec_name != "A") return 24;
+        GuiCommand stop{GuiCategory::Recording, 3, hex("0000000c")};
+        if (!handler->handle(stop, replies) || replies[0].command != 0x83 ||
+            replies[0].payload[5] != 0 || replies[0].payload[19] != 3) return 25;
+    }
     {
         const auto packet = hex("4c574952040500080000000300000002");
         GuiCommand request;

@@ -1,5 +1,30 @@
 # model-bank 최신 기능 이식 대장
 
+## 2026-11-16 원격 main 갱신 대조
+
+이전 기준 `3897aaf`에서 원격 `main` `5ea5b64`까지 244개 커밋이 추가됐다.
+현재 `feat/python-runtime-integration` 및 PC GUI의 실제 구현과 비교한 상태다.
+`model-bank`의 Python 서버·HTTP 경로는 이식 대상이 아니며, 장치/GUI 기능을
+기존 C++ Runtime의 스레드·Queue 및 단일 PC LAN 경계에 연결한다.
+
+| 기능 | 현재 Runtime/PC 상태 | 남은 작업 |
+| --- | --- | --- |
+| 16비트 원본 녹화 | 호스트 구현: gzip 원본, 프레임 시각·Track CSV, LAN 시작/종료/상태, PC 버튼 | 장치 실카메라·장시간 디스크·PC LAN 검증, 목록/재생 |
+| C++ SORT/OC-SORT/BoT-SORT | Runtime에는 자체 C++ Tracker가 이미 있음. Python 서버의 확장 모듈을 그대로 복사할 필요 없음 | 동일 검출 입력/설정에서 결과·ID/지연 비교, 신규 정책 차이 선별 |
+| 새 근거리/범용 자세 검출과 관절 | 기존 Runtime 카탈로그와 후처리는 여섯 split head 모델까지 | 모델 파일 SHA/Tensor 확인, 9 출력 관절 풀이, Runtime 모델 카탈로그·보드 추론 |
+| 자동 검출 모델 선택·두 모델 상주 | 미구현 | 기존 ModelManager/세대 교체 경로 확장, NPU 자원·전환·복구 검증 |
+| 관절 기반 위치 기억 GRU/Mamba | 미구현 | 모델/입력 계약·실제 데이터 평가, Tracker 내부 정책 연결 |
+| 상자 다듬기 size/body·lost_same | 미구현 | 표시/짐벌 동일 박스 계약과 예측 표기, 기존 제어 경로 유지 |
+| NPU 교대·자동 투입·주기 감시 | Runtime은 max_inflight와 정해진 core binding만 지원 | DXRT 자원·순서·드롭 정책 실기 비교 뒤 선택 기능 추가 |
+| 재생·재생 중 채점 | 미구현 | Camera 입력 선택, 안전 STOP, 원본 프레임 시간표, 선택 시퀀스 평가 |
+| 화면 지연·영상/메타데이터 동기화 | PC에서 수신율만 표시하고 최신 metadata를 영상에 그림 | RTP timestamp 결합 및 실제 LAN 지연 측정 |
+| 짐벌 소실·탐색 후보 | 기존 Runtime의 단일 GimbalCommandExecutor 제어 사용. 신규 후보 미이식 | 모델뱅크에서 운영 채택된 조건만 분리해 실기 안전 검증 |
+| 시스템·카메라 관리 | PC 원본 화면의 미지원 버튼은 실패 응답 | Camera 소유권·서비스 상태 계약 뒤 LAN 명령 추가 |
+
+이 표는 이식 완료 선언이 아니다. 특히 모델뱅크의 장치 적용·PC 모의 시험은
+현재 Runtime/GUI가 통과한 증거가 아니다. 아래 11월 12일 표는 당시 기준의
+기능 배치 결정으로 남긴다.
+
 확인 기준: 독립 저장소 `model-bank`의 `main` / `3897aaf572fae1d87f9c8cc3d7db85028cc79501`
 (2026-11-12), `tracking_server/` 및 `label_server/` 소스와 `HANDOFF.md`.
 이 파일의 상태는 현재 호스트 코드 기준이다. Python 서버의 동작이나 PC 모의 시험을
