@@ -535,3 +535,25 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   메타데이터가 각각 약 20 fps로 다시 수신되는 것을 확인했다. 현재 GUI와
   Runtime 실행을 유지하며 model-bank keepalive는 일시 중지 상태다.
   `.local/runtime-live.yaml`은 보드 로컬 시험 설정이며 Git에는 포함하지 않는다.
+
+## 2026-11-16 유선 LAN과 PC 녹화 내보내기 실기 검증
+
+- PC `enp3s0`에 `192.168.50.1/24`, Orange Pi `enP4p65s0`에
+  `192.168.50.2/24`를 사용했다. 양쪽 라우팅은 유선 인터페이스를 선택했고
+  1Gb 링크와 서로의 MAC/ARP, ping을 확인했다. 보드 로컬 설정의 영상·메타데이터
+  목적지는 `192.168.50.1`, TCP 명령 바인드는 `192.168.50.2:5002`로 바꿨다.
+  PC GUI도 `--board 192.168.50.2`로 실행했다. 런타임 영상·명령·녹화 전송에
+  Tailscale이나 별도 서버를 쓰지 않는다.
+- 기존 TCP 5002 Recording 카테고리에 최신 완료 녹화 조회와 최대 32 KiB
+  파일 청크 읽기를 추가했다. PC GUI의 `최근 녹화 PC로 내보내기` 버튼은 네 파일을
+  `/workspace/recordings/MEASURE_*/`에 내려받고 gzip을 확인한다.
+- GUI에서 실제 카메라 녹화를 시작·종료하고 `MEASURE_20261116_144816_0`을
+  버튼으로 PC에 내보냈다. `frames.csv`는 헤더 포함 128행, 원본 해제 크기는
+  78,028,800바이트 = 127 x 640 x 480 x 2, `frames.raw.gz`는 38,507,151바이트다.
+  네 파일의 PC/보드 SHA-256이 모두 일치하고 gzip 해제가 통과했다. PC 저장
+  경로는 `/workspace/recordings/MEASURE_20261116_144816_0`이다.
+- PC Python LAN/route 테스트 23/23, 호스트와 Orange Pi의 `raw_recorder` 및
+  `gui_pipeline_commands` CTest 각각 2/2 통과. 보드 브랜치를
+  `feat/python-runtime-integration`으로 전환해 코드와 빌드를 최신화했다.
+  기존 미추적 `tests/tracking/lwir_to_mot.py`는 보존했다. GUI와 Runtime은
+  계속 실행 중이며 model-bank keepalive 일시 중지 파일도 유지했다.
