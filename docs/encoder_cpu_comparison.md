@@ -14,7 +14,9 @@
 
 기존 Runtime 빌드 방법을 그대로 사용한다. 보드에 이 테스트 브랜치의 소스를 반영하는 작업은 별도이며, 개발환경에서 소스를 준비했다고 보드가 갱신되지는 않는다.
 
-기존에 실제 운용한 YAML을 `config/local/encoder-sw.yaml`, `config/local/encoder-hw.yaml`로 각각 복사한다. **두 파일의 유일한 차이**는 아래 encoder 값이어야 한다. 모델·트래커·제어·로그 수준·telemetry·기록·IP·비트레이트·GOP·FPS·MTU는 같게 유지한다. 활성 공용 YAML은 수정할 필요가 없다.
+`config/local/encoder-sw.yaml`, `config/local/encoder-hw.yaml`을 저장소에 준비해 두었다. 현재 공용 `config/runtime.yaml`을 기준으로 만들었으며 **두 파일의 유일한 차이**는 아래 encoder 값이다. 모델·트래커·제어·로그 수준·telemetry·기록·IP·비트레이트·GOP·FPS·MTU는 같다. 활성 공용 YAML은 수정하지 않았다.
+
+보드에서 실제 사용하는 설정이 공용 설정과 다르면 시험 전에 그 값을 두 파일에 동일하게 반영한다. 특히 모델 파일, PC IP·bind 주소, serial 장치, 결과 저장 경로가 보드의 실사용 환경과 맞아야 한다. 측정 때문에 그 외 실행 조건을 바꾸지 않는다.
 
 ```yaml
 # SW 실행: gui.video 아래
@@ -22,6 +24,12 @@ codec: h264
 encoder: x264enc
 # HW 실행에서는 encoder: mpph264enc
 ```
+
+```bash
+diff -u config/local/encoder-sw.yaml config/local/encoder-hw.yaml
+```
+
+encoder 행만 달라야 한다. 첫 시험은 아래 두 실행으로 정상 계측을 확인하고 이후 반복 번호를 바꾼다.
 
 이 프로젝트의 실제 설정을 비교한다. x264enc는 현재 `ultrafast/zerolatency`, MPP는 `baseline/CBR`이며 SW는 I420, HW는 NV12로 변환된다. 따라서 순수 코덱 연산량이나 동일 화질의 비교가 아니라 **현재 송신 경로를 사용하는 전체 Runtime CPU 비교**다.
 

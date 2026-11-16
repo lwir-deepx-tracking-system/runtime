@@ -1,0 +1,143 @@
+# ============================================================
+# 1. Runtime / Logging
+# ============================================================
+
+logging:
+  level: debug
+
+measurement:
+  enabled: true
+  output_root: /mnt/lwir_data/results/runtime
+
+
+# ============================================================
+# 2. Model
+# ============================================================
+
+# 모델에 종속적인 설정은 별도 YAML에서 관리한다.
+# - model path
+# - camera input format
+# - model input size
+# - preprocess
+# - postprocess
+model:
+  config: config/model/yolov8n.yaml
+
+# Internal model catalog. The PC wire protocol does not define model selection.
+model_catalog:
+  - id: 1
+    config: config/model/yolov8n.yaml
+  - id: 2
+    config: config/model/yolo26s.yaml
+
+
+# ============================================================
+# 3. Detection
+# ============================================================
+
+detection:
+  # 동시에 처리할 수 있는 최대 inference 요청 수
+  max_inflight: 4
+
+  # DXRT 내부 입력·출력 buffer 수. 0이면 DXRT가 자동으로 결정한다.
+  buffer_count: 6
+
+  # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
+  use_ort: false
+
+
+# ============================================================
+# 4. Tracking
+# ============================================================
+
+tracking:
+  id: 1
+
+tracking_catalog:
+  - id: 1
+    config: config/tracking/bytetrack.yaml
+  - id: 2
+    config: config/tracking/ocsort.yaml
+
+# ============================================================
+# 5. Target / Control
+# ============================================================
+
+control:
+  enabled: true
+
+  auto:
+    min_confidence: 0.0    # AUTO 제어 대상의 최소 신뢰도
+    input_timeout_ms: 500  # 캡처 시각 기준 입력 유효 시간
+    reacquire_timeout_ms: 2000 # 표적 상실 후 재획득 대기 시간
+    # 흔들림 완화를 위해 P 제어로 기준을 잡고 실기에서 축별 kp를 조정한다.
+    controller: p          # p / pi / pd / pid
+    pid_x: {kp: 40.0, ki: 0.0, kd: 0.0}
+    pid_y: {kp: 40.0, ki: 0.0, kd: 0.0}
+    deadband_x: 0.06
+    deadband_y: 0.06
+    speed_max: 70          # AUTO 전용 상한
+    speed_rate: 100.0       # SPD/초. STOP은 제한 우회
+
+  gimbal:
+    device: /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_5a321a87be72ef1184f1744f8fcc3fa0-if00-port0
+    speed: 30              # 수동 방향키 고정 속도. AUTO 상한과 독립
+
+# ============================================================
+# 6. GUI Communication
+# ============================================================
+
+gui:
+  enabled: true
+
+  # ----------------------------------------------------------
+  # 6-1. Video
+  # Orange Pi -> GUI
+  # JPEG or H.264 / RTP / UDP
+  # ----------------------------------------------------------
+
+  video:
+    host: 192.168.50.1
+    port: 5000
+
+    # JPEG : jpegenc / mppjpegenc
+    # H.264 : x264enc / mpph264enc
+
+    codec: h264
+    encoder: mpph264enc
+    bitrate_kbps: 3000
+    jpeg_quality: 80
+    keyframe_interval: 30
+    fps: 30
+    rtp_mtu: 1200
+
+  # ----------------------------------------------------------
+  # 6-2. Tracking Metadata
+  # Orange Pi -> GUI
+  # frame_id / track_id / bbox 등을 UDP로 전송
+  # ----------------------------------------------------------
+
+  metadata:
+    enabled: true
+
+    host: 192.168.50.1
+    port: 5001
+
+    max_packet_bytes: 1200
+    telemetry:
+      enabled: true
+
+  # ----------------------------------------------------------
+  # 6-3. GUI Command
+  # GUI -> Orange Pi
+  # PC 명령 수신 및 ACK/STATUS 응답
+  # ----------------------------------------------------------
+
+  command:
+    handler: tracking  # tracking: AUTO+수동 / deferred: 통신 시험만
+    enabled: true
+
+    bind_address: 192.168.50.2
+    port: 5002
+
+    receive_timeout_ms: 1000
