@@ -505,3 +505,33 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
 - 다음: 원본 녹화의 추적 결과·파일 목록/재생·전송 계약, 신규 모델 Tensor와
   관절 출력, 동적 정책 및 나머지 model-bank 시스템 기능을 순서대로 연결하고
   각 기능의 보드/PC 통합을 검증한다. 기존 Qt 미커밋 변경은 건드리지 않는다.
+
+## 2026-11-16 Orange Pi + PC GUI 원본 녹화 실기 검증
+
+- Orange Pi 기존 체크아웃은 같은 `feat/python-runtime-integration` 브랜치의
+  `292142b`였고, 미추적 `tests/tracking/lwir_to_mot.py`는 보존했다. model-bank
+  `start_tracking_server.py`와 cron keepalive를 확인한 뒤 사용자의 명시적 허용에
+  따라 `/home/orangepi/lwir_keepalive.pause`를 만들어 재시작을 멈추고 해당 서버만
+  종료했다. label server와 다른 서비스는 종료하지 않았다.
+- Runtime `7915a9b`를 격리 작업트리에서 DXRT+I3 camera SDK로 빌드하고
+  `raw_recorder`, `gui_pipeline_commands` 2/2 CTest가 통과했다. 실카메라,
+  YOLOv8n DXNN, H.264 RTP, 추적 메타데이터가 실행됐다.
+- PC `python_gui/desktop_gui.py`를 실제 GTK 화면에서 실행하고 접근성 버튼으로
+  녹화 시작·종료를 조작했다. PC 영상·메타데이터 수신은 각각 약 20 fps였고
+  사용자가 실시간 영상 표시를 확인했다. 첫 Tailscale 목적지에는 UDP가 도착하지
+  않아, 시험 설정에서 보드의 영상·메타데이터 목적지를 PC 로컬 IP
+  `192.168.3.94`로 바꿨다. TCP 명령은 Tailscale `100.70.47.115:5002`를
+  사용했다. 별도의 인터넷 없는 직결 랜선 경로는 이번에 검증하지 못했다.
+- GUI에서 정상 종료한 `/mnt/lwir_data/results/runtime/recordings/
+  MEASURE_20261116_142347_0`는 108프레임, 놓친 프레임 0개다. `gzip -t`
+  통과, 해제 크기 66,355,200바이트 = 108 x 640 x 480 x 2,
+  `frames.csv`는 헤더 포함 109행이며 첫 프레임에 389개 서로 다른 픽셀 값이
+  있었다. 이 장면의 `tracks.csv`는 헤더만 있었다. 이전 86프레임 녹화도
+  gzip과 크기 검증을 통과했다.
+- 보드 기존 체크아웃을 `7915a9b`로 fast-forward했다. PC Python GUI 변경은
+  PC 저장소의 같은 이름 브랜치 `69b390a`로 커밋·push했고 기존 Qt 수정 15개를
+  보존했다. 보드 기존 체크아웃도 DXRT+I3 camera SDK로 재빌드했다. 최신
+  체크아웃의 `build/lwir_runtime .local/runtime-live.yaml`을 실행해 PC 영상과
+  메타데이터가 각각 약 20 fps로 다시 수신되는 것을 확인했다. 현재 GUI와
+  Runtime 실행을 유지하며 model-bank keepalive는 일시 중지 상태다.
+  `.local/runtime-live.yaml`은 보드 로컬 시험 설정이며 Git에는 포함하지 않는다.
