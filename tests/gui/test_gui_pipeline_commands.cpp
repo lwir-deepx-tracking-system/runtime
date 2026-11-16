@@ -38,6 +38,13 @@ public:
         return true;
     }
     bool stop_recording() override { rec.active = false; rec.frames = 3; return true; }
+    std::string latest_recording() const override { return "MEASURE_20261116_142347_0"; }
+    PipelineRecordingFileChunk read_recording_file(
+        const std::string& name, std::uint8_t file, std::uint64_t offset,
+        std::uint16_t limit) const override {
+        if (name != latest_recording() || file != 1 || offset != 0 || limit != 4) return {};
+        return {true, 2, {'O', 'K'}};
+    }
     PipelineChangeTicket request_model_change(std::uint32_t id) override {
         model_id = id;
         if (id < 1 || id > 2) return {GuiPipelineResult::InvalidId, {}};
@@ -84,6 +91,26 @@ int main() {
         GuiCommand stop{GuiCategory::Recording, 3, hex("0000000c")};
         if (!handler->handle(stop, replies) || replies[0].command != 0x83 ||
             replies[0].payload[5] != 0 || replies[0].payload[19] != 3) return 25;
+        GuiCommand latest{GuiCategory::Recording, 4, hex("0000000d")};
+        const auto rec_name = requests.latest_recording();
+        if (!handler->handle(latest, replies) || replies[0].command != 0x84 ||
+            replies[0].payload.size() != 69 || replies[0].payload[4] != 0 ||
+            std::string(replies[0].payload.begin() + 5,
+                        replies[0].payload.begin() + 5 + rec_name.size()) != rec_name) return 26;
+        GuiCommand read{GuiCategory::Recording, 5, std::vector<std::uint8_t>(79, 0)};
+        read.payload[3] = 14;
+        std::copy(rec_name.begin(), rec_name.end(), read.payload.begin() + 4);
+        read.payload[68] = 1;
+        read.payload[78] = 4;
+        auto wire = encode_gui_command(read);
+        GuiCommand decoded;
+        if (!decode_gui_command(wire.data(), wire.size(), decoded) ||
+            !handler->handle(decoded, replies) || replies[0].command != 0x85 ||
+            replies[0].payload.size() != 23 || replies[0].payload[4] != 0 ||
+            replies[0].payload[12] != 2 || replies[0].payload[21] != 'O' ||
+            replies[0].payload[22] != 'K') return 27;
+        wire = encode_gui_command(replies[0]);
+        if (!decode_gui_command(wire.data(), wire.size(), decoded)) return 28;
     }
     {
         const auto packet = hex("4c574952040500080000000300000002");

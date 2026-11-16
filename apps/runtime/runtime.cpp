@@ -40,6 +40,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -128,6 +129,9 @@ public:
     PipelineRecordingStatus recording_status() const override;
     bool start_recording(const std::string& name) override;
     bool stop_recording() override;
+    std::string latest_recording() const override;
+    PipelineRecordingFileChunk read_recording_file(
+        const std::string&, std::uint8_t, std::uint64_t, std::uint16_t) const override;
     PipelineChangeTicket request_model_change(std::uint32_t model_id) override;
     // 트래커 변경 서비스에 요청을 위임한다.
     PipelineChangeTicket request_tracker_change(std::uint32_t tracker_id) override;
@@ -338,6 +342,54 @@ bool RuntimeApplication::start_recording(const std::string& name)
 bool RuntimeApplication::stop_recording()
 {
     return recorder_ && recorder_->stop();
+}
+
+std::string RuntimeApplication::latest_recording() const
+{
+    const auto root = std::filesystem::path(config_.measurement.output_root) / "recordings";
+    std::string latest;
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(root)) {
+            if (!entry.is_directory()) continue;
+            const auto name = entry.path().filename().string();
+            if (name.size() > 64 || name.rfind("MEASURE_", 0) != 0) continue;
+            if (!std::all_of(name.begin() + 8, name.end(), [](unsigned char c) {
+                    return (c >= '0' && c <= '9') || c == '_'; })) continue;
+            if (recorder_ && recorder_->status().active &&
+                recorder_->directory().filename() == entry.path().filename()) continue;
+            if (name > latest) latest = name;
+        }
+    } catch (const std::filesystem::filesystem_error&) {}
+    return latest;
+}
+
+PipelineRecordingFileChunk RuntimeApplication::read_recording_file(
+    const std::string& name, std::uint8_t file_id, std::uint64_t offset,
+    std::uint16_t limit) const
+{
+    if (name.size() < 10 || name.size() > 64 || name.rfind("MEASURE_", 0) != 0 ||
+        !std::all_of(name.begin() + 8, name.end(), [](unsigned char c) {
+            return (c >= '0' && c <= '9') || c == '_'; }) ||
+        !limit || limit > 32768 || file_id < 1 || file_id > 4 ||
+        offset > std::uint64_t(std::numeric_limits<std::streamoff>::max())) return {};
+    if (recorder_ && recorder_->status().active && recorder_->directory().filename() == name)
+        return {};
+    static const char* files[] = {"", "frames.raw.gz", "frames.csv", "tracks.csv", "recording.txt"};
+    const auto path = std::filesystem::path(config_.measurement.output_root) /
+        "recordings" / name / files[file_id];
+    try {
+        if (!std::filesystem::is_regular_file(path)) return {};
+        const auto total = std::filesystem::file_size(path);
+        if (offset > total) return {};
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream) return {};
+        stream.seekg(static_cast<std::streamoff>(offset));
+        std::vector<std::uint8_t> data(static_cast<std::size_t>(
+            std::min<std::uint64_t>(limit, total - offset)));
+        if (!data.empty()) stream.read(reinterpret_cast<char*>(data.data()), data.size());
+        if (!stream || static_cast<std::uint64_t>(stream.gcount()) != data.size()) return {};
+        return {true, total, std::move(data)};
+    } catch (const std::filesystem::filesystem_error&) { return {}; }
 }
 
 PipelineChangeTicket RuntimeApplication::request_model_change(std::uint32_t model_id)

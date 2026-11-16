@@ -62,9 +62,12 @@ int payload_size(GuiCategory category, std::uint8_t command)
         if (command == 0x87) return 32;
         break;
     case GuiCategory::Recording:
-        if (command == 1 || command == 3) return 4;
+        if (command == 1 || command == 3 || command == 4) return 4;
         if (command == 2) return 69;
+        if (command == 5) return 79;
         if (command == 0x81 || command == 0x82 || command == 0x83) return 28;
+        if (command == 0x84) return 69;
+        if (command == 0x85) return -2; // bounded file chunk reply
         break;
     }
     return -1;
@@ -74,6 +77,10 @@ std::size_t packet_size(const std::uint8_t* data, std::size_t size)
     if (!data || size < kGuiCommandHeaderSize || get(data, 4) != kGuiCommandMagic)
         return 0;
     const int payload = payload_size(static_cast<GuiCategory>(data[4]), data[5]);
+    if (payload == -2) {
+        const auto length = get(data + 6, 2);
+        return length >= 21 && length <= 32789 ? kGuiCommandHeaderSize + length : 0;
+    }
     if (payload < 0 || get(data + 6, 2) != static_cast<unsigned>(payload)) return 0;
     return kGuiCommandHeaderSize + payload;
 }
@@ -95,12 +102,13 @@ bool PcGuiProtocol::encode_metadata(const GuiTrackingMetadata& metadata, std::si
 std::vector<std::uint8_t> encode_gui_command(const GuiCommand& command)
 {
     const int size = payload_size(command.category, command.command);
-    if (size < 0 || command.payload.size() != static_cast<std::size_t>(size)) return {};
+    if ((size == -2 && (command.payload.size() < 21 || command.payload.size() > 32789)) ||
+        (size != -2 && (size < 0 || command.payload.size() != static_cast<std::size_t>(size)))) return {};
     std::vector<std::uint8_t> packet;
     put(packet, kGuiCommandMagic, 4);
     put(packet, static_cast<std::uint8_t>(command.category), 1);
     put(packet, command.command, 1);
-    put(packet, size, 2);
+    put(packet, command.payload.size(), 2);
     packet.insert(packet.end(), command.payload.begin(), command.payload.end());
     return packet;
 }

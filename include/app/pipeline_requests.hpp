@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <future>
 #include <string>
+#include <vector>
 #include "app/pipeline_result.hpp"
 #include "tracking/tracker_policy_update.hpp"
 
@@ -34,6 +35,12 @@ struct PipelineRecordingStatus {
     std::uint64_t dropped = 0;
 };
 
+struct PipelineRecordingFileChunk {
+    bool ok = false;
+    std::uint64_t total = 0;
+    std::vector<std::uint8_t> bytes;
+};
+
 // 접수 결과와 실제 전환 완료 future를 분리해 TCP 수신 스레드를 막지 않는다.
 struct PipelineChangeTicket
 {
@@ -54,6 +61,9 @@ class IPipelineRequests
     virtual PipelineRecordingStatus recording_status() const { return {}; }
     virtual bool start_recording(const std::string&) { return false; }
     virtual bool stop_recording() { return false; }
+    virtual std::string latest_recording() const { return {}; }
+    virtual PipelineRecordingFileChunk read_recording_file(
+        const std::string&, std::uint8_t, std::uint64_t, std::uint16_t) const { return {}; }
     virtual PipelineChangeTicket request_model_change(std::uint32_t id)   = 0;
     virtual PipelineChangeTicket request_tracker_change(std::uint32_t id) = 0;
     virtual PipelineChangeTicket request_policy_change(const TrackerPolicyUpdate&) {

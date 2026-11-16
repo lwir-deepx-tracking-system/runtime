@@ -251,8 +251,19 @@ active:u8, failed:u8, reserved:u8=0, session:u32, frames:u64, dropped:u64`
 `tracks.csv`(게시된 추적 결과의 frame ID·Track·박스), `recording.txt`다.
 `tracks.csv`에는 저장 큐가 놓친 프레임의 결과가 있을 수 있어 `frames.csv`의
 frame ID와 결합해야 한다. 종료 시점에 아직 처리 중인 마지막 프레임의 Track은
-포함되지 않을 수 있다. 이 명령은 녹화 재생이나 파일 전송을 제공하지 않는다.
-PC 페이지는 로컬 브리지에서 이 명령으로 시작·종료·상태를 조회한다.
+포함되지 않을 수 있다. PC 페이지는 로컬 브리지에서 시작·종료·상태를 조회한다.
+
+완료된 녹화는 기존 TCP 5002 연결로 PC에 복사할 수 있다. 요청 `4`는
+`request_id:u32`, 응답 `0x84`는 `request_id:u32, result:u8,
+directory:ascii[64]`다. `result=0`일 때 최신 완료 디렉터리 이름을 돌려준다.
+요청 `5`는 `request_id:u32, directory:ascii[64], file_id:u8,
+offset:u64, limit:u16`(79바이트)이며 `limit`은 1..32768이다. 파일 ID
+1..4는 위에 나열한 네 파일 순서다. 응답 `0x85`는 `request_id:u32,
+result:u8, total:u64, offset:u64, bytes[0..32768]`다. 녹화 중인 디렉터리는
+읽을 수 없고, 디렉터리 이름과 파일 ID는 Runtime에서 제한한다. PC GUI는
+네 파일을 `/workspace/recordings/MEASURE_*/`에 임시 디렉터리로 받은 뒤
+gzip 무결성을 검사하고 완료 디렉터리로 바꾼다. 별도 HTTP 서버, SSH,
+Tailscale은 이 전송에 사용하지 않는다.
 
 ## Verification scope
 

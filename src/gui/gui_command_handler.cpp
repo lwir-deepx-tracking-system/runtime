@@ -72,6 +72,9 @@ class PipelineCommandHandler final : public IGuiCommandHandler {
         for (std::size_t i = offset; i < offset + 4; ++i) value = (value << 8) | p[i];
         return value;
     }
+    static std::uint64_t read64(const std::vector<std::uint8_t>& p, std::size_t offset) {
+        return (std::uint64_t(read32(p, offset)) << 32) | read32(p, offset + 4);
+    }
     static void write32(std::vector<std::uint8_t>& p, std::uint32_t value) {
         for (int shift : {24, 16, 8, 0}) p.push_back(static_cast<std::uint8_t>(value >> shift));
     }
@@ -114,9 +117,39 @@ public:
         if (command.category == GuiCategory::Recording) {
             replies.clear();
             const auto code = command.command;
-            if (code < 1 || code > 3 || command.payload.size() != (code == 2 ? 69u : 4u))
+            const std::size_t expected = code == 2 ? 69u : code == 5 ? 79u : 4u;
+            if (code < 1 || code > 5 || command.payload.size() != expected)
                 return false;
             const auto request_id = read32(command.payload, 0);
+            if (code == 4) {
+                const auto name = requests_ ? requests_->latest_recording() : std::string{};
+                GuiCommand reply{GuiCategory::Recording, 0x84, {}};
+                write32(reply.payload, request_id);
+                reply.payload.push_back(name.empty() ? 1 : 0);
+                for (std::size_t i = 0; i < 64; ++i)
+                    reply.payload.push_back(i < name.size() ? std::uint8_t(name[i]) : 0);
+                replies.push_back(std::move(reply));
+                return true;
+            }
+            if (code == 5) {
+                const auto first = command.payload.begin() + 4;
+                const auto end = std::find(first, first + 64, 0);
+                const std::string name(first, end);
+                const auto file_id = command.payload[68];
+                const auto offset = read64(command.payload, 69);
+                const auto limit = std::uint16_t(command.payload[77]) << 8 | command.payload[78];
+                const auto chunk = requests_ && limit > 0 && limit <= 32768
+                    ? requests_->read_recording_file(name, file_id, offset, limit)
+                    : PipelineRecordingFileChunk{};
+                GuiCommand reply{GuiCategory::Recording, 0x85, {}};
+                write32(reply.payload, request_id);
+                reply.payload.push_back(chunk.ok ? 0 : 1);
+                write64(reply.payload, chunk.total);
+                write64(reply.payload, offset);
+                reply.payload.insert(reply.payload.end(), chunk.bytes.begin(), chunk.bytes.end());
+                replies.push_back(std::move(reply));
+                return true;
+            }
             bool ok = requests_ != nullptr;
             if (code == 2) {
                 const auto first = command.payload.begin() + 5;
