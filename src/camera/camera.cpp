@@ -108,6 +108,8 @@ bool Camera::open(const std::function<bool()>& should_stop)
 
   te_->ShutterCalibrationOn();
 
+  have_read_plan_ = false;
+
   return true;
 }
 
@@ -121,12 +123,37 @@ bool Camera::capture(FrameContext &frame)
   frame.image.create(height_, width_, CV_16UC1);
   auto *buffer = reinterpret_cast<unsigned short *>(frame.image.data);
 
+  // RecvImage는 프레임이 준비되기 전에 다시 호출하면 4를 반환하며,
+  // 연속 호출 시 읽기 위상이 어긋나 실제 30 fps 중 상당수를 놓친다.
+  // 성공한 읽기의 시작 시각을 기준으로 고정된 카메라 주기에 맞춰 읽는다.
+  using Clock = std::chrono::steady_clock;
+  constexpr auto frame_period = std::chrono::nanoseconds(33333778);
+  if(have_read_plan_)
+  {
+    read_plan_ += frame_period;
+    const auto now = Clock::now();
+    while(now - read_plan_ > std::chrono::milliseconds(6))
+      read_plan_ += frame_period;
+    std::this_thread::sleep_until(read_plan_);
+  }
+  const auto read_start = Clock::now();
+
   // 학습/전처리의 고정 16-bit 입력 범위를 유지하기 위해 SDK AGC를 끈다.
   const int receive_result = te_->RecvImage(buffer, true);
   // Logger::info("[Camera] Frame 결과 " + std::to_string(receive_result));
 
   if(receive_result != 1)
+  {
+    // 빈 읽기 뒤에는 즉시 다시 시도하여 프레임 위상을 잡는다.
+    have_read_plan_ = false;
     return false;
+  }
+
+  if(!have_read_plan_)
+  {
+    read_plan_ = read_start;
+    have_read_plan_ = true;
+  }
 
   return true;
 }
@@ -141,5 +168,6 @@ void Camera::close()
   te_     = nullptr;
   width_  = 0;
   height_ = 0;
+  have_read_plan_ = false;
   Logger::info("[Camera] 닫기 완료");
 }

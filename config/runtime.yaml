@@ -10,6 +10,7 @@ logging:
 
 measurement:
   enabled: true
+  recording_enabled: true  # 시연 설정에서는 false: 녹화 생성과 LAN 녹화 명령 차단
   output_root: /mnt/lwir_data/results/runtime
 
 
@@ -33,6 +34,12 @@ detection:
     # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
     use_ort: false
     npu_cores: all
+  auto_select:
+    enabled: false
+    near_id: 12
+    far_id: 13
+  resident_pair:
+    enabled: false  # 두 DXNN 상주 시도; 불가능하면 기존 교체 경로
 
 reid:
   config: config/reid/repvgg.yaml
@@ -63,6 +70,8 @@ detection_catalog:
   - {id: 9, name: 'YOLO26m inside patch 20261111', config: config/detection/yolo26m_inside_patch.yaml}
   - {id: 10, name: 'YOLO26m outside patch 20261110', config: config/detection/yolo26m_outside_patch.yaml}
   - {id: 11, name: 'YOLO26s NMS-free 640x640', config: config/detection/yolo26s_nmsfree.yaml}
+  - {id: 12, name: 'YOLO26m pose near 640x480', config: config/detection/yolo26m_pose_near.yaml}
+  - {id: 13, name: 'YOLO26m pose far 640x480', config: config/detection/yolo26m_pose_far.yaml}
 
 
 # ============================================================

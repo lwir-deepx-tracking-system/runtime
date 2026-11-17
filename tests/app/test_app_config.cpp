@@ -54,6 +54,7 @@ int main()
         config.tracking.kalman_format != "xywh" || config.tracking.lost_output_frames != 0 ||
         config.tracking.oru || config.tracking.ocm_weight != 0.0F ||
         config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
+        config.tracking.box_refine.mode != "off" || config.tracking.box_refine.lost_same ||
         config.tracking_catalog.size() != 6 ||
         config.tracking_catalog.at(1).config_path !=
             std::filesystem::absolute("config/tracking/bytetrack.yaml").lexically_normal().string() ||
@@ -67,9 +68,12 @@ int main()
         config.tracking_catalog.at(5).config.type != TrackerType::OcSort ||
         config.tracking_catalog.at(6).config.type != TrackerType::Sort ||
         config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
-        !config.measurement.enabled ||
+        !config.measurement.enabled || !config.measurement.recording_enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")
         return 2;
+    auto no_record = YAML::Clone(yaml["measurement"]);
+    no_record["recording_enabled"] = false;
+    if (config_parser::load_measurement_config(no_record).recording_enabled) return 58;
 
     auto tracking = YAML::LoadFile("config/tracking/bytetrack.yaml")["tracking"];
     tracking["type"] = "unsupported";
@@ -80,6 +84,15 @@ int main()
     tracking.remove("type");
     if (config_parser::load_tracking_config(tracking).type != TrackerType::ByteTrack)
         return 42;
+    tracking["box_refine"]["mode"]="size";
+    tracking["box_refine"]["lost_same"]=true;
+    tracking["box_refine"]["aim_y"]=0.3;
+    const auto refined=config_parser::load_tracking_config(tracking);
+    if (refined.box_refine.mode!="size" || !refined.box_refine.lost_same ||
+        refined.box_refine.aim_y!=0.3) return 82;
+    tracking["box_refine"]["mode"]="invalid";
+    try { config_parser::load_tracking_config(tracking);return 83; }
+    catch (const std::runtime_error&) {}
 
     // 연결된 모델 YAML의 Camera와 모델 입력 계약 검증.
     if (config.detection.model.camera_input.opencv_type != "CV_16UC1") return 3;
@@ -116,11 +129,13 @@ int main()
         return 7;
     if (config.detection_catalog.at(2).model.postprocess.type != "yolo26")
         return 44;
-    if (config.detection_catalog.size() != 11 ||
+    if (config.detection_catalog.size() != 13 ||
         config.detection_catalog.at(3).display_name != "YOLO26m FLIR 640x480" ||
         config.detection_catalog.at(3).model.input.height != 480 ||
         config.detection_catalog.at(3).model.postprocess.output_format != PostprocessOutputFormat::SplitHead ||
         config.detection_catalog.at(11).model.postprocess.output_format != PostprocessOutputFormat::EndToEndXyxy ||
+        config.detection_catalog.at(12).model.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose ||
+        config.detection_catalog.at(13).model.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose ||
         config.tracking_catalog.at(2).display_name != "BoT-SORT + Appearance ReID")
         return 54;
     if (!YAML::LoadFile("config/detection/yolov8n.yaml")["postprocess"] ||

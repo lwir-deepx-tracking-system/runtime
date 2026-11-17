@@ -1,0 +1,32 @@
+# Pose26 nine-head contract from model-bank origin/main (2026-11-16).
+path_base: ../..
+model:
+  name: yolo26m_pose_near
+  path: models/imported/detect/yolo26m/yolo26m_pose_otp2cocomot_20261114_bodybox_occl_kpt_640x480.dxnn
+camera_input:
+  opencv_type: CV_16UC1
+  width: 640
+  height: 480
+  clip_min: 0
+  clip_max: 65535
+  channel_mode: replicate_gray_to_rgb
+input:
+  width: 640
+  height: 480
+preprocess:
+  type: lwir_letterbox
+  resize: letterbox
+  normalize: false
+  pad_value: 114
+postprocess:
+  type: yolo26
+  output_format: split_head_pose
+  split_output_levels: 3
+  split_regression_bins: 1
+  split_class_score_activation: sigmoid
+  nms_mode: enabled
+  class_agnostic_nms: false
+  confidence_threshold: 0.001
+  nms_threshold: 0.7
+  num_classes: 16
+  class_names: ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat"]

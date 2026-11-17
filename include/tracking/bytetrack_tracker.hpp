@@ -8,6 +8,7 @@
 #include "config/app_config.hpp"
 #include "tracking/camera_motion.hpp"
 #include "tracking/kalman_filter.hpp"
+#include "tracking/position_memory.hpp"
 #include "tracking/tracker.hpp"
 
 namespace bytetrack
@@ -29,6 +30,7 @@ struct STrack
 
     KalmanState kf{};
     std::array<float, 4> det_tlwh{};  // 검출 bbox (x, y, width, height)
+    std::vector<Detection::Keypoint> keypoints;
 
     float score = 0.0f;
     int class_id = -1;
@@ -64,12 +66,14 @@ private:
     TrackingConfig config_;
     float new_track_threshold_ = 0.6F;
     KalmanFilter kalman_;
+    PositionMemory position_memory_;
 
     int frame_id_ = 0;
     int next_track_id_ = 0;
     int max_time_lost_ = 30;
 
     CameraMotion camera_motion_;   // 다음 track() 한 번에만 적용할 카메라 움직임
+    CameraMotion previous_motion_;
     float image_width_ = 0.0f;     // 영상 크기. 0이면 모름 (화면 밖 판정을 하지 않음)
     float image_height_ = 0.0f;
 

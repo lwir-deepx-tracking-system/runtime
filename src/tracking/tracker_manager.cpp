@@ -63,12 +63,22 @@ void TrackerManager::update_active_policy(const TrackerPolicyUpdate& update,
     if (update.confirmation_ms) config.frame.confirmation_ms = *update.confirmation_ms;
     if (update.gmc) config.frame.gmc = *update.gmc;
     if (update.class_gate) config.class_gate = *update.class_gate;
+    if (update.position_memory) config.position_memory = *update.position_memory;
+    if (update.box_refine_mode) config.box_refine.mode = *update.box_refine_mode;
+    if (update.box_refine_lost_same) config.box_refine.lost_same = *update.box_refine_lost_same;
+    if (update.box_refine_aim_y) config.box_refine.aim_y = *update.box_refine_aim_y;
     if (config.frame.warmth_min < 0 || config.frame.warmth_min > 65535 ||
         config.frame.warmth_max < 0 || config.frame.warmth_max > 65535 ||
         (config.frame.warmth_max > 0 && config.frame.warmth_min > config.frame.warmth_max) ||
         !std::isfinite(config.edge_birth_threshold) || config.edge_birth_threshold < 0 ||
         config.edge_birth_threshold > 1 || config.frame.confirmation_ms < 0 ||
-        config.frame.confirmation_ms > 1000)
+        config.frame.confirmation_ms > 1000 ||
+        (config.position_memory!="kalman" && config.position_memory!="gru_kpt" &&
+         config.position_memory!="mamba_kpt" && config.position_memory!="gru_near_kpt") ||
+        (config.box_refine.mode!="off" && config.box_refine.mode!="size" &&
+         config.box_refine.mode!="body") ||
+        !std::isfinite(config.box_refine.aim_y) || config.box_refine.aim_y<0 ||
+        config.box_refine.aim_y>1)
         throw std::invalid_argument("Invalid tracker policy update");
     std::shared_ptr<Tracker> candidate = creator_(config);
     if (!candidate) throw std::runtime_error("Tracker factory returned null");

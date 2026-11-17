@@ -20,7 +20,7 @@ int main() {
         auto result = std::make_shared<TrackingResult>();
         result->frame = frame;
         result->tracks.push_back(Track{n + 10, 1.0F, 2.0F, 3.0F, 4.0F, 0, 0.9F});
-        recorder.submit_tracks(result);
+        recorder.submit_tracks(result, 2.0);
     }
     if (!recorder.stop()) return 2;
     const auto status = recorder.status();
@@ -39,6 +39,11 @@ int main() {
     std::string header, row;
     if (!std::getline(tracks, header) || !std::getline(tracks, row) ||
         row.find("1,10,0,0.9,1,2,3,4,0") != 0) return 8;
+    std::ifstream info(recorder.directory() / "recording.txt");
+    std::string content((std::istreambuf_iterator<char>(info)), std::istreambuf_iterator<char>());
+    if (content.find("delay_p50=") == std::string::npos ||
+        content.find("interval_p95=") == std::string::npos ||
+        content.find("tracker_p50=2") == std::string::npos) return 9;
     std::filesystem::remove_all(root);
     return 0;
 }

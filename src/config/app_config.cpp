@@ -48,9 +48,10 @@ PostprocessOutputFormat parse_postprocess_output_format(const std::string& value
     if (value == "decoded_xywh") return PostprocessOutputFormat::DecodedXywh;
     if (value == "end_to_end_xyxy") return PostprocessOutputFormat::EndToEndXyxy;
     if (value == "split_head") return PostprocessOutputFormat::SplitHead;
+    if (value == "split_head_pose") return PostprocessOutputFormat::SplitHeadPose;
     throw std::runtime_error(
         "postprocess.output_format must be one of: auto, decoded_xywh, "
-        "end_to_end_xyxy, split_head");
+        "end_to_end_xyxy, split_head, split_head_pose");
 }
 
 PostprocessScoreActivation parse_postprocess_score_activation(
@@ -199,6 +200,20 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
     c.frame.gmc_downscale = optional_value<int>(node,"gmc_downscale","tracking",2);
     c.frame.gmc_max_corners = optional_value<int>(node,"gmc_max_corners","tracking",300);
     c.frame.gmc_min_distance = optional_value<double>(node,"gmc_min_distance","tracking",5.0);
+    c.position_memory = optional_value<std::string>(node,"position_memory","tracking","kalman");
+    if (c.position_memory!="kalman" && c.position_memory!="gru_kpt" &&
+        c.position_memory!="mamba_kpt" && c.position_memory!="gru_near_kpt")
+        throw std::runtime_error("tracking.position_memory is unsupported");
+    if (const auto refine = node["box_refine"]) {
+        if (!refine.IsMap()) throw std::runtime_error("tracking.box_refine must be a map");
+        c.box_refine.mode = optional_value<std::string>(refine,"mode","tracking.box_refine","off");
+        c.box_refine.lost_same = optional_value<bool>(refine,"lost_same","tracking.box_refine",false);
+        c.box_refine.aim_y = optional_value<double>(refine,"aim_y","tracking.box_refine",0.5);
+    }
+    if ((c.box_refine.mode!="off" && c.box_refine.mode!="size" &&
+         c.box_refine.mode!="body") ||
+        !std::isfinite(c.box_refine.aim_y) || c.box_refine.aim_y<0 || c.box_refine.aim_y>1)
+        throw std::runtime_error("tracking.box_refine requires mode off/size/body and aim_y in [0,1]");
     if(c.confirmation_frames<1 || c.frame.person_class_id<0 ||
        !std::isfinite(c.edge_birth_threshold) || c.edge_birth_threshold<0 || c.edge_birth_threshold>1 ||
        !std::isfinite(c.edge_margin_px) || c.edge_margin_px<0 ||
@@ -395,6 +410,8 @@ MeasurementConfig load_measurement_config(const YAML::Node& node)
 {
     MeasurementConfig c;
     c.enabled = required<bool>(node, "enabled", "measurement");
+    if (node["recording_enabled"])
+        c.recording_enabled = required<bool>(node, "recording_enabled", "measurement");
     c.output_root = required<std::string>(node, "output_root", "measurement");
     if (c.output_root.empty())
         throw std::runtime_error("measurement.output_root must not be empty");
@@ -805,6 +822,30 @@ RuntimeConfig load_runtime_config(const std::string& path)
     }
 
     validate_catalog_ids(c.detection_catalog, "detection_catalog");
+    const YAML::Node auto_detection = root["detection"]["auto_select"];
+    if (auto_detection) {
+        c.auto_detection_enabled = optional_value<bool>(
+            auto_detection, "enabled", "detection.auto_select", false);
+        c.auto_near_model_id = optional_value<int>(
+            auto_detection, "near_id", "detection.auto_select", 0);
+        c.auto_far_model_id = optional_value<int>(
+            auto_detection, "far_id", "detection.auto_select", 0);
+        if (c.auto_detection_enabled &&
+            (c.auto_near_model_id == c.auto_far_model_id ||
+             !c.detection_catalog.count(c.auto_near_model_id) ||
+             !c.detection_catalog.count(c.auto_far_model_id) ||
+             c.detection_catalog.at(c.auto_near_model_id).model.postprocess.output_format !=
+                 PostprocessOutputFormat::SplitHeadPose ||
+             c.detection_catalog.at(c.auto_far_model_id).model.postprocess.output_format !=
+                 PostprocessOutputFormat::SplitHeadPose))
+            throw std::runtime_error("detection.auto_select requires two distinct pose catalog models");
+    }
+    const YAML::Node resident_pair = root["detection"]["resident_pair"];
+    if (resident_pair)
+        c.resident_detection_pair = optional_value<bool>(
+            resident_pair, "enabled", "detection.resident_pair", false);
+    if (c.resident_detection_pair && !c.auto_detection_enabled)
+        throw std::runtime_error("detection.resident_pair requires auto_select.enabled");
     const std::string active_config =
         fs::path(c.detection.config_path).lexically_normal().string();
     for (const auto& item : c.detection_catalog)
@@ -817,6 +858,10 @@ RuntimeConfig load_runtime_config(const std::string& path)
         throw std::runtime_error(
             "detection.config must be listed in detection_catalog");
     c.detection.model = c.detection_catalog.at(c.initial_detection_id).model;
+    if (c.auto_detection_enabled &&
+        c.initial_detection_id != c.auto_near_model_id &&
+        c.initial_detection_id != c.auto_far_model_id)
+        throw std::runtime_error("detection.auto_select initial model must be near_id or far_id");
 
     c.reid.config_path = config_parser::required_string(root["reid"], "config", "reid");
     if (c.reid.config_path.empty())

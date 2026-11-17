@@ -52,22 +52,27 @@ int payload_size(GuiCategory category, std::uint8_t command)
         if (command == 0x84) return 9;
         break;
     case GuiCategory::Pipeline:
-        if (command == 1 || command == 2 || command == 7) return 4;
-        if (command == 3 || command == 4 || command == 5 || command == 6) return 8;
+        if (command == 1 || command == 2 || command == 7 || command == 9 || command == 11) return 4;
+        if (command == 3 || command == 4 || command == 5 || command == 6 || command == 12) return 8;
         if (command == 8) return 28;
+        if (command == 10) return 24;
+        if (command == 13) return 12;
         if (command == 0x81 || command == 0x82) return 8;
         if (command == 0x83 || command == 0x84) return 6;
-        if (command == 0x88) return 6;
+        if (command == 0x88 || command == 0x8a || command == 0x8c || command == 0x8d) return 6;
         if (command == 0x85 || command == 0x86) return 76;
         if (command == 0x87) return 32;
+        if (command == 0x89) return 20;
+        if (command == 0x8b) return 28;
         break;
     case GuiCategory::Recording:
-        if (command == 1 || command == 3 || command == 4) return 4;
+        if (command == 1 || command == 3 || command == 4 || command == 6) return 4;
         if (command == 2) return 69;
         if (command == 5) return 79;
         if (command == 0x81 || command == 0x82 || command == 0x83) return 28;
         if (command == 0x84) return 69;
         if (command == 0x85) return -2; // bounded file chunk reply
+        if (command == 0x86) return -3; // 5-byte header, up to 32 fixed names
         break;
     }
     return -1;
@@ -77,6 +82,11 @@ std::size_t packet_size(const std::uint8_t* data, std::size_t size)
     if (!data || size < kGuiCommandHeaderSize || get(data, 4) != kGuiCommandMagic)
         return 0;
     const int payload = payload_size(static_cast<GuiCategory>(data[4]), data[5]);
+    if (payload == -3) {
+        const auto length = get(data + 6, 2);
+        return length >= 5 && length <= 2053 && (length - 5) % 64 == 0
+            ? kGuiCommandHeaderSize + length : 0;
+    }
     if (payload == -2) {
         const auto length = get(data + 6, 2);
         return length >= 21 && length <= 32789 ? kGuiCommandHeaderSize + length : 0;
@@ -103,7 +113,10 @@ std::vector<std::uint8_t> encode_gui_command(const GuiCommand& command)
 {
     const int size = payload_size(command.category, command.command);
     if ((size == -2 && (command.payload.size() < 21 || command.payload.size() > 32789)) ||
-        (size != -2 && (size < 0 || command.payload.size() != static_cast<std::size_t>(size)))) return {};
+        (size == -3 && (command.payload.size() < 5 || command.payload.size() > 2053 ||
+                         (command.payload.size() - 5) % 64 != 0)) ||
+        (size >= 0 && command.payload.size() != static_cast<std::size_t>(size)) ||
+        size == -1 || size < -3) return {};
     std::vector<std::uint8_t> packet;
     put(packet, kGuiCommandMagic, 4);
     put(packet, static_cast<std::uint8_t>(command.category), 1);

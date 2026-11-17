@@ -15,6 +15,11 @@
 #include "pipeline/runtime_control.hpp"
 class RawRecorder;
 
+struct AutoModelObservation {
+    DetectionResult detections;
+    TrackingResultPtr tracks;
+};
+
 // Detection을 Tracking하고 같은 결과를 GUI와 제어 경로에 분기한다.
 class TrackingThread
 {
@@ -31,6 +36,7 @@ private:
     bool measurement_enabled_;
     IMeasurementSink* measurements_;
     RawRecorder* recorder_ = nullptr;
+    ThreadSafeQueue<AutoModelObservation>* auto_output_queue_ = nullptr;
     std::atomic<bool> failed_{false};
     std::string error_message_;
     std::vector<StageMetric> metrics_;
@@ -46,7 +52,8 @@ public:
         ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
         ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
         bool measurement_enabled, IMeasurementSink* measurements = nullptr,
-        RawRecorder* recorder = nullptr
+        RawRecorder* recorder = nullptr,
+        ThreadSafeQueue<AutoModelObservation>* auto_output_queue = nullptr
     );
 
     void start();

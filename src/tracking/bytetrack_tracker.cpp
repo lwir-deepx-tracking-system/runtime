@@ -383,7 +383,8 @@ ByteTrackTracker::ByteTrackTracker(const TrackingConfig& config)
       new_track_threshold_(config.new_track_threshold > 0.0F ?
                                config.new_track_threshold :
                                std::min(config.track_threshold + 0.1F, 1.0F)),
-      kalman_(config.kalman_format == "xywh" ? KalmanFormat::XYWH : KalmanFormat::XYAH)
+      kalman_(config.kalman_format == "xywh" ? KalmanFormat::XYWH : KalmanFormat::XYAH),
+      position_memory_(config.position_memory)
 {
     max_time_lost_ = config_.track_buffer;
 
@@ -437,6 +438,11 @@ void ByteTrackTracker::activate(STrack& t)
     t.start_frame = frame_id_;
     if (observation_centric())
         record_observation(t, t.det_tlwh);
+    if(position_memory_.enabled()) {
+        Detection d;d.x=t.det_tlwh[0];d.y=t.det_tlwh[1];d.width=t.det_tlwh[2];
+        d.height=t.det_tlwh[3];d.keypoints=t.keypoints;
+        position_memory_.observe(t.track_id,d,t.kf);
+    }
 }
 
 
@@ -485,6 +491,7 @@ void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
     if (config_.oru && t.state == TrackState::Lost && t.has_lost_kf)
         re_update(t, det);
     t.has_lost_kf = false;
+    const auto predicted_state=t.kf;
     kalman_.update(t.kf, to_measurement(det.det_tlwh, kalman_.format()), measurement_noise_scale(det.score));
     t.state = TrackState::Tracked;
     t.is_activated = t.is_activated || t.tracklet_len+1 >= config_.confirmation_frames;
@@ -494,6 +501,12 @@ void ByteTrackTracker::apply_detection(STrack& t, const STrack& det)
     t.det_tlwh = det.det_tlwh;  // 마지막으로 매칭된 검출 박스 (화면 밖 판정에 사용)
     if (observation_centric())
         record_observation(t, det.det_tlwh);
+    t.keypoints=det.keypoints;
+    if(position_memory_.enabled()) {
+        Detection d;d.x=det.det_tlwh[0];d.y=det.det_tlwh[1];d.width=det.det_tlwh[2];
+        d.height=det.det_tlwh[3];d.keypoints=det.keypoints;
+        position_memory_.observe(t.track_id,d,t.kf,&predicted_state);
+    }
 }
 
 
@@ -514,6 +527,7 @@ std::vector<Track> ByteTrackTracker::track(
         det->det_tlwh = {d.x, d.y, d.width, d.height};
         det->score = d.confidence;
         det->class_id = d.class_id;
+        det->keypoints = d.keypoints;
 
         if (d.confidence >= config_.track_threshold)
             high_dets.push_back(std::move(det));
@@ -557,6 +571,9 @@ std::vector<Track> ByteTrackTracker::track(
                         apply_camera_motion(t->lost_kf, camera_motion_);
                 }
     }
+    for(auto& t:pool)if(t->state==TrackState::Lost)
+        position_memory_.lost(t->track_id,t->kf,previous_motion_,camera_motion_);
+    previous_motion_=camera_motion_;
     camera_motion_ = CameraMotion{};
 
     std::vector<STrackPtr> activated, refind, lost_new, removed;
@@ -705,6 +722,7 @@ std::vector<Track> ByteTrackTracker::track(
         if (t->state != TrackState::Lost)
         {
             t->state = TrackState::Lost;
+            position_memory_.lost(t->track_id,t->kf,previous_motion_,previous_motion_);
             lost_new.push_back(t);
             if (config_.oru)
             {
@@ -770,6 +788,7 @@ std::vector<Track> ByteTrackTracker::track(
     lost_stracks_ = sub(lost_stracks_, new_tracked);
     lost_stracks_.insert(lost_stracks_.end(), lost_new.begin(), lost_new.end());
     lost_stracks_ = sub(lost_stracks_, removed);
+    for(const auto& t:removed)position_memory_.forget(t->track_id);
 
     remove_duplicates(new_tracked, lost_stracks_, config_);
     tracked_stracks_ = std::move(new_tracked);
@@ -843,6 +862,8 @@ void ByteTrackTracker::reset()
     lost_stracks_.clear();
     frame_id_ = 0;
     camera_motion_ = CameraMotion{};
+    previous_motion_ = CameraMotion{};
+    position_memory_.reset();
     next_track_id_ = 0;
 
     Logger::info(

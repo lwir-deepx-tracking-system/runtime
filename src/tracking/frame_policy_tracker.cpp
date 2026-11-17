@@ -51,6 +51,18 @@ void FramePolicyTracker::reset() {
     }
 }
 
+void FramePolicyTracker::reset_for_model_change() {
+    base_->reset_for_model_change();
+    previous_.release();points_.clear();
+    confirmation_intervals_.clear();last_confirmation_frame_={};
+    if (config_.confirmation_ms > 0) {
+        time_confirmation_frames_ = std::max(1, (config_.confirmation_ms * 25 + 500) / 1000);
+        const auto frames = std::max(base_confirmation_frames_, time_confirmation_frames_);
+        base_->set_confirmation_frames(frames);
+        effective_confirmation_frames_.store(frames);
+    }
+}
+
 std::vector<Track> FramePolicyTracker::track(const std::vector<Detection>& detections)
 {
     if (config_.gmc || config_.warmth_min || config_.warmth_max || config_.confirmation_ms)

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -118,11 +119,24 @@ public:
             replies.clear();
             const auto code = command.command;
             const std::size_t expected = code == 2 ? 69u : code == 5 ? 79u : 4u;
-            if (code < 1 || code > 5 || command.payload.size() != expected)
+            if (code < 1 || code > 6 || command.payload.size() != expected)
                 return false;
             const auto request_id = read32(command.payload, 0);
+            if (code == 6) {
+                const auto names = requests_ && requests_->recording_available()
+                    ? requests_->list_recordings() : std::vector<std::string>{};
+                GuiCommand reply{GuiCategory::Recording, 0x86, {}};
+                write32(reply.payload, request_id);
+                reply.payload.push_back(requests_ && requests_->recording_available() ? 0 : 1);
+                for (std::size_t n = 0; n < std::min<std::size_t>(names.size(), 32); ++n)
+                    for (std::size_t i = 0; i < 64; ++i)
+                        reply.payload.push_back(i < names[n].size() ? std::uint8_t(names[n][i]) : 0);
+                replies.push_back(std::move(reply));
+                return true;
+            }
             if (code == 4) {
-                const auto name = requests_ ? requests_->latest_recording() : std::string{};
+                const auto name = requests_ && requests_->recording_available()
+                    ? requests_->latest_recording() : std::string{};
                 GuiCommand reply{GuiCategory::Recording, 0x84, {}};
                 write32(reply.payload, request_id);
                 reply.payload.push_back(name.empty() ? 1 : 0);
@@ -138,7 +152,7 @@ public:
                 const auto file_id = command.payload[68];
                 const auto offset = read64(command.payload, 69);
                 const auto limit = std::uint16_t(command.payload[77]) << 8 | command.payload[78];
-                const auto chunk = requests_ && limit > 0 && limit <= 32768
+                const auto chunk = requests_ && requests_->recording_available() && limit > 0 && limit <= 32768
                     ? requests_->read_recording_file(name, file_id, offset, limit)
                     : PipelineRecordingFileChunk{};
                 GuiCommand reply{GuiCategory::Recording, 0x85, {}};
@@ -150,7 +164,7 @@ public:
                 replies.push_back(std::move(reply));
                 return true;
             }
-            bool ok = requests_ != nullptr;
+            bool ok = requests_ && requests_->recording_available();
             if (code == 2) {
                 const auto first = command.payload.begin() + 5;
                 const auto end = std::find(first, command.payload.end(), 0);
@@ -165,10 +179,51 @@ public:
         if (command.category != GuiCategory::Pipeline) return control_->handle(command, replies);
         replies.clear();
         const auto code = command.command;
-        if (code < 1 || code > 8 || command.payload.size() !=
-            (code == 8 ? 28u : ((code <= 2 || code == 7) ? 4u : 8u)))
+        if (code < 1 || code > 13 || command.payload.size() !=
+            (code == 8 ? 28u : code == 10 ? 24u : code == 13 ? 12u :
+             ((code <= 2 || code == 7 || code == 9 || code == 11) ? 4u : 8u)))
             return false; // 보드 응답을 PC가 보내는 경우도 거부한다.
         const auto request_id = read32(command.payload, 0);
+        if (code == 9) {
+            const auto policy=requests_ ? requests_->tracker_policy() : PipelineTrackerPolicy{};
+            GuiCommand reply{GuiCategory::Pipeline,0x89,{}};
+            write32(reply.payload,request_id);
+            write32(reply.payload,policy.position_memory);
+            write32(reply.payload,policy.box_refine_mode);
+            write32(reply.payload,policy.box_refine_lost_same ? 1u : 0u);
+            std::uint32_t bits=0;std::memcpy(&bits,&policy.box_refine_aim_y,4);
+            write32(reply.payload,bits);
+            replies.push_back(std::move(reply));return true;
+        }
+        if (code == 11) {
+            const auto auto_policy=requests_ ? requests_->auto_detection() : PipelineAutoDetection{};
+            GuiCommand reply{GuiCategory::Pipeline,0x8b,{}};
+            write32(reply.payload,request_id);
+            write32(reply.payload,auto_policy.enabled ? 1u : 0u);
+            write32(reply.payload,auto_policy.available ? 1u : 0u);
+            write32(reply.payload,auto_policy.near_id);
+            write32(reply.payload,auto_policy.far_id);
+            std::uint32_t far_bits=0,near_bits=0;
+            std::memcpy(&far_bits,&auto_policy.far_px,4);
+            std::memcpy(&near_bits,&auto_policy.near_px,4);
+            write32(reply.payload,far_bits);write32(reply.payload,near_bits);
+            replies.push_back(std::move(reply));return true;
+        }
+        if (code == 12) {
+            const auto enabled=read32(command.payload,4);
+            const bool ok=enabled<=1 && requests_ && requests_->set_auto_detection(enabled!=0);
+            replies.push_back(response(code,request_id,GuiPipelinePhase::Completed,
+                ok ? GuiPipelineResult::Ok : GuiPipelineResult::InvalidConfiguration));
+            return true;
+        }
+        if (code == 13) {
+            const auto far_bits=read32(command.payload,4),near_bits=read32(command.payload,8);
+            float far=0,near=0;std::memcpy(&far,&far_bits,4);std::memcpy(&near,&near_bits,4);
+            const bool ok=requests_ && requests_->set_auto_detection_thresholds(far,near);
+            replies.push_back(response(code,request_id,GuiPipelinePhase::Completed,
+                ok ? GuiPipelineResult::Ok : GuiPipelineResult::InvalidConfiguration));
+            return true;
+        }
         if (code == 7) {
             const auto policy = requests_ ? requests_->tracker_policy() : PipelineTrackerPolicy{};
             GuiCommand reply{GuiCategory::Pipeline, 0x87, {}};
@@ -215,7 +270,27 @@ public:
         }
         PipelineChangeTicket ticket;
         if (requests_) {
-            if (code == 8) {
+            if (code == 10) {
+                const auto mask=read32(command.payload,4);
+                const auto position=read32(command.payload,8);
+                const auto refine=read32(command.payload,12);
+                const auto flags=read32(command.payload,16);
+                const auto aim_bits=read32(command.payload,20);
+                float aim=0;std::memcpy(&aim,&aim_bits,4);
+                if(!mask || (mask & ~15u) || position>3 || refine>2 || flags>1 ||
+                    !std::isfinite(aim) || aim<0 || aim>1) {
+                    replies.push_back(response(code,request_id,GuiPipelinePhase::Completed,
+                        GuiPipelineResult::InvalidConfiguration));return true;
+                }
+                TrackerPolicyUpdate update;
+                const char* positions[]={"kalman","gru_kpt","mamba_kpt","gru_near_kpt"};
+                const char* modes[]={"off","size","body"};
+                if(mask&1u)update.position_memory=positions[position];
+                if(mask&2u)update.box_refine_mode=modes[refine];
+                if(mask&4u)update.box_refine_lost_same=(flags&1u)!=0;
+                if(mask&8u)update.box_refine_aim_y=aim;
+                ticket=requests_->request_policy_change(update);
+            } else if (code == 8) {
                 const auto mask = read32(command.payload, 4);
                 const auto flags = read32(command.payload, 24);
                 if (!mask || (mask & ~63u) || (flags & ~3u)) {

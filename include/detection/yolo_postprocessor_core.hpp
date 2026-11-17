@@ -25,6 +25,7 @@ private:
         float y2 = 0.0F;
         float confidence = 0.0F;
         int class_id = -1;
+        std::vector<Detection::Keypoint> keypoints;
     };
 
     PostprocessOutputFormat resolve_output_format(

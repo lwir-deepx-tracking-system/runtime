@@ -135,5 +135,44 @@ int main()
             return 6;
     }
 
+    // Pose26 nine-head contract: the kept person's 17 points follow the box through NMS.
+    {
+        ModelConfig config = make_config();
+        config.input.width = 8;
+        config.input.height = 8;
+        config.postprocess.output_format = PostprocessOutputFormat::SplitHeadPose;
+        config.postprocess.split_output_levels = 1;
+        config.postprocess.split_regression_bins = 1;
+        config.postprocess.split_class_score_activation = PostprocessScoreActivation::Sigmoid;
+        YoloPostprocessorCore postprocessor(config);
+        PreprocessContext context;
+        context.original_width = context.original_height = 8;
+        context.input_width = context.input_height = 8;
+        context.scale = 1.0F;
+        std::vector<float> joints(51, 0.0F);
+        for (int i = 0; i < 17; ++i) {
+            joints[i * 3] = 0.25F;
+            joints[i * 3 + 1] = 0.125F;
+            joints[i * 3 + 2] = 2.0F;
+        }
+        const dxrt::TensorPtrs outputs = {
+            make_tensor("kpt_s8", {1, 51, 1, 1}, joints),
+            make_tensor("cls_s8", {1, 2, 1, 1}, {2.0F, -2.0F}),
+            make_tensor("box_s8", {1, 4, 1, 1}, {0.25F, 0.25F, 0.25F, 0.25F}),
+        };
+        const auto detections = postprocessor.process(outputs, context);
+        if (detections.size() != 1 || detections[0].keypoints.size() != 17) return 7;
+        if (!close(detections[0].keypoints[0].x, 6.0F) ||
+            !close(detections[0].keypoints[0].y, 5.0F) ||
+            !close(detections[0].keypoints[0].visibility, 0.88079708F)) return 8;
+        bool rejected = false;
+        try {
+            auto bad = outputs;
+            bad[0] = make_tensor("kpt_s8", {1, 51, 2, 1}, std::vector<float>(102, 0.0F));
+            postprocessor.process(bad, context);
+        } catch (const std::runtime_error&) { rejected = true; }
+        if (!rejected) return 9;
+    }
+
     return 0;
 }

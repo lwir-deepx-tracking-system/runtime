@@ -16,6 +16,7 @@ public:
     std::vector<Track> track(const std::vector<Detection>& detections) override;
     TrackingStep process(const DetectionResult& input) override;
     void reset() override;
+    void reset_for_model_change() override;
     int current_confirmation_frames() const override { return effective_confirmation_frames_.load(); }
 private:
     CameraMotion estimate(const cv::Mat& raw);

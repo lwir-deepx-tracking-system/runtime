@@ -115,13 +115,15 @@ cv::Rect crop_rect(const Detection& d, const cv::Mat& image)
 
 BotSortTracker::BotSortTracker(TrackingConfig config,
     std::unique_ptr<IReidPipeline> reid, int person_class_id)
-    : config_(std::move(config)), reid_(std::move(reid)), person_class_id_(person_class_id)
+    : config_(std::move(config)), reid_(std::move(reid)), person_class_id_(person_class_id),
+      position_memory_(config_.position_memory)
 {
     if(config_.type!=TrackerType::BotSort) throw std::invalid_argument("BoT-SORT config type mismatch");
     if(config_.kalman_format!="xywh") throw std::invalid_argument("BoT-SORT requires xywh Kalman format");
 }
 
-void BotSortTracker::reset() { targets_.clear();frame_=0;next_id_=0;motion_={}; }
+void BotSortTracker::reset() { targets_.clear();frame_=0;next_id_=0;motion_={};
+    previous_motion_={};position_memory_.reset(); }
 
 std::vector<Track> BotSortTracker::track(const std::vector<Detection>& detections)
 {
@@ -181,20 +183,24 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
     }
     for(size_t i=0;i<targets_.size();++i) if(targets_[i].state!=State::Removed) {
         if(targets_[i].state==State::Lost && frame_-targets_[i].last_frame>config_.track_buffer) {
-            targets_[i].state=State::Removed;continue;
+            targets_[i].state=State::Removed;position_memory_.forget(targets_[i].id);continue;
         }
         if(!targets_[i].confirmed) { apply_camera_motion(targets_[i].kf,motion_); unconfirmed.push_back(i);continue; }
         if(targets_[i].state==State::Lost) { targets_[i].kf.mean[6]=0;targets_[i].kf.mean[7]=0; }
         kalman_.predict(targets_[i].kf);
         apply_camera_motion(targets_[i].kf,motion_);
+        if(targets_[i].state==State::Lost)
+            position_memory_.lost(targets_[i].id,targets_[i].kf,previous_motion_,motion_);
         active.push_back(i);
     }
-    motion_={};
+    previous_motion_=motion_;motion_={};
     std::vector<bool> used(detections.size());
     std::vector<bool> matched(targets_.size());
     auto update=[&](size_t ti,size_t di,const char* stage) {
         auto& t=targets_[ti];const auto& d=detections[di];
+        const auto predicted_state=t.kf;
         kalman_.update(t.kf,measure(d));
+        position_memory_.observe(t.id,d,t.kf,&predicted_state);
         t.observation=d;t.last_frame=frame_;t.state=State::Tracked;
         ++t.hits;t.confirmed=t.confirmed || t.hits>=config_.confirmation_frames;
         const auto f=normalized(features[di]);
@@ -249,11 +255,13 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
     stage(unconfirmed,remaining_high,true,config_.unconfirmed_match_threshold,"confirm");
     for(size_t i:unconfirmed) if(!matched[i]) {
         targets_[i].state=State::Removed;
+        position_memory_.forget(targets_[i].id);
         result.association_events.push_back(std::to_string(frame_)+",removed,"+
             std::to_string(targets_[i].id)+",-1");
     }
     for(size_t i:active) if(!matched[i] && targets_[i].state==State::Tracked) {
         targets_[i].state=State::Lost;
+        position_memory_.lost(targets_[i].id,targets_[i].kf,previous_motion_,previous_motion_);
         result.association_events.push_back(std::to_string(frame_)+",lost,"+
             std::to_string(targets_[i].id)+",-1");
     }
@@ -265,6 +273,7 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
         Target t;t.id=++next_id_;t.last_frame=frame_;t.observation=detections[i];
         t.confirmed=(frame_==1 || config_.confirmation_frames==1);
         t.kf=kalman_.initiate(measure(detections[i]));t.feature=normalized(features[i]);
+        position_memory_.observe(t.id,d,t.kf);
         targets_.push_back(std::move(t));
         result.association_events.push_back(std::to_string(frame_)+",new,"+
             std::to_string(next_id_)+","+std::to_string(i));

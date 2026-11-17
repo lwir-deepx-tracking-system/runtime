@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <string>
 
@@ -39,6 +40,9 @@ class ModelManagerThread
 private:
     ModelCatalogEntry initial_model_;
     ModelCatalogEntry active_model_;
+    std::optional<ModelCatalogEntry> resident_peer_;
+    std::shared_ptr<IDetectionPipeline> resident_inactive_;
+    int resident_inactive_id_ = 0;
     InferenceConfig inference_config_;
     ThreadSafeQueue<ModelChangeRequest>& requests_;
     ThreadSafeQueue<ModelChangeResult>* results_;
@@ -71,7 +75,8 @@ public:
         RuntimeControl& runtime_control,
         ThreadSafeQueue<ModelChangeResult>* results = nullptr,
         std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
-            pipeline_creator = {}, IMeasurementSink* measurements = nullptr);
+            pipeline_creator = {}, IMeasurementSink* measurements = nullptr,
+        std::optional<ModelCatalogEntry> resident_peer = std::nullopt);
 
     void start();
     void wait_until_initialized();

@@ -15,9 +15,11 @@ ModelManagerThread::ModelManagerThread(
     RuntimeControl& runtime_control,
     ThreadSafeQueue<ModelChangeResult>* results,
     std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>
-        pipeline_creator, IMeasurementSink* measurements)
+        pipeline_creator, IMeasurementSink* measurements,
+    std::optional<ModelCatalogEntry> resident_peer)
     : initial_model_(std::move(initial_model)),
       active_model_(initial_model_),
+      resident_peer_(std::move(resident_peer)),
       inference_config_(std::move(inference_config)),
       requests_(requests),
       results_(results),
@@ -130,6 +132,19 @@ void ModelManagerThread::run()
         "[ModelManagerThread] active model id=" +
         std::to_string(active_model_id_.load()));
 
+    if (resident_peer_ && !runtime_control_.stop_requested.load()) {
+        try {
+            resident_inactive_ = create_pipeline(*resident_peer_);
+            if (!resident_inactive_) throw std::runtime_error("resident pipeline is null");
+            resident_inactive_id_ = resident_peer_->id;
+            Logger::info("[ModelManagerThread] resident model id=" +
+                std::to_string(resident_inactive_id_));
+        } catch (const std::exception& e) {
+            resident_inactive_.reset();
+            Logger::warn(std::string("[ModelManagerThread] resident model unavailable: ") + e.what());
+        }
+    }
+
     // The old DXNN instance must be released before loading another. If loading
     // fails, recreate the last working model from its validated configuration.
     const auto restore_previous_model = [this](
@@ -197,13 +212,20 @@ void ModelManagerThread::run()
         {
             if (old_pipeline)
                 old_pipeline->wait_idle();
-            old_pipeline.reset();
-
-            if (runtime_control_.stop_requested.load())
-                break;
-
-            std::shared_ptr<IDetectionPipeline> new_pipeline =
-                create_pipeline(request.entry);
+            if (runtime_control_.stop_requested.load()) break;
+            std::shared_ptr<IDetectionPipeline> new_pipeline;
+            if (resident_inactive_ && request.entry.id == resident_inactive_id_) {
+                new_pipeline = std::move(resident_inactive_);
+                resident_inactive_ = std::move(old_pipeline);
+                resident_inactive_id_ = active_model_.id;
+            } else {
+                if (resident_inactive_) resident_inactive_->wait_idle();
+                resident_inactive_.reset();
+                resident_inactive_id_ = 0;
+                old_pipeline.reset();
+                if (runtime_control_.stop_requested.load()) break;
+                new_pipeline = create_pipeline(request.entry);
+            }
             if (!new_pipeline)
                 throw std::runtime_error("Model pipeline creation returned null");
             if (runtime_control_.stop_requested.load()) break;
@@ -242,5 +264,7 @@ void ModelManagerThread::run()
     if (remaining)
         remaining->wait_idle();
     remaining.reset();
+    if (resident_inactive_) resident_inactive_->wait_idle();
+    resident_inactive_.reset();
     Logger::info("[ModelManagerThread] stopped");
 }

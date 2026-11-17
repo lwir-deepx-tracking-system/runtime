@@ -27,7 +27,7 @@ public:
     bool start(const std::string& name);
     bool stop();
     void submit(FrameContextPtr frame) noexcept;
-    void submit_tracks(TrackingResultPtr result) noexcept;
+    void submit_tracks(TrackingResultPtr result, double tracker_ms = -1.0) noexcept;
     RawRecordingStatus status() const;
     std::filesystem::path directory() const;
 };

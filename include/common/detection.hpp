@@ -10,6 +10,7 @@
 // 한 객체의 검출 결과.
 struct Detection
 {
+    struct Keypoint { float x = 0.0f, y = 0.0f, visibility = 0.0f; };
     float x = 0.0f;
     float y = 0.0f;
     float width = 0.0f;
@@ -17,6 +18,7 @@ struct Detection
     int class_id = -1;
     float confidence = 0.0f;
     std::string class_name;
+    std::vector<Keypoint> keypoints; // Pose26: 17 original-frame points; empty for box-only models.
 };
 
 // 통합 Detection 단계의 출력. 원본 영상은 복사하지 않는다.

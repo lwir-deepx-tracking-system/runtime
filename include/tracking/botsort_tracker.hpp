@@ -6,6 +6,7 @@
 #include "config/app_config.hpp"
 #include "reid/i_reid_pipeline.hpp"
 #include "tracking/kalman_filter.hpp"
+#include "tracking/position_memory.hpp"
 #include "tracking/tracker.hpp"
 
 // BoT-SORT association with XYWH Kalman motion and smoothed appearance features.
@@ -41,9 +42,11 @@ private:
     std::unique_ptr<IReidPipeline> reid_;
     int person_class_id_;
     KalmanFilter kalman_{KalmanFormat::XYWH};
+    PositionMemory position_memory_;
     int frame_ = 0;
     int next_id_ = 0;
     CameraMotion motion_;
+    CameraMotion previous_motion_;
     float width_ = 0, height_ = 0;
     std::vector<Target> targets_;
     TrackingStep associate(const std::vector<Detection>& detections,

@@ -11,6 +11,7 @@
 #include "common/track.hpp"
 
 #include "detection/detector_factory.hpp"
+#include "detection/auto_model_selector.hpp"
 #include "tracking/tracker_factory.hpp"
 #include "tracking/tracker_manager.hpp"
 
@@ -34,6 +35,7 @@
 #include <cstdint>
 #include <mutex>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <ctime>
 #include <filesystem>
@@ -64,6 +66,12 @@ private:
 
     // Detection 목록 다음 Stage로 전달
     ThreadSafeQueue<DetectionResult> detection_queue_;
+    ThreadSafeQueue<AutoModelObservation> auto_observation_queue_;
+    std::unique_ptr<AutoModelSelector> auto_selector_;
+    std::atomic<bool> auto_detection_enabled_{false};
+    std::atomic<float> auto_far_px_{100.0f}, auto_near_px_{140.0f};
+    std::atomic<std::uint64_t> auto_settings_generation_{0};
+    std::shared_future<PipelineResult> auto_completion_;
 
     // 같은 TrackingResult를 제어와 GUI 경로가 공유한다.
     ThreadSafeQueue<TrackingResultPtr> control_track_queue_;
@@ -126,10 +134,15 @@ public:
     PipelineCatalogItem model_info(std::uint32_t id) const override;
     PipelineCatalogItem tracker_info(std::uint32_t id) const override;
     PipelineTrackerPolicy tracker_policy() const override;
+    PipelineAutoDetection auto_detection() const override;
+    bool set_auto_detection(bool enabled) override;
+    bool set_auto_detection_thresholds(float far_px,float near_px) override;
+    bool recording_available() const override { return recorder_ != nullptr; }
     PipelineRecordingStatus recording_status() const override;
     bool start_recording(const std::string& name) override;
     bool stop_recording() override;
     std::string latest_recording() const override;
+    std::vector<std::string> list_recordings() const override;
     PipelineRecordingFileChunk read_recording_file(
         const std::string&, std::uint8_t, std::uint64_t, std::uint16_t) const override;
     PipelineChangeTicket request_model_change(std::uint32_t model_id) override;
@@ -197,8 +210,9 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         Logger::info("[Measurement] 결과 경로: " + metrics_writer_->directory().string());
     }
     camera_ = std::make_unique<Camera>();
-    recorder_ = std::make_unique<RawRecorder>(
-        std::filesystem::path(config_.measurement.output_root) / "recordings");
+    if (config_.measurement.recording_enabled)
+        recorder_ = std::make_unique<RawRecorder>(
+            std::filesystem::path(config_.measurement.output_root) / "recordings");
 
     model_manager_thread_ = std::make_unique<ModelManagerThread>(
         config_.detection_catalog.at(config_.initial_detection_id),
@@ -207,7 +221,17 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         active_pipeline_,
         runtime_control_, &model_change_results_,
         std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>{},
-        metrics_writer_.get());
+        metrics_writer_.get(),
+        config_.resident_detection_pair ? std::optional<ModelCatalogEntry>(
+            config_.detection_catalog.at(config_.initial_detection_id == config_.auto_near_model_id ?
+                config_.auto_far_model_id : config_.auto_near_model_id)) : std::nullopt);
+    if (config_.auto_near_model_id>0 && config_.auto_far_model_id>0 &&
+        config_.detection_catalog.count(config_.auto_near_model_id) &&
+        config_.detection_catalog.count(config_.auto_far_model_id)) {
+        auto_selector_ = std::make_unique<AutoModelSelector>(
+            AutoModelSelector::Config{config_.auto_near_model_id, config_.auto_far_model_id});
+        auto_detection_enabled_.store(config_.auto_detection_enabled);
+    }
 
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
@@ -249,7 +273,8 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             control_track_queue_,
             gui_track_queue_,
-            measurement_enabled_, metrics_writer_.get(), recorder_.get()
+            measurement_enabled_, metrics_writer_.get(), recorder_.get(),
+            auto_selector_ ? &auto_observation_queue_ : nullptr
         );
 
     // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
@@ -324,7 +349,36 @@ PipelineTrackerPolicy RuntimeApplication::tracker_policy() const
             static_cast<std::uint32_t>(effective_frames > 0 ? effective_frames : c.confirmation_frames),
             static_cast<std::uint32_t>(c.frame.confirmation_ms),
             (c.class_gate ? 1u : 0u) | (c.frame.gmc ? 2u : 0u) |
-                (c.post_reid ? 4u : 0u)};
+                (c.post_reid ? 4u : 0u),
+            c.position_memory=="gru_kpt" ? 1u : c.position_memory=="mamba_kpt" ? 2u :
+                c.position_memory=="gru_near_kpt" ? 3u : 0u,
+            c.box_refine.mode=="size" ? 1u : c.box_refine.mode=="body" ? 2u : 0u,
+            c.box_refine.lost_same,static_cast<float>(c.box_refine.aim_y)};
+}
+
+PipelineAutoDetection RuntimeApplication::auto_detection() const {
+    const bool present=auto_selector_ &&
+        std::filesystem::is_regular_file(config_.detection_catalog.at(config_.auto_near_model_id).model.path) &&
+        std::filesystem::is_regular_file(config_.detection_catalog.at(config_.auto_far_model_id).model.path);
+    return {auto_detection_enabled_.load(),present,
+        static_cast<std::uint32_t>(config_.auto_near_model_id),
+        static_cast<std::uint32_t>(config_.auto_far_model_id),
+        auto_far_px_.load(),auto_near_px_.load()};
+}
+
+bool RuntimeApplication::set_auto_detection(bool enabled) {
+    if(enabled && !auto_detection().available)return false;
+    auto_detection_enabled_.store(enabled);
+    auto_settings_generation_.fetch_add(1);
+    return true;
+}
+
+bool RuntimeApplication::set_auto_detection_thresholds(float far_px,float near_px) {
+    if(!std::isfinite(far_px) || !std::isfinite(near_px) || far_px<20 ||
+       near_px<=far_px || near_px>1000)return false;
+    auto_far_px_.store(far_px);auto_near_px_.store(near_px);
+    auto_settings_generation_.fetch_add(1);
+    return true;
 }
 
 PipelineRecordingStatus RuntimeApplication::recording_status() const
@@ -346,6 +400,7 @@ bool RuntimeApplication::stop_recording()
 
 std::string RuntimeApplication::latest_recording() const
 {
+    if (!recorder_) return {};
     const auto root = std::filesystem::path(config_.measurement.output_root) / "recordings";
     std::string latest;
     try {
@@ -363,10 +418,33 @@ std::string RuntimeApplication::latest_recording() const
     return latest;
 }
 
+std::vector<std::string> RuntimeApplication::list_recordings() const
+{
+    if (!recorder_) return {};
+    const auto root = std::filesystem::path(config_.measurement.output_root) / "recordings";
+    std::vector<std::string> names;
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(root)) {
+            if (!entry.is_directory()) continue;
+            const auto name = entry.path().filename().string();
+            if (name.size() < 10 || name.size() > 64 || name.rfind("MEASURE_", 0) != 0 ||
+                !std::all_of(name.begin() + 8, name.end(), [](unsigned char c) {
+                    return (c >= '0' && c <= '9') || c == '_'; })) continue;
+            if (recorder_->status().active &&
+                recorder_->directory().filename() == entry.path().filename()) continue;
+            names.push_back(name);
+        }
+    } catch (const std::filesystem::filesystem_error&) {}
+    std::sort(names.begin(), names.end(), std::greater<>());
+    if (names.size() > 32) names.resize(32);
+    return names;
+}
+
 PipelineRecordingFileChunk RuntimeApplication::read_recording_file(
     const std::string& name, std::uint8_t file_id, std::uint64_t offset,
     std::uint16_t limit) const
 {
+    if (!recorder_) return {};
     if (name.size() < 10 || name.size() > 64 || name.rfind("MEASURE_", 0) != 0 ||
         !std::all_of(name.begin() + 8, name.end(), [](unsigned char c) {
             return (c >= '0' && c <= '9') || c == '_'; }) ||
@@ -481,8 +559,16 @@ void RuntimeApplication::run()
         std::unique_ptr<PipelineConsole> console;
         if (console_enabled_) console = std::make_unique<PipelineConsole>(*this, std::cout);
 
+        std::uint64_t applied_auto_generation=auto_settings_generation_.load();
         while (!camera_thread_->finished())
         {
+            const auto auto_generation=auto_settings_generation_.load();
+            if(auto_selector_ && applied_auto_generation!=auto_generation) {
+                auto_selector_=std::make_unique<AutoModelSelector>(AutoModelSelector::Config{
+                    config_.auto_near_model_id,config_.auto_far_model_id,
+                    auto_far_px_.load(),auto_near_px_.load()});
+                applied_auto_generation=auto_generation;
+            }
             if (console && !console->poll()) app_shutdown::request_stop();
             if (app_shutdown::requested) {
                 pipeline_ready_.store(false);
@@ -495,6 +581,31 @@ void RuntimeApplication::run()
             }
             if (suspend_for_model_.exchange(false) && gimbal_executor_) gimbal_executor_->suspend();
             report_model_changes();
+            if (auto_selector_) {
+                if (auto_completion_.valid() &&
+                    auto_completion_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                    if (auto_completion_.get() != PipelineResult::Ok)
+                        auto_selector_->request_failed();
+                    auto_completion_ = {};
+                }
+                AutoModelObservation observation;
+                while (auto_observation_queue_.try_pop(observation)) {
+                    const auto control = gimbal_executor_ ? gimbal_executor_->snapshot() : ControlSnapshot{};
+                    const int followed_id = control.automatic &&
+                        control.selected_id<=static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ?
+                        static_cast<int>(control.selected_id) : 0;
+                    if(!auto_detection_enabled_.load())continue;
+                    const auto target = auto_selector_->observe(
+                        observation.detections, *observation.tracks,
+                        model_manager_thread_->active_model_id(), followed_id);
+                    if (target) {
+                        auto ticket = request_model_change(static_cast<std::uint32_t>(*target));
+                        if (ticket.result == PipelineResult::Ok)
+                            auto_completion_ = std::move(ticket.completion);
+                        else auto_selector_->request_failed();
+                    }
+                }
+            }
             const bool worker_failed = (metrics_writer_ && metrics_writer_->failed()) || detection_thread_->failed() ||
                 (model_manager_thread_ && model_manager_thread_->failed()) ||
                 tracking_thread_->failed() || control_thread_->failed() ||

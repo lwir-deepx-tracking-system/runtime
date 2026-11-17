@@ -1,6 +1,7 @@
 #include "app/raw_recorder.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <condition_variable>
 #include <ctime>
 #include <deque>
@@ -15,6 +16,9 @@ struct RawRecorder::Impl {
     struct TrackRows {
         std::uint64_t frame_id = 0;
         std::vector<Track> tracks;
+        double delay_ms = -1.0;
+        double interval_ms = -1.0;
+        double tracker_ms = -1.0;
     };
     explicit Impl(std::filesystem::path path) : root(std::move(path)) {}
     std::filesystem::path root, current;
@@ -24,6 +28,8 @@ struct RawRecorder::Impl {
     std::deque<TrackRows> track_queue;
     std::uint64_t dropped_track_results = 0;
     std::uint64_t first_captured_id = 0, last_captured_id = 0;
+    std::chrono::steady_clock::time_point last_result_at{};
+    std::vector<double> delays, intervals, tracker_times;
     std::thread writer;
     RawRecordingStatus state;
     bool stopping = false;
@@ -56,6 +62,9 @@ struct RawRecorder::Impl {
                 } else break;
             }
             if (!frame) {
+                if (rows.delay_ms >= 0) delays.push_back(rows.delay_ms);
+                if (rows.interval_ms >= 0) intervals.push_back(rows.interval_ms);
+                if (rows.tracker_ms >= 0) tracker_times.push_back(rows.tracker_ms);
                 for (const auto& track : rows.tracks)
                     tracks << rows.frame_id << ',' << track.track_id << ',' << track.class_id
                            << ',' << track.confidence << ',' << track.x << ',' << track.y
@@ -122,6 +131,18 @@ struct RawRecorder::Impl {
         }
         std::ofstream summary(current / "recording.txt", std::ios::app);
         summary << "dropped_track_results=" << dropped_track_results << '\n';
+        const auto stats = [&](std::vector<double>& values, const char* key) {
+            if (values.empty()) return;
+            std::sort(values.begin(), values.end());
+            const auto at = [&](double p) { return values[static_cast<std::size_t>(p * (values.size() - 1))]; };
+            summary << key << "_p50=" << at(0.50) << '\n'
+                    << key << "_p95=" << at(0.95) << '\n'
+                    << key << "_p99=" << at(0.99) << '\n'
+                    << key << "_max=" << values.back() << '\n';
+        };
+        stats(delays, "delay");
+        stats(intervals, "interval");
+        stats(tracker_times, "tracker");
         if (!summary) {
             std::lock_guard<std::mutex> lock(mutex);
             state.failed = true;
@@ -163,6 +184,8 @@ bool RawRecorder::start(const std::string& name) {
         impl_->track_queue.clear();
         impl_->dropped_track_results = 0;
         impl_->first_captured_id = impl_->last_captured_id = 0;
+        impl_->last_result_at = {};
+        impl_->delays.clear(); impl_->intervals.clear(); impl_->tracker_times.clear();
         impl_->state.session = next;
         impl_->state.active = true;
         impl_->stopping = false;
@@ -200,7 +223,7 @@ void RawRecorder::submit(FrameContextPtr frame) noexcept {
     impl_->ready.notify_one();
 }
 
-void RawRecorder::submit_tracks(TrackingResultPtr result) noexcept {
+void RawRecorder::submit_tracks(TrackingResultPtr result, double tracker_ms) noexcept {
     if (!result || !result->frame) return;
     std::lock_guard<std::mutex> lock(impl_->mutex);
     if (!impl_->state.active || impl_->stopping) return;
@@ -211,7 +234,13 @@ void RawRecorder::submit_tracks(TrackingResultPtr result) noexcept {
         ++impl_->dropped_track_results;
         return;
     }
-    impl_->track_queue.push_back({id, result->tracks});
+    const auto now = std::chrono::steady_clock::now();
+    const double delay_ms = std::chrono::duration<double, std::milli>(
+        now - result->frame->metadata.captured_at).count();
+    const double interval_ms = impl_->last_result_at.time_since_epoch().count() ?
+        std::chrono::duration<double, std::milli>(now - impl_->last_result_at).count() : -1.0;
+    impl_->last_result_at = now;
+    impl_->track_queue.push_back({id, result->tracks, delay_ms, interval_ms, tracker_ms});
     impl_->ready.notify_one();
 }
 

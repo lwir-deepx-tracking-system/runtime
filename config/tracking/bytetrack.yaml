@@ -4,6 +4,9 @@
 # 원본 평가의 전체 임계값은 문서에 없으므로 아래 pipeline 임계값은 유지한다.
 # https://app.notion.com/p/4109de3f14a28064997ad50226e5714d
 tracking:
+  # model-bank size 박스 다듬기. 예측 박스 크기 유지도 기본 비활성.
+  box_refine: {mode: off, lost_same: false, aim_y: 0.5}
+  position_memory: kalman
   type: bytetrack
   # Detection confidence 기준
   track_threshold: 0.5

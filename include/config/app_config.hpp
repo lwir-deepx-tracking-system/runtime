@@ -36,6 +36,12 @@ struct TrackingFrameConfig {
     double gmc_min_distance = 5.0;
 };
 
+struct BoxRefineConfig {
+    std::string mode = "off"; // off, size or body.
+    bool lost_same = false;
+    double aim_y = 0.5;
+};
+
 struct TrackingConfig {
     TrackerType type = TrackerType::ByteTrack;
     bool post_reid = false;
@@ -47,6 +53,8 @@ struct TrackingConfig {
     float edge_birth_threshold = 0.0F;
     float edge_margin_px = 4.0F;
     TrackingFrameConfig frame;
+    BoxRefineConfig box_refine;
+    std::string position_memory = "kalman"; // kalman, gru_kpt, mamba_kpt, gru_near_kpt
 
     // 아래 값은 runtime/benchmark yaml에서 생략할 수 있다. 생략하면 해당 기능은 꺼진다.
 
@@ -154,6 +162,7 @@ struct ControlConfig {
 
 struct MeasurementConfig {
     bool enabled = false;
+    bool recording_enabled = true;
     std::string output_root;
 };
 
@@ -241,7 +250,8 @@ enum class PostprocessOutputFormat
     Auto,
     DecodedXywh,
     EndToEndXyxy,
-    SplitHead
+    SplitHead,
+    SplitHeadPose
 };
 
 // split-head class tensor가 logit인지 이미 sigmoid가 적용된 확률인지 구분한다.
@@ -404,6 +414,10 @@ struct RuntimeConfig
     DetectionSettings detection;
     int initial_detection_id = 0;
     std::map<int, ModelCatalogEntry> detection_catalog;
+    bool auto_detection_enabled = false;
+    bool resident_detection_pair = false;
+    int auto_near_model_id = 0;
+    int auto_far_model_id = 0;
     std::map<int, TrackingCatalogEntry> tracking_catalog;
     int initial_tracker_id = 0;
     ReidSettings reid;

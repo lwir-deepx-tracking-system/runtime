@@ -17,15 +17,18 @@ constexpr std::uint32_t kGuiFrameWidth = 640;
 constexpr std::uint32_t kGuiFrameHeight = 480;
 
 enum class GuiCategory : std::uint8_t { System = 1, Mode = 2, Gimbal = 3, Pipeline = 4, Recording = 5 };
-// Recording requests: status(1), start(2), stop(3), latest(4), read file(5).
+// Recording requests: status(1), start(2), stop(3), latest(4), read file(5), list(6).
 // Start includes request ID, video flag and a UTF-8 name padded to 64 bytes.
 enum class GuiRecordingCommand : std::uint8_t {
-    Status = 1, Start = 2, Stop = 3, Latest = 4, ReadFile = 5
+    Status = 1, Start = 2, Stop = 3, Latest = 4, ReadFile = 5, List = 6
 };
 // Pipeline 응답은 요청 번호에 0x80을 더한다. 기존 1..4 계약은 유지한다.
 enum class GuiPipelineCommand : std::uint8_t {
     ModelCount = 1, TrackerCount = 2, ChangeModel = 3, ChangeTracker = 4,
-    ModelInfo = 5, TrackerInfo = 6, TrackerPolicy = 7, ChangeTrackerPolicy = 8
+    ModelInfo = 5, TrackerInfo = 6, TrackerPolicy = 7, ChangeTrackerPolicy = 8,
+    TrackerFeaturePolicy = 9, ChangeTrackerFeaturePolicy = 10,
+    AutoDetection = 11, ChangeAutoDetection = 12,
+    ChangeAutoDetectionThresholds = 13
 };
 enum class GuiPipelinePhase : std::uint8_t { Accepted = 1, Completed = 2 };
 // 기존 PC 프로토콜의 결과 코드 값을 공용 요청 결과와 동일하게 유지한다.

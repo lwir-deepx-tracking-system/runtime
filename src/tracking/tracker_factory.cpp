@@ -8,6 +8,7 @@
 #include "tracking/post_reid_tracker.hpp"
 #include "reid/reid_factory.hpp"
 #include "tracking/frame_policy_tracker.hpp"
+#include "tracking/box_refine_tracker.hpp"
 
 namespace
 {
@@ -63,9 +64,11 @@ std::unique_ptr<Tracker> TrackerFactory::create_configured(
 {
     auto factory=for_type(tracking.type);
     auto wrap=[&](std::unique_ptr<Tracker> tracker) -> std::unique_ptr<Tracker> {
+        if (tracking.box_refine.mode!="off")
+            tracker = std::make_unique<BoxRefineTracker>(std::move(tracker),tracking.box_refine);
         if(tracking.frame.gmc || tracking.frame.warmth_min || tracking.frame.warmth_max ||
            tracking.frame.confirmation_ms>0 || tracking.edge_birth_threshold>0)
-            return std::make_unique<FramePolicyTracker>(std::move(tracker),tracking.frame,
+            tracker = std::make_unique<FramePolicyTracker>(std::move(tracker),tracking.frame,
                 tracking.confirmation_frames);
         return tracker;
     };

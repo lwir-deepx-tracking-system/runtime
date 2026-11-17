@@ -22,6 +22,7 @@ struct TrackingStep
 {
     std::vector<Track> tracks;
     std::vector<Track> raw_tracks;
+    std::vector<Track> unrefined_tracks; // Same public IDs, before display/control box refinement.
     std::vector<TrackingEmbedding> embeddings;
     std::vector<std::string> association_events;
     double reid_ms = 0;
@@ -55,6 +56,7 @@ public:
 
     // Tracker가 유지하는 내부 상태를 초기화한다.
     virtual void reset() = 0;
+    virtual void reset_for_model_change() { reset(); }
     virtual void set_camera_motion(const CameraMotion&) {}
     virtual void set_image_size(float, float) {}
     virtual void set_confirmation_frames(int) {}

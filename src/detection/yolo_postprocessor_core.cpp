@@ -273,6 +273,7 @@ std::vector<Detection> YoloPostprocessorCore::process(
         candidates = decode_end_to_end_xyxy(outputs);
         break;
     case PostprocessOutputFormat::SplitHead:
+    case PostprocessOutputFormat::SplitHeadPose:
         candidates = decode_split_head(outputs);
         break;
     case PostprocessOutputFormat::Auto:
@@ -303,15 +304,16 @@ PostprocessOutputFormat YoloPostprocessorCore::resolve_output_format(
             all_rank_four = false;
     }
 
-    const int expected_split_tensors =
-        config_.postprocess.split_output_levels * 2;
+    const int expected_split_tensors = config_.postprocess.split_output_levels * 2;
     const bool split_match = all_rank_four &&
         outputs.size() == static_cast<std::size_t>(expected_split_tensors);
+    const bool pose_match = all_rank_four &&
+        outputs.size() == static_cast<std::size_t>(config_.postprocess.split_output_levels * 3);
 
     const int format_matches =
         (decoded_matches == 1 ? 1 : 0) +
         (end_to_end_matches == 1 ? 1 : 0) +
-        (split_match ? 1 : 0);
+        (split_match ? 1 : 0) + (pose_match ? 1 : 0);
     if (format_matches != 1 || decoded_matches > 1 || end_to_end_matches > 1)
         throw std::runtime_error(
             "Cannot uniquely resolve postprocess.output_format from tensor shapes: " +
@@ -319,6 +321,7 @@ PostprocessOutputFormat YoloPostprocessorCore::resolve_output_format(
 
     if (decoded_matches == 1) return PostprocessOutputFormat::DecodedXywh;
     if (end_to_end_matches == 1) return PostprocessOutputFormat::EndToEndXyxy;
+    if (pose_match) return PostprocessOutputFormat::SplitHeadPose;
     return PostprocessOutputFormat::SplitHead;
 }
 
@@ -365,7 +368,7 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_deco
         const float y2 = center_y + height * 0.5F;
         validate_box(x1, y1, x2, y2);
         if (x2 <= x1 || y2 <= y1) continue;
-        candidates.push_back({x1, y1, x2, y2, best_confidence, best_class});
+        candidates.push_back({x1, y1, x2, y2, best_confidence, best_class, {}});
     }
     return candidates;
 }
@@ -407,7 +410,7 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_end_
         validate_box(row[0], row[1], row[2], row[3]);
         if (row[2] <= row[0] || row[3] <= row[1]) continue;
         candidates.push_back({
-            row[0], row[1], row[2], row[3], confidence, class_id});
+            row[0], row[1], row[2], row[3], confidence, class_id, {}});
     }
     return candidates;
 }
@@ -416,7 +419,10 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
     const dxrt::TensorPtrs& outputs) const
 {
     const int levels = config_.postprocess.split_output_levels;
-    if (outputs.size() != static_cast<std::size_t>(levels * 2))
+    const bool pose = config_.postprocess.output_format == PostprocessOutputFormat::SplitHeadPose ||
+        (config_.postprocess.output_format == PostprocessOutputFormat::Auto &&
+         outputs.size() == static_cast<std::size_t>(levels * 3));
+    if (outputs.size() != static_cast<std::size_t>(levels * (pose ? 3 : 2)))
         throw std::runtime_error(
             "Split-head output tensor count does not match split_output_levels");
 
@@ -428,6 +434,7 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
 
     std::vector<dxrt::TensorPtr> regression_tensors;
     std::vector<dxrt::TensorPtr> class_tensors;
+    std::vector<dxrt::TensorPtr> pose_tensors;
     for (const auto& output : outputs)
     {
         if (!output || output->shape().size() != 4 || output->shape()[0] != 1)
@@ -439,6 +446,8 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
             regression_tensors.push_back(output);
         else if (output->shape()[1] == config_.postprocess.num_classes)
             class_tensors.push_back(output);
+        else if (pose && output->shape()[1] == 51)
+            pose_tensors.push_back(output);
         else
             throw std::runtime_error(
                 "Split-head tensor has unexpected channel count: " +
@@ -446,7 +455,8 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
     }
 
     if (regression_tensors.size() != static_cast<std::size_t>(levels) ||
-        class_tensors.size() != static_cast<std::size_t>(levels))
+        class_tensors.size() != static_cast<std::size_t>(levels) ||
+        (pose && pose_tensors.size() != static_cast<std::size_t>(levels)))
         throw std::runtime_error(
             "Split-head regression/class tensor counts do not match configuration");
 
@@ -457,6 +467,7 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
     };
     std::sort(regression_tensors.begin(), regression_tensors.end(), by_grid);
     std::sort(class_tensors.begin(), class_tensors.end(), by_grid);
+    if (pose) std::sort(pose_tensors.begin(), pose_tensors.end(), by_grid);
 
     std::vector<Candidate> candidates;
     for (int level = 0; level < levels; ++level)
@@ -467,6 +478,9 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
             regression->shape()[3] != classes->shape()[3])
             throw std::runtime_error(
                 "Split-head regression/class tensor grids do not match");
+        if (pose && (pose_tensors[static_cast<std::size_t>(level)]->shape()[2] != classes->shape()[2] ||
+                     pose_tensors[static_cast<std::size_t>(level)]->shape()[3] != classes->shape()[3]))
+            throw std::runtime_error("Split-head pose tensor grid does not match boxes");
 
         const int height = checked_int_dimension(
             classes->shape()[2], "split-head height");
@@ -485,6 +499,8 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
         const float* regression_data =
             require_float_data(regression, "split regression");
         const float* class_data = require_float_data(classes, "split class");
+        const float* pose_data = pose ? require_float_data(
+            pose_tensors[static_cast<std::size_t>(level)], "split pose") : nullptr;
         for (int y = 0; y < height; ++y)
         {
             for (int x = 0; x < width; ++x)
@@ -527,8 +543,22 @@ std::vector<YoloPostprocessorCore::Candidate> YoloPostprocessorCore::decode_spli
                 const float y2 = (anchor_y + bottom) * stride_y;
                 validate_box(x1, y1, x2, y2);
                 if (x2 <= x1 || y2 <= y1) continue;
-                candidates.push_back({
-                    x1, y1, x2, y2, best_confidence, best_class});
+                Candidate candidate{x1, y1, x2, y2, best_confidence, best_class, {}};
+                if (pose && best_class == 0) {
+                    candidate.keypoints.reserve(17);
+                    for (int joint = 0; joint < 17; ++joint) {
+                        const auto raw = [&](int component) {
+                            return pose_data[(static_cast<std::size_t>(joint) * 3 + component) * grid_size + cell];
+                        };
+                        const float px = (raw(0) + anchor_x) * stride_x;
+                        const float py = (raw(1) + anchor_y) * stride_y;
+                        const float visibility = 1.0F / (1.0F + std::exp(-raw(2)));
+                        if (!std::isfinite(px) || !std::isfinite(py) || !std::isfinite(visibility))
+                            throw std::runtime_error("Split-head pose contains nonfinite keypoint");
+                        candidate.keypoints.push_back({px, py, visibility});
+                    }
+                }
+                candidates.push_back(std::move(candidate));
             }
         }
     }
@@ -606,6 +636,11 @@ std::vector<Detection> YoloPostprocessorCore::restore_coordinates(
         detection.class_id = candidate.class_id;
         detection.confidence = candidate.confidence;
         detection.class_name = class_name(candidate.class_id);
+        for (const auto& point : candidate.keypoints)
+            detection.keypoints.push_back({
+                (point.x - static_cast<float>(context.pad_x)) / context.scale,
+                (point.y - static_cast<float>(context.pad_y)) / context.scale,
+                point.visibility});
         detections.push_back(std::move(detection));
     }
     return detections;

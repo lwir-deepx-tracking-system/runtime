@@ -15,13 +15,15 @@ TrackingThread::TrackingThread(
     ThreadSafeQueue<DetectionResult>& input_queue,
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
-    bool measurement_enabled, IMeasurementSink* measurements, RawRecorder* recorder)
+    bool measurement_enabled, IMeasurementSink* measurements, RawRecorder* recorder,
+    ThreadSafeQueue<AutoModelObservation>* auto_output_queue)
     : tracker_manager_(tracker_manager),
       runtime_control_(runtime_control),
       input_queue_(input_queue),
       control_output_queue_(control_output_queue),
       gui_output_queue_(gui_output_queue),
-      measurement_enabled_(measurement_enabled), measurements_(measurements), recorder_(recorder)
+      measurement_enabled_(measurement_enabled), measurements_(measurements), recorder_(recorder),
+      auto_output_queue_(auto_output_queue)
 {
 }
 
@@ -74,7 +76,7 @@ void TrackingThread::run()
             }
             else if (tracker_generation_ != detections.model_generation)
             {
-                tracker.tracker->reset();
+                tracker.tracker->reset_for_model_change();
                 tracker_generation_ = detections.model_generation;
             }
 
@@ -86,7 +88,14 @@ void TrackingThread::run()
             const auto started_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};
-            tracks->tracks = tracker.tracker->process(detections).tracks;
+            auto step = tracker.tracker->process(detections);
+            tracks->tracks = std::move(step.tracks);
+            TrackingResultPtr unrefined_result = tracks;
+            if (!step.unrefined_tracks.empty()) {
+                auto original = std::make_shared<TrackingResult>(*tracks);
+                original->tracks = std::move(step.unrefined_tracks);
+                unrefined_result = std::move(original);
+            }
             const auto finished_at = measurement_enabled_ ?
                 std::chrono::steady_clock::now() :
                 std::chrono::steady_clock::time_point{};
@@ -122,7 +131,13 @@ void TrackingThread::run()
             if (!published) continue;
             if (!control_push_ok)
                 throw std::runtime_error("Tracking control result queue is closed");
-            if (recorder_) recorder_->submit_tracks(tracks);
+            if (recorder_) {
+                const double tracker_ms = measurement_enabled_ ?
+                    std::chrono::duration<double, std::milli>(finished_at - started_at).count() : -1.0;
+                recorder_->submit_tracks(unrefined_result, tracker_ms);
+            }
+            if (auto_output_queue_)
+                auto_output_queue_->push_latest({std::move(detections), unrefined_result}, 1);
         }
     }
     catch (const std::exception& e)

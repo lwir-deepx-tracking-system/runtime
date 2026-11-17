@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <functional>
 
 #include "common/frame.hpp"
@@ -15,6 +16,8 @@ private:
     i3::TE_A* te_ = nullptr;
     int width_ = 0;
     int height_ = 0;
+    std::chrono::steady_clock::time_point read_plan_{};
+    bool have_read_plan_ = false;
 
 public:
     Camera() = default;

@@ -25,6 +25,16 @@ struct PipelineTrackerPolicy
     std::uint32_t confirmation_ms = 0;
     // bit 0: class gate, bit 1: GMC, bit 2: post ReID.
     std::uint32_t flags = 0;
+    std::uint32_t position_memory = 0;
+    std::uint32_t box_refine_mode = 0;
+    bool box_refine_lost_same = false;
+    float box_refine_aim_y = 0.5f;
+};
+
+struct PipelineAutoDetection {
+    bool enabled = false, available = false;
+    std::uint32_t near_id = 0, far_id = 0;
+    float far_px = 100.0f, near_px = 140.0f;
 };
 
 struct PipelineRecordingStatus {
@@ -58,10 +68,15 @@ class IPipelineRequests
     virtual PipelineCatalogItem model_info(std::uint32_t) const { return {}; }
     virtual PipelineCatalogItem tracker_info(std::uint32_t) const { return {}; }
     virtual PipelineTrackerPolicy tracker_policy() const { return {}; }
+    virtual PipelineAutoDetection auto_detection() const { return {}; }
+    virtual bool set_auto_detection(bool) { return false; }
+    virtual bool set_auto_detection_thresholds(float,float) { return false; }
+    virtual bool recording_available() const { return false; }
     virtual PipelineRecordingStatus recording_status() const { return {}; }
     virtual bool start_recording(const std::string&) { return false; }
     virtual bool stop_recording() { return false; }
     virtual std::string latest_recording() const { return {}; }
+    virtual std::vector<std::string> list_recordings() const { return {}; }
     virtual PipelineRecordingFileChunk read_recording_file(
         const std::string&, std::uint8_t, std::uint64_t, std::uint16_t) const { return {}; }
     virtual PipelineChangeTicket request_model_change(std::uint32_t id)   = 0;

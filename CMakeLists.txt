@@ -161,11 +161,15 @@ endif()
 if(LWIR_NEEDS_VISION)
     add_library(lwir_vision
         src/detection/lwir_preprocessor.cpp
+        src/detection/auto_model_selector.cpp
         src/reid/reid_pipeline.cpp
         src/reid/reid_matcher.cpp
         src/tracking/bytetrack_tracker.cpp
         src/tracking/botsort_tracker.cpp
         src/tracking/frame_policy_tracker.cpp
+        src/tracking/box_refine_tracker.cpp
+        src/tracking/position_model.cpp
+        src/tracking/position_memory.cpp
         src/tracking/post_reid_tracker.cpp
         src/tracking/tracker_factory.cpp
         src/tracking/tracker_manager.cpp
@@ -177,6 +181,8 @@ if(LWIR_NEEDS_VISION)
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${OpenCV_INCLUDE_DIRS}
     )
+    target_compile_definitions(lwir_vision PRIVATE
+        LWIR_POSITION_WEIGHT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/tracking/position_weights")
 
     target_link_libraries(lwir_vision
         PUBLIC
@@ -338,8 +344,18 @@ if(BUILD_TESTING)
     add_test(NAME frame_policy COMMAND test_frame_policy)
     set_tests_properties(frame_policy PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+    add_executable(test_box_refine tests/tracking/test_box_refine.cpp)
+    target_link_libraries(test_box_refine PRIVATE lwir_vision)
+    add_test(NAME box_refine COMMAND test_box_refine)
+    add_executable(test_position_memory tests/tracking/test_position_memory.cpp)
+    target_link_libraries(test_position_memory PRIVATE lwir_vision)
+    add_test(NAME position_memory COMMAND test_position_memory)
+
     add_executable(test_botsort tests/tracking/test_botsort.cpp
-        src/tracking/botsort_tracker.cpp src/tracking/kalman_filter.cpp)
+        src/tracking/botsort_tracker.cpp src/tracking/kalman_filter.cpp
+        src/tracking/position_model.cpp src/tracking/position_memory.cpp)
+    target_compile_definitions(test_botsort PRIVATE
+        LWIR_POSITION_WEIGHT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/tracking/position_weights")
     target_include_directories(test_botsort PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(test_botsort PRIVATE ${OpenCV_LIBS})
@@ -530,6 +546,14 @@ if(BUILD_TESTING)
     target_link_libraries(test_detection_thread PRIVATE lwir_runtime_core)
     add_test(NAME detection_thread COMMAND test_detection_thread)
 
+    add_executable(test_auto_model_selector tests/detection/test_auto_model_selector.cpp)
+    target_link_libraries(test_auto_model_selector PRIVATE lwir_vision)
+    add_test(NAME auto_model_selector COMMAND test_auto_model_selector)
+
+    add_executable(test_resident_model_pair tests/pipeline/test_resident_model_pair.cpp)
+    target_link_libraries(test_resident_model_pair PRIVATE lwir_runtime_core)
+    add_test(NAME resident_model_pair COMMAND test_resident_model_pair)
+
     if(LWIR_ENABLE_DX_APP)
         add_executable(
             test_postprocessor
@@ -537,6 +561,15 @@ if(BUILD_TESTING)
         )
         target_link_libraries(test_postprocessor PRIVATE lwir_vision)
         add_test(NAME postprocessor COMMAND test_postprocessor)
+    else()
+        add_executable(test_postprocessor_host
+            tests/detection/test_postprocessor.cpp
+            src/detection/yolo_postprocessor_core.cpp)
+        target_include_directories(test_postprocessor_host PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${OpenCV_INCLUDE_DIRS})
+        add_test(NAME postprocessor_host COMMAND test_postprocessor_host)
     endif()
 
 
