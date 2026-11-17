@@ -28,5 +28,5 @@ postprocess:
   class_agnostic_nms: false
   confidence_threshold: 0.001
   nms_threshold: 0.7
-  num_classes: 16
-  class_names: ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat"]
+  num_classes: 1
+  class_names: ["person"]
