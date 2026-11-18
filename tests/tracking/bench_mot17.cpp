@@ -1,4 +1,5 @@
 #include "tracking/bytetrack_tracker.hpp"
+#include "tracking/ocsort_tracker.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -7,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <set>
@@ -32,7 +34,9 @@
 //     짝지어진 출력은 헛출력으로 세지 않고 제외한다
 //
 // 사용법
-//   bench_mot17 <MOT17 폴더> [--det FRCNN|SDP|DPM] [--out 결과폴더] [--config yaml] [--gmc GMC폴더] [시퀀스 이름 필터...]
+//   bench_mot17 <MOT17 폴더> [--tracker bytetrack|ocsort] [--det FRCNN|SDP|DPM] [--out 결과폴더] [--config yaml]
+//               [--gmc GMC폴더] [시퀀스 이름 필터...]
+//     --tracker    : bytetrack (기본) 또는 ocsort (단독 OC-SORT, 공식 구현 이식)
 //     <MOT17 폴더> : train/ 이 들어 있는 폴더 또는 train 폴더 자체
 //     --det        : 사용할 공개 검출기 (기본 FRCNN)
 //     --out        : 결과 파일 폴더 (기본: 저장하지 않음)
@@ -40,8 +44,11 @@
 //                    - runtime.yaml / benchmark.yaml 처럼 tracking: 섹션이 있는 파일
 //                    - track_threshold: ... 처럼 tracking 키만 나열한 파일 (sweep_mot17.py가 만드는 형식)
 //                    모르는 키(오타)와 v2에서 없어진 frame_rate 키는 오류로 처리한다
+//                    --tracker ocsort면 ocsort: 섹션(없으면 파일 전체)을 OC-SORT 설정으로 읽는다
+//                    (설정 파일을 주지 않으면 공식 OC-SORT 기본값)
 //     track_buffer : v2 Tracker는 fps 환산을 하지 않으므로, 예전 결과와 맞추기 위해 여기서
 //                    track_buffer × (seqinfo fps / 30)으로 환산해 넘긴다 (05는 14fps)
+//                    OC-SORT의 max_age는 공식 평가처럼 환산하지 않는다
 //     --gmc        : 카메라 움직임 보정(CMC). 폴더 안의 GMC-MOT17-XX.txt를 읽어 프레임마다 적용한다
 //                    BoT-SORT가 영상으로 미리 계산해 공개한 파일 형식 (MIT 라이선스):
 //                    줄 번호(0부터), a, b, tx, c, d, ty  (탭 구분, n번째 줄 = n프레임 → n+1프레임 변환)
@@ -253,6 +260,39 @@ TrackingConfig load_config(const std::string& path)
     return config_parser::load_tracking_config(node);
 }
 
+// --tracker ocsort의 --config 파일. ocsort: 섹션이 있으면 그 안을, 없으면 파일 전체를 OC-SORT 설정으로 본다.
+// ByteTrack 설정(tracking: 섹션)만 있는 파일은 실수로 보고 오류로 처리한다.
+OCSortConfig load_ocsort_file(const std::string& path)
+{
+    const YAML::Node root = config_parser::load_yaml(path);
+    if (!root["ocsort"] && root["tracking"])
+        throw std::runtime_error(path + ": ocsort: 섹션이 없습니다 (tracking: 섹션은 ByteTrack 설정입니다)");
+    const YAML::Node node = root["ocsort"] ? root["ocsort"] : root;
+    if (!node.IsMap())
+        throw std::runtime_error(path + ": ocsort 설정이 key: value 형식이 아닙니다");
+    static const std::set<std::string> known = {"det_threshold", "iou_threshold", "max_age", "min_hits",
+                                                "delta_t", "inertia", "use_byte"};
+    for (const auto& kv : node)
+    {
+        const std::string key = kv.first.as<std::string>();
+        if (!known.count(key))
+            throw std::runtime_error(path + ": 알 수 없는 OC-SORT 키 '" + key + "'");
+    }
+    return config_parser::load_ocsort_config(node);
+}
+
+// OC-SORT 기준 검출 점수 분포: 0.1 이하 버림, 0.1 ~ det_threshold는 use_byte일 때만 2차 매칭, 초과는 high(새 ID 가능)
+void print_ocsort_score_distribution(const std::vector<float>& scores, const OCSortConfig& c)
+{
+    int band[3] = {0, 0, 0};
+    for (float s : scores)
+        ++band[s > c.det_threshold ? 2 : (s > 0.1f && s < c.det_threshold ? 1 : 0)];
+    const double n = scores.empty() ? 1.0 : static_cast<double>(scores.size());
+    std::printf("  검출 %zu개   버림 %5.1f%%   2차(use_byte %s) %5.1f%%   high(>%.2f) %5.1f%%\n", scores.size(),
+                100.0 * band[0] / n, c.use_byte ? "켬" : "끔", 100.0 * band[1] / n, c.det_threshold,
+                100.0 * band[2] / n);
+}
+
 void print_score_distribution(const std::vector<float>& scores, const TrackingConfig& c)
 {
     const float low = c.low_threshold, new_thresh = new_track_threshold(c);
@@ -293,7 +333,7 @@ struct Totals
 
 int main(int argc, char** argv)
 {
-    std::string root_arg, det_name = "FRCNN", out_dir, config_path, gmc_dir;
+    std::string root_arg, det_name = "FRCNN", out_dir, config_path, gmc_dir, tracker_name = "bytetrack";
     std::vector<std::string> filters;
     for (int i = 1; i < argc; ++i)
     {
@@ -314,10 +354,12 @@ int main(int argc, char** argv)
             next(config_path);
         else if (a == "--gmc")
             next(gmc_dir);
+        else if (a == "--tracker")
+            next(tracker_name);
         else if (a == "-h" || a == "--help")
         {
-            std::cout << "사용법: bench_mot17 <MOT17 폴더> [--det FRCNN|SDP|DPM] [--out 결과폴더] "
-                         "[--config yaml] [--gmc GMC폴더] [시퀀스 필터...]\n";
+            std::cout << "사용법: bench_mot17 <MOT17 폴더> [--tracker bytetrack|ocsort] [--det FRCNN|SDP|DPM] "
+                         "[--out 결과폴더] [--config yaml] [--gmc GMC폴더] [시퀀스 필터...]\n";
             return 0;
         }
         else if (root_arg.empty())
@@ -331,15 +373,28 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    if (tracker_name != "bytetrack" && tracker_name != "ocsort")
+    {
+        std::cerr << "--tracker는 bytetrack 또는 ocsort입니다: " << tracker_name << "\n";
+        return 2;
+    }
+    const bool use_ocsort = (tracker_name == "ocsort");
+
     fs::path root = root_arg;
     if (fs::is_directory(root / "train"))
         root /= "train";
 
     TrackingConfig base;
+    OCSortConfig oc_base;
     try
     {
         if (!config_path.empty())
-            base = load_config(config_path);
+        {
+            if (use_ocsort)
+                oc_base = load_ocsort_file(config_path);
+            else
+                base = load_config(config_path);
+        }
     }
     catch (const std::exception& e)
     {
@@ -370,6 +425,13 @@ int main(int argc, char** argv)
     if (!out_dir.empty())
         fs::create_directories(out_dir);
 
+    if (use_ocsort)
+        std::printf("\n[MOT17 %s, 시퀀스 %zu개]  OC-SORT det %.2f / iou %.2f / max_age %d / min_hits %d / delta_t %d / "
+                    "inertia %.2f / use_byte %s\n",
+                    det_name.c_str(), seqs.size(), oc_base.det_threshold, oc_base.iou_threshold, oc_base.max_age,
+                    oc_base.min_hits, oc_base.delta_t, oc_base.inertia, oc_base.use_byte ? "켬" : "끔");
+    else
+    {
     std::printf("\n[MOT17 %s, 시퀀스 %zu개]  ByteTrack track %.2f / low %.2f / new %.2f / match %.2f / buffer %d\n",
                 det_name.c_str(), seqs.size(), base.track_threshold, base.low_threshold, new_track_threshold(base),
                 base.match_threshold, base.track_buffer);
@@ -378,8 +440,9 @@ int main(int argc, char** argv)
     std::printf("  kalman %s / fuse_score %s / nsa_kalman %s / lost_output_frames %d / buffer_scale %.2f (max_px %.0f, small %.0f, snap %s)\n",
                 base.kalman_format.c_str(), base.fuse_score ? "켬" : "끔", base.nsa_kalman ? "켬" : "끔", base.lost_output_frames, base.buffer_scale, base.buffer_max_px,
                 base.buffer_small_size, base.buffer_snap ? "켬" : "끔");
-    std::printf("  OC-SORT: oru %s / ocm_weight %.2f (delta_t %d) / ocr %s\n", base.oru ? "켬" : "끔",
+    std::printf("  ByteTrack OC-SORT 옵션: oru %s / ocm_weight %.2f (delta_t %d) / ocr %s\n", base.oru ? "켬" : "끔",
                 base.ocm_weight, base.ocm_delta_t, base.ocr ? "켬" : "끔");
+    }
     if (!gmc_dir.empty())
         std::printf("  CMC 켬: %s/GMC-<시퀀스>.txt\n", gmc_dir.c_str());
 
@@ -409,13 +472,24 @@ int main(int argc, char** argv)
         const auto gt = has_gt ? read_gt(dir / "gt" / "gt.txt") : std::map<int, std::vector<GtRow>>{};
 
         std::printf("\n%s  (%d프레임, %dfps)\n", info.name.c_str(), info.length, info.frame_rate);
-        print_score_distribution(scores, base);
+        if (use_ocsort)
+            print_ocsort_score_distribution(scores, oc_base);
+        else
+            print_score_distribution(scores, base);
 
         // 예전 Tracker처럼 track_buffer를 30fps 기준으로 보고 시퀀스 fps에 맞춰 환산한다
         TrackingConfig cfg = base;
         cfg.track_buffer = std::max(1, static_cast<int>(info.frame_rate / 30.0 * base.track_buffer));
-        ByteTrackTracker tracker(cfg);
-        tracker.set_image_size(static_cast<float>(info.width), static_cast<float>(info.height));
+        std::unique_ptr<ByteTrackTracker> bytetrack;
+        std::unique_ptr<OCSortTracker> ocsort;
+        if (use_ocsort)
+            ocsort = std::make_unique<OCSortTracker>(oc_base);
+        else
+        {
+            bytetrack = std::make_unique<ByteTrackTracker>(cfg);
+            bytetrack->set_image_size(static_cast<float>(info.width), static_cast<float>(info.height));
+        }
+        Tracker& tracker = use_ocsort ? static_cast<Tracker&>(*ocsort) : static_cast<Tracker&>(*bytetrack);
         std::vector<CameraMotion> gmc;
         if (!gmc_dir.empty())
         {
@@ -446,7 +520,12 @@ int main(int argc, char** argv)
             const auto t0 = std::chrono::steady_clock::now();
             // GMC 파일 f-1번째 줄 = (f-1)프레임 → f프레임 변환 (첫 줄은 항등)
             if (f >= 2 && f - 1 < static_cast<int>(gmc.size()))
-                tracker.set_camera_motion(gmc[f - 1]);
+            {
+                if (use_ocsort)
+                    ocsort->set_camera_motion(gmc[f - 1]);
+                else
+                    bytetrack->set_camera_motion(gmc[f - 1]);
+            }
             auto tracks = tracker.track(in);
             const double dt = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             ms += dt;

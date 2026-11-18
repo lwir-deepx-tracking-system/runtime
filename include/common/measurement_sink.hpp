@@ -12,4 +12,7 @@ public:
     virtual void activate(std::uint64_t generation, int model_id) noexcept = 0;
     virtual void record(std::uint64_t generation, MetricStage stage, const StageMetric& metric) noexcept = 0;
     virtual void record_detection(std::uint64_t generation, const DetectionTiming& timing) noexcept = 0;
+    // Tracking supplies the epoch only after acquiring the active tracker.
+    virtual void bind_tracking(std::uint64_t, std::uint64_t, std::uint64_t, int,
+        std::chrono::steady_clock::time_point) noexcept {}
 };

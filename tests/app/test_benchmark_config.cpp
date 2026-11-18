@@ -36,7 +36,7 @@ int main()
         !config.tracking.post_reid ||
         !config.tracking.frame.gmc ||
         !config.tracking.class_gate ||
-        config.tracking_catalog.size() != 4 ||
+        config.tracking_catalog.size() != 7 ||
         config.sequence.start != "seq_004" ||
         config.sequence.end != "seq_004" ||
         config.path.output_root != "/mnt/lwir_data/results/benchmark" ||

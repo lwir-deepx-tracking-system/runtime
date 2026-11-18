@@ -59,7 +59,7 @@ AppConfig가 코드 기본값으로 채운다. 기존 설정 키는 계속 지�
 | --- | --- |
 | `control.heartbeat_timeout_ms` / `poll_interval_ms` | 1500 / 25 ms |
 | `auto.period_ms` / `input_timeout_ms` / `reacquire_timeout_ms` | 25 / 250 / 1000 ms |
-| `auto.speed_min` / `min_confidence` | 1 / 0.5 |
+| `auto.speed_min` / `min_confidence` | 1 / 0.0 |
 | `auto.fov_x_deg` / `fov_y_deg` | 0 / 0 (정규화 오차) |
 | 각 축 `integral_limit` / `derivative_filter_ms` | 10 / 100 ms |
 | `gimbal.baud_rate` / `write_timeout_ms` | 115200 / 100 ms |

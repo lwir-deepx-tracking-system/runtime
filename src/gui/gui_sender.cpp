@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -88,10 +89,12 @@ GuiSender::GuiSender(
     GuiVideoConfig video_config,
     GuiMetadataConfig metadata_config,
     std::uint16_t clip_min,
-    std::uint16_t clip_max)
+    std::uint16_t clip_max,
+    FrameTelemetryCollector* telemetry)
     : video_config_(std::move(video_config)),
       metadata_config_(std::move(metadata_config)),
       protocol_(std::make_unique<PcGuiProtocol>()),
+      telemetry_(metadata_config_.telemetry_enabled ? telemetry : nullptr),
       clip_min_(clip_min),
       clip_max_(clip_max)
 {
@@ -208,6 +211,7 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
     frame_width_ = width;
     frame_height_ = height;
     frame_index_ = 0;
+    if (telemetry_) telemetry_->start_session();
     Logger::info(
         "[GuiSender] RTP/UDP 영상 송신 시작: " + video_config_.host + ":" +
         std::to_string(video_config_.port));
@@ -215,13 +219,15 @@ bool GuiSender::start_gstreamer_pipeline(int width, int height)
 }
 
 // 연속 메모리 BGR image를 timestamp가 있는 GstBuffer로 복사해 appsrc에 넘긴다.
-bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
+bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image,
+    const TrackingResult* result, double queue_ms, double convert_ms)
 {
     if (!pipeline_ || !appsrc_ || image.empty() || !image.isContinuous())
         return false;
 
     // OpenCV가 소유한 memory와 pipeline의 비동기 수명을 분리하기 위해
     // GstBuffer를 만들고 현재 frame bytes를 복사한다.
+    const auto submit_started = std::chrono::steady_clock::now();
     const std::size_t byte_size = image.total() * image.elemSize();
     GstBuffer* buffer = gst_buffer_new_allocate(nullptr, byte_size, nullptr);
     if (!buffer) return false;
@@ -240,21 +246,32 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image)
     GST_BUFFER_PTS(buffer) = frame_presentation_time(frame_index_, video_config_.fps);
     GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
     GST_BUFFER_DURATION(buffer) = duration;
+    const auto encode_started = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(processing_mutex_);
         // Bound tracking even when queued inputs are dropped before encoding.
         if (processing_started_.size() >= 256) processing_started_.clear();
-        processing_started_[static_cast<std::uint32_t>(ticks)] = steady_ns();
+        processing_started_[static_cast<std::uint32_t>(ticks)] = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(encode_started.time_since_epoch()).count());
     }
+    if (telemetry_ && result)
+        telemetry_->gui_begin(result->model_generation, result->frame->metadata.frame_id,
+            result->tracker_epoch, result->frame->metadata.captured_at,
+            static_cast<std::uint32_t>(ticks), queue_ms, convert_ms,
+            encode_started);
     ++frame_index_;
 
     // push_buffer 호출 뒤 GstBuffer 소유권은 appsrc로 이동한다.
-    const GstFlowReturn result = gst_app_src_push_buffer(appsrc_, buffer);
-    if (result != GST_FLOW_OK)
+    const GstFlowReturn flow = gst_app_src_push_buffer(appsrc_, buffer);
+    if (telemetry_ && result)
+        telemetry_->gui_submitted(static_cast<std::uint32_t>(ticks),
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - submit_started).count(),
+            flow == GST_FLOW_OK);
+    if (flow != GST_FLOW_OK)
     {
         Logger::error(
             "[GuiSender] appsrc push 실패: " +
-            std::to_string(static_cast<int>(result)));
+            std::to_string(static_cast<int>(flow)));
         log_pipeline_error(pipeline_);
         return false;
     }
@@ -331,6 +348,10 @@ bool GuiSender::send_tracking_metadata(
     metadata.rtp_timestamp = static_cast<std::uint32_t>(
         gst_util_uint64_scale(frame_pts, 90000, GST_SECOND));
     metadata.gui_started_us = gui_started_us;
+    metadata.telemetry_enabled = metadata_config_.telemetry_enabled;
+    if (telemetry_)
+        metadata.telemetry = telemetry_->latest_before(metadata.frame_id,
+            result.model_generation, result.tracker_epoch);
     metadata.width = static_cast<std::uint32_t>(result.frame->image.cols);
     metadata.height = static_cast<std::uint32_t>(result.frame->image.rows);
     metadata.tracks.reserve(result.tracks.size());
@@ -370,6 +391,7 @@ bool GuiSender::send(
     std::uint64_t gui_started_us,
     bool include_metadata)
 {
+    const auto dequeued_at = std::chrono::steady_clock::now();
     // 잘못된 frame이나 네트워크 설정은 pipeline 일부를 시작하기 전에 거부한다.
     if (!result.frame || result.frame->image.empty() ||
         result.frame->image.type() != CV_16UC1 || clip_min_ >= clip_max_ ||
@@ -396,7 +418,8 @@ bool GuiSender::send(
 
     cv::Mat display;
     cv::cvtColor(gray8, display, cv::COLOR_GRAY2BGR);
-    preprocessing_ns_.fetch_add(steady_ns() - preprocess_started, std::memory_order_relaxed);
+    const auto convert_ns = steady_ns() - preprocess_started;
+    preprocessing_ns_.fetch_add(convert_ns, std::memory_order_relaxed);
 
     // 영상과 Tracking metadata는 서로 다른 UDP 채널로 전송한다.
     // Video: BGR -> JPEG/H.264 -> RTP -> UDP
@@ -404,7 +427,11 @@ bool GuiSender::send(
     if (include_metadata &&
         !send_tracking_metadata(result, gui_started_us))
         return false;
-    if (!push_frame_to_gstreamer(display)) return false;
+    const double queue_ms = result.enqueued_at == std::chrono::steady_clock::time_point{} ?
+        std::numeric_limits<double>::quiet_NaN() :
+        std::chrono::duration<double, std::milli>(dequeued_at - result.enqueued_at).count();
+    if (!push_frame_to_gstreamer(display, include_metadata ? &result : nullptr,
+            queue_ms, double(convert_ns) / 1e6)) return false;
     const auto now = steady_ns();
     if (now - last_report_ns_ >= 1000000000ULL)
     {
@@ -414,6 +441,10 @@ bool GuiSender::send(
                 std::to_string(double(values.preprocessing_ns) / values.submitted_frames / 1e6) +
                 " ms, encode+RTP=" + std::to_string(double(values.encode_rtp_ns) / values.processing_samples / 1e6) +
                 " ms, encoded=" + std::to_string(values.encoded_frames));
+        if (telemetry_)
+            Logger::debug("[GuiSender] telemetry dropped_events=" +
+                std::to_string(telemetry_->dropped_events()) + " expired_or_evicted_frames=" +
+                std::to_string(telemetry_->expired_frames()));
         last_report_ns_ = now;
     }
     return true;
@@ -423,6 +454,7 @@ bool GuiSender::send_bypass(
     const FrameContextPtr& frame,
     std::uint64_t gui_started_us)
 {
+    if (telemetry_) telemetry_->reset_context();
     TrackingResult result;
     result.frame = frame;
     return send(result, gui_started_us, false);
@@ -448,6 +480,7 @@ void GuiSender::stop()
         std::lock_guard<std::mutex> lock(processing_mutex_);
         processing_started_.clear();
     }
+    if (telemetry_) telemetry_->reset_context();
     if (metadata_fd_ >= 0)
     {
         ::close(metadata_fd_);
@@ -470,6 +503,10 @@ GstPadProbeReturn GuiSender::observe_rtp(GstPad*, GstPadProbeInfo* info, gpointe
                 const std::uint32_t timestamp = (std::uint32_t(header[4]) << 24) |
                     (std::uint32_t(header[5]) << 16) | (std::uint32_t(header[6]) << 8) | header[7];
                 const auto completed = steady_ns();
+                if (self->telemetry_)
+                    self->telemetry_->rtp_ready(timestamp,
+                        FrameTelemetryCollector::TimePoint(std::chrono::duration_cast<
+                            FrameTelemetryCollector::Clock::duration>(std::chrono::nanoseconds(completed))));
                 std::lock_guard<std::mutex> lock(self->processing_mutex_);
                 const auto found = self->processing_started_.find(timestamp);
                 if (found != self->processing_started_.end())

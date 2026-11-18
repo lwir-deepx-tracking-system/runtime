@@ -557,3 +557,30 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   `feat/python-runtime-integration`으로 전환해 코드와 빌드를 최신화했다.
   기존 미추적 `tests/tracking/lwir_to_mot.py`는 보존했다. GUI와 Runtime은
   계속 실행 중이며 model-bank keepalive 일시 중지 파일도 유지했다.
+
+## 2026-11-18 encoder-cpu 브랜치 로컬 통합
+
+- 대상 `test/modelbank-orangepi-20261117` (`323c3d1`)에서
+  `origin/test/encoder-cpu` (`916bca1`)를 `--no-commit --no-ff`로 병합하고
+  9개 파일의 충돌을 해결했다. 사용자 제공 AGENTS 지침에 따라 commit/push는
+  수행하지 않으며 병합 결과를 인덱스에 준비한다.
+- Encoder CPU 선택형 계측과 telemetry 측정 sink를 기존 자동 모델 선택,
+  resident pair, 원본 녹화, LAN 명령·내보내기 경로에 연결했다.
+  자동 선택 상태 조회는 생성 시 확정한 가용 여부를 읽어 selector 교체와의
+  unique_ptr 데이터 경쟁을 제거했다.
+- 기존 Tracker ID 1~6을 보존했다. ID 5의 XYWH 변형은
+  `config/tracking/ocsort_xywh.yaml`, 새 ID 7의 독립 OC-SORT 구현은
+  `config/tracking/ocsort.yaml`로 구분한다. 이전 `type: ocsort` + ByteTrack
+  설정도 허용하며 독립 OC-SORT 키와 섞인 설정은 거부한다.
+- 비교용 `encoder-sw.yaml`/`encoder-hw.yaml`을 통합 Runtime 설정에서 갱신했다.
+  두 파일의 유일한 차이는 encoder이며, `path_base: ../..`로 하위 폴더의
+  모델 경로를 해결한다. Config·Tracker 테스트도 두 구현과 비교 YAML을 검증한다.
+- `/tmp/lwir-encoder-merge-build`에서 Debug, BUILD_TESTING=ON,
+  DXRT/I3 camera 비활성 전체 빌드 성공. CTest 49/49 통과.
+  인코더 계측, telemetry H.264/JPEG 송신, GUI 명령, 녹화, 모델/트래커 전환,
+  자동 선택기 및 OC-SORT 테스트를 포함한다. `--help` 계측 옵션 표시와
+  SW/HW YAML 차이, 충돌 마커·공백 오류도 확인했다.
+- Orange Pi 배포, 실카메라 30 FPS, MPP 하드웨어 인코더 CPU 비교,
+  DXNN 로딩·추론·실제 텐서 검증·NPU 벤치마크는 이번 병합에서 미검증이다.
+- 다음 단계는 병합 커밋과 원격 반영에 대한 사용자 지침 확인 후 PR #15 반영,
+  실제 보드와 PC GUI를 연결한 계측·녹화·자동 모델 선택 검증이다.

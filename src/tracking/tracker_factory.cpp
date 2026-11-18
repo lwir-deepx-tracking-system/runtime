@@ -1,4 +1,5 @@
 #include "tracking/tracker_factory.hpp"
+#include "tracking/ocsort_tracker.hpp"
 
 #include <stdexcept>
 #include <filesystem>
@@ -41,6 +42,19 @@ public:
     }
     const char* name() const noexcept override { return "botsort"; }
 };
+
+class OCSortFactory final : public TrackerFactory
+{
+public:
+    std::unique_ptr<Tracker> create(
+        const TrackingConfig& config) const override
+    {
+        if (config.type != TrackerType::OCSort)
+            throw std::invalid_argument("TrackerFactory configuration type mismatch");
+        return std::make_unique<OCSortTracker>(config.ocsort);
+    }
+    const char* name() const noexcept override { return "ocsort"; }
+};
 }  // namespace
 
 // 설정의 TrackerType을 지원하는 구체 팩토리로 변환한다.
@@ -52,6 +66,8 @@ std::unique_ptr<TrackerFactory> TrackerFactory::for_type(TrackerType type)
     case TrackerType::OcSort:
     case TrackerType::ByteTrack:
         return std::make_unique<ByteTrackFactory>(type);
+    case TrackerType::OCSort:
+        return std::make_unique<OCSortFactory>();
     case TrackerType::BotSort:
         return std::make_unique<BotSortFactory>();
     }

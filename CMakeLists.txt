@@ -95,6 +95,7 @@ endif()
 
 add_library(lwir_common
     src/common/logger.cpp
+    src/common/frame_telemetry_collector.cpp
     src/config/app_config.cpp
 )
 
@@ -106,6 +107,7 @@ target_include_directories(lwir_common
 target_link_libraries(lwir_common
     PUBLIC
         yaml-cpp
+        Threads::Threads
 )
 
 
@@ -174,6 +176,7 @@ if(LWIR_NEEDS_VISION)
         src/tracking/tracker_factory.cpp
         src/tracking/tracker_manager.cpp
         src/tracking/kalman_filter.cpp
+        src/tracking/ocsort_tracker.cpp
     )
 
     target_include_directories(lwir_vision
@@ -384,6 +387,10 @@ if(BUILD_TESTING)
     target_include_directories(test_reid_matcher PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include ${OpenCV_INCLUDE_DIRS})
     add_test(NAME reid_matcher COMMAND test_reid_matcher)
+    add_executable(test_runtime_telemetry tests/gui/test_runtime_telemetry.cpp)
+    target_link_libraries(test_runtime_telemetry PRIVATE lwir_runtime_core)
+    add_test(NAME runtime_telemetry COMMAND test_runtime_telemetry)
+    set_tests_properties(runtime_telemetry PROPERTIES TIMEOUT 15)
 
     # --------------------------------------------------------------------------
     # 실제 카메라 하드웨어 테스트
@@ -448,6 +455,11 @@ if(BUILD_TESTING)
     target_include_directories(test_runtime_console PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
     target_link_libraries(test_runtime_console PRIVATE lwir_app_support)
     add_test(NAME runtime_console COMMAND test_runtime_console)
+
+    add_executable(test_encoder_cpu_monitor tests/app/test_encoder_cpu_monitor.cpp)
+    target_include_directories(test_encoder_cpu_monitor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    target_link_libraries(test_encoder_cpu_monitor PRIVATE lwir_runtime_core)
+    add_test(NAME encoder_cpu_monitor COMMAND test_encoder_cpu_monitor)
 
     add_executable(test_benchmark_config
         tests/app/test_benchmark_config.cpp
@@ -521,6 +533,8 @@ if(BUILD_TESTING)
     add_test(NAME gui_sender_jpeg COMMAND test_gui_sender jpegenc)
     add_test(NAME gui_sender_bypass COMMAND test_gui_sender x264enc bypass)
     add_test(NAME gui_sender_bypass_jpeg COMMAND test_gui_sender jpegenc bypass)
+    add_test(NAME gui_sender_telemetry COMMAND test_gui_sender x264enc telemetry)
+    add_test(NAME gui_sender_telemetry_jpeg COMMAND test_gui_sender jpegenc telemetry)
     option(LWIR_TEST_MPP "Run Orange Pi MPP hardware encoder tests" OFF)
     if(LWIR_TEST_MPP)
         add_test(NAME gui_sender_mpp_jpeg COMMAND test_gui_sender mppjpegenc)
@@ -648,6 +662,13 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_bytetrack PRIVATE lwir_vision)
     add_test(NAME bytetrack COMMAND test_bytetrack)
+
+    add_executable(
+        test_ocsort
+        tests/tracking/test_ocsort.cpp
+    )
+    target_link_libraries(test_ocsort PRIVATE lwir_vision)
+    add_test(NAME ocsort COMMAND test_ocsort)
 
     add_executable(test_tracker_factory
         tests/tracking/test_tracker_factory.cpp)

@@ -55,7 +55,7 @@ int main()
         config.tracking.oru || config.tracking.ocm_weight != 0.0F ||
         config.tracking.ocm_delta_t != 3 || !config.tracking.ocr ||
         config.tracking.box_refine.mode != "off" || config.tracking.box_refine.lost_same ||
-        config.tracking_catalog.size() != 6 ||
+        config.tracking_catalog.size() != 7 ||
         config.tracking_catalog.at(1).config_path !=
             std::filesystem::absolute("config/tracking/bytetrack.yaml").lexically_normal().string() ||
         config.tracking_catalog.at(2).config.type != TrackerType::BotSort ||
@@ -67,6 +67,7 @@ int main()
         config.tracking_catalog.at(4).config.edge_birth_threshold != 0.5F ||
         config.tracking_catalog.at(5).config.type != TrackerType::OcSort ||
         config.tracking_catalog.at(6).config.type != TrackerType::Sort ||
+        config.tracking_catalog.at(7).config.type != TrackerType::OCSort ||
         config.control.enabled != yaml["control"]["enabled"].as<bool>() ||
         !config.measurement.enabled || !config.measurement.recording_enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")
@@ -77,6 +78,7 @@ int main()
 
     auto tracking = YAML::LoadFile("config/tracking/bytetrack.yaml")["tracking"];
     tracking["type"] = "unsupported";
+
     try {
         config_parser::load_tracking_config(tracking);
         return 41;
@@ -93,6 +95,37 @@ int main()
     tracking["box_refine"]["mode"]="invalid";
     try { config_parser::load_tracking_config(tracking);return 83; }
     catch (const std::runtime_error&) {}
+
+    {
+        const TrackingConfig oc = load_tracker_config("config/tracking/ocsort.yaml");
+        if (oc.type != TrackerType::OCSort || oc.ocsort.det_threshold != 0.6F ||
+            oc.ocsort.iou_threshold != 0.3F || oc.ocsort.max_age != 30 ||
+            oc.ocsort.min_hits != 3 || oc.ocsort.delta_t != 3 ||
+            oc.ocsort.inertia != 0.2F || oc.ocsort.use_byte)
+            return 54;
+
+        auto oc_node = YAML::LoadFile("config/tracking/ocsort.yaml")["tracking"];
+        oc_node["track_threshold"] = 0.5;      // ByteTrack 키가 섞인 OC-SORT 설정
+        bool rejected = false;
+        try { config_parser::load_tracking_config(oc_node); }
+        catch (const std::runtime_error&) { rejected = true; }
+        if (!rejected)
+            return 55;
+    }
+
+    // 비교 설정은 통합된 카탈로그·녹화·자동 선택을 공유하고 encoder만 다르다.
+    const auto software = load_runtime_config("config/local/encoder-sw.yaml");
+    const auto hardware = load_runtime_config("config/local/encoder-hw.yaml");
+    if (software.detection.model.path != config.detection.model.path ||
+        hardware.detection.model.path != config.detection.model.path ||
+        software.tracking_catalog.size() != config.tracking_catalog.size() ||
+        hardware.tracking_catalog.size() != config.tracking_catalog.size() ||
+        software.gui.video.encoder != "x264enc" || hardware.gui.video.encoder != "mpph264enc" ||
+        !software.gui.metadata.telemetry_enabled || !hardware.gui.metadata.telemetry_enabled ||
+        software.measurement.recording_enabled != hardware.measurement.recording_enabled ||
+        software.auto_near_model_id != hardware.auto_near_model_id ||
+        software.auto_far_model_id != hardware.auto_far_model_id)
+        return 84;
 
     // 연결된 모델 YAML의 Camera와 모델 입력 계약 검증.
     if (config.detection.model.camera_input.opencv_type != "CV_16UC1") return 3;
@@ -169,6 +202,18 @@ int main()
         try { config_parser::load_gui_config(gui); } catch (const std::runtime_error&) { return true; }
         return false;
     };
+    // Telemetry defaults on when its YAML key is omitted, independent of CSV.
+    gui["metadata"].remove("telemetry");
+    if (!config_parser::load_gui_config(gui).metadata.telemetry_enabled) return 60;
+    gui["metadata"]["max_packet_bytes"] = 151;
+    if (!rejects()) return 61;
+    gui["metadata"]["max_packet_bytes"] = 152;
+    if (!config_parser::load_gui_config(gui).metadata.telemetry_enabled) return 62;
+    gui["metadata"]["telemetry"]["enabled"] = false;
+    gui["metadata"]["max_packet_bytes"] = 64;
+    if (config_parser::load_gui_config(gui).metadata.telemetry_enabled) return 63;
+    gui["metadata"]["max_packet_bytes"] = 1200;
+    gui["metadata"]["telemetry"]["enabled"] = true;
     gui["video"]["encoder"] = "mppjpegenc";
     if (!rejects()) return 11;
     gui["video"]["encoder"] = "mpph264enc";

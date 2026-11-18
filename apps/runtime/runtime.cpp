@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "encoder_cpu_monitor.hpp"
 #include "app/pipeline_console.hpp"
 #include "app/metrics_writer.hpp"
 #include "app/raw_recorder.hpp"
@@ -60,6 +61,8 @@ private:
     RuntimeConfig config_;
     std::unique_ptr<MetricsWriter> metrics_writer_;
     std::unique_ptr<RawRecorder> recorder_;
+    std::unique_ptr<FrameTelemetryCollector> telemetry_collector_;
+    IMeasurementSink* measurement_sink_ = nullptr;
 
     // Camera의 shared FrameContext를 Detection으로 전달
     ThreadSafeQueue<FrameMessage> frame_queue_;
@@ -68,6 +71,8 @@ private:
     ThreadSafeQueue<DetectionResult> detection_queue_;
     ThreadSafeQueue<AutoModelObservation> auto_observation_queue_;
     std::unique_ptr<AutoModelSelector> auto_selector_;
+    // GUI는 생성 시 확정된 가용 여부만 읽고 selector 소유권은 runtime 루프가 관리한다.
+    bool auto_selector_available_ = false;
     std::atomic<bool> auto_detection_enabled_{false};
     std::atomic<float> auto_far_px_{100.0f}, auto_near_px_{140.0f};
     std::atomic<std::uint64_t> auto_settings_generation_{0};
@@ -82,6 +87,7 @@ private:
     std::string tracker_name_;
     bool measurement_enabled_ = false;
     bool console_enabled_ = false;
+    bool encoder_cpu_enabled_ = false;
     RuntimeControl runtime_control_;
     ActivePipelineSlot active_pipeline_;
     std::mutex model_change_mutex_;
@@ -124,7 +130,8 @@ private:
 
 public:
     // YAML 설정을 읽고 필요한 객체를 생성
-    explicit RuntimeApplication(const std::string& config_path, bool console_enabled = false);
+    explicit RuntimeApplication(const std::string& config_path, bool console_enabled = false,
+        bool encoder_cpu_enabled = false);
     RuntimeApplication(const RuntimeApplication&) = delete;
     RuntimeApplication& operator=(const RuntimeApplication&) = delete;
 
@@ -154,11 +161,18 @@ public:
 
 
 // YAML을 읽고 설정에 맞는 Component들을 생성한다.
-RuntimeApplication::RuntimeApplication(const std::string& config_path, bool console_enabled)
-    : config_(load_runtime_config(config_path)), config_path_(config_path), console_enabled_(console_enabled)
+RuntimeApplication::RuntimeApplication(const std::string& config_path, bool console_enabled,
+    bool encoder_cpu_enabled)
+    : config_(load_runtime_config(config_path)), config_path_(config_path),
+      console_enabled_(console_enabled), encoder_cpu_enabled_(encoder_cpu_enabled)
 {
+    if (encoder_cpu_enabled_ && (!config_.gui.enabled ||
+        config_.gui.video.codec != GuiVideoCodec::H264))
+        throw std::runtime_error("--encoder-cpu requires enabled H.264 GUI video");
     Logger::set_level(config_.logging.level);
-    measurement_enabled_ = config_.measurement.enabled;
+    const bool telemetry_enabled = config_.gui.enabled && config_.gui.metadata.enabled &&
+        config_.gui.metadata.telemetry_enabled;
+    measurement_enabled_ = config_.measurement.enabled || telemetry_enabled;
 
     // Control은 GUI 선택 ID에 의존하므로 enable 조합만으로 세 모드를 결정한다.
     if (config_.control.enabled)
@@ -191,7 +205,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         std::to_string(gui_track_queue_.size())
     );
 
-    if (measurement_enabled_) {
+    if (config_.measurement.enabled) {
         MetricsWriterOptions options;
         options.output_root = std::filesystem::path(config_.measurement.output_root) / runtime_mode_;
         options.snapshots.emplace_back(config_path_, "runtime.yaml");
@@ -209,6 +223,10 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         metrics_writer_ = std::make_unique<MetricsWriter>(options);
         Logger::info("[Measurement] 결과 경로: " + metrics_writer_->directory().string());
     }
+    if (telemetry_enabled)
+        telemetry_collector_ = std::make_unique<FrameTelemetryCollector>(metrics_writer_.get());
+    measurement_sink_ = telemetry_collector_ ? static_cast<IMeasurementSink*>(telemetry_collector_.get()) :
+        static_cast<IMeasurementSink*>(metrics_writer_.get());
     camera_ = std::make_unique<Camera>();
     if (config_.measurement.recording_enabled)
         recorder_ = std::make_unique<RawRecorder>(
@@ -221,7 +239,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         active_pipeline_,
         runtime_control_, &model_change_results_,
         std::function<std::shared_ptr<IDetectionPipeline>(const ModelCatalogEntry&)>{},
-        metrics_writer_.get(),
+        measurement_sink_,
         config_.resident_detection_pair ? std::optional<ModelCatalogEntry>(
             config_.detection_catalog.at(config_.initial_detection_id == config_.auto_near_model_id ?
                 config_.auto_far_model_id : config_.auto_near_model_id)) : std::nullopt);
@@ -230,6 +248,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         config_.detection_catalog.count(config_.auto_far_model_id)) {
         auto_selector_ = std::make_unique<AutoModelSelector>(
             AutoModelSelector::Config{config_.auto_near_model_id, config_.auto_far_model_id});
+        auto_selector_available_ = true;
         auto_detection_enabled_.store(config_.auto_detection_enabled);
     }
 
@@ -262,7 +281,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             gui_track_queue_,
             config_.gui.enabled,
-            measurement_enabled_, metrics_writer_.get()
+            measurement_enabled_, measurement_sink_
         );
     
     // detection_queue → Tracking → track_queue
@@ -273,7 +292,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             detection_queue_,
             control_track_queue_,
             gui_track_queue_,
-            measurement_enabled_, metrics_writer_.get(), recorder_.get(),
+            measurement_enabled_, measurement_sink_, recorder_.get(),
             auto_selector_ ? &auto_observation_queue_ : nullptr
         );
 
@@ -282,7 +301,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         gimbal_executor_ = std::make_unique<GimbalCommandExecutor>(
             config_.control, GimbalDeviceFactory::create(config_.control.gimbal), runtime_control_);
     control_thread_ = std::make_unique<ControlThread>(
-        control_track_queue_, gimbal_executor_.get(), measurement_enabled_, metrics_writer_.get());
+        control_track_queue_, gimbal_executor_.get(), measurement_enabled_, measurement_sink_);
 
 
     if (config_.gui.enabled)
@@ -291,7 +310,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             config_.gui.video,
             config_.gui.metadata,
             config_.detection.model.camera_input.clip_min,
-            config_.detection.model.camera_input.clip_max);
+            config_.detection.model.camera_input.clip_max, telemetry_collector_.get());
         gui_sender_thread_ = std::make_unique<GuiSenderThread>(
             *gui_sender_, runtime_control_, gui_track_queue_);
 
@@ -357,7 +376,7 @@ PipelineTrackerPolicy RuntimeApplication::tracker_policy() const
 }
 
 PipelineAutoDetection RuntimeApplication::auto_detection() const {
-    const bool present=auto_selector_ &&
+    const bool present=auto_selector_available_ &&
         std::filesystem::is_regular_file(config_.detection_catalog.at(config_.auto_near_model_id).model.path) &&
         std::filesystem::is_regular_file(config_.detection_catalog.at(config_.auto_far_model_id).model.path);
     return {auto_detection_enabled_.load(),present,
@@ -560,6 +579,15 @@ void RuntimeApplication::run()
         if (console_enabled_) console = std::make_unique<PipelineConsole>(*this, std::cout);
 
         std::uint64_t applied_auto_generation=auto_settings_generation_.load();
+        EncoderCpuMonitor encoder_cpu;
+        if (encoder_cpu_enabled_)
+            std::cout << "[EncoderCPU] encoder=" << config_.gui.video.encoder
+                      << " bitrate_kbps=" << config_.gui.video.bitrate_kbps
+                      << " fps=" << config_.gui.video.fps
+                      << " gop=" << config_.gui.video.keyframe_interval
+                      << " rtp_mtu=" << config_.gui.video.rtp_mtu
+                      << " warmup_s=10 window_s=60; waiting for first RTP frame\n";
+
         while (!camera_thread_->finished())
         {
             const auto auto_generation=auto_settings_generation_.load();
@@ -618,6 +646,36 @@ void RuntimeApplication::run()
                 break;
             }
 
+            if (encoder_cpu_enabled_)
+            {
+                timespec cpu{};
+                if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &cpu) != 0)
+                    throw std::runtime_error("Cannot read process CPU time");
+                const double wall = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                const auto sample = encoder_cpu.poll(wall,
+                    cpu.tv_sec + cpu.tv_nsec / 1e9, gui_sender_->stats());
+                if (sample)
+                {
+                    // Use one line, independently of the configured log level.
+                    // Capture with tee; no extra writer thread or disk I/O in workers.
+                    std::ostringstream line;
+                    line << std::fixed << std::setprecision(3)
+                         << "[EncoderCPU] encoder=" << config_.gui.video.encoder
+                         << " elapsed_s=" << sample->elapsed_seconds
+                         << " interval_s=" << sample->interval_seconds
+                         << " cpu_percent_one_core=" << sample->cpu_percent_one_core
+                         << " avg_cpu_percent_one_core=" << sample->average_cpu_percent_one_core
+                         << " submitted_fps=" << sample->submitted_fps
+                         << " tx_fps=" << sample->tx_fps
+                         << " avg_tx_fps=" << sample->average_tx_fps
+                         << " submitted=" << sample->submitted
+                         << " encoded=" << sample->encoded
+                         << " final=" << sample->final;
+                    std::cout << line.str() << std::endl;
+                    if (sample->final) encoder_cpu_enabled_ = false;
+                }
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
@@ -673,10 +731,10 @@ void RuntimeApplication::run()
     }
 }
 
-int run_runtime(const std::string& config_path, bool console_enabled)
+int run_runtime(const std::string& config_path, bool console_enabled, bool encoder_cpu_enabled)
 {
     try {
-        RuntimeApplication app(config_path, console_enabled);
+        RuntimeApplication app(config_path, console_enabled, encoder_cpu_enabled);
         app.run();
         return 0;
     } catch (const std::exception& error) {

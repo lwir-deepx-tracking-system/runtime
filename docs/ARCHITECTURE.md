@@ -49,8 +49,10 @@ TrackingThread ------------------------TrackingResultPtr-----------------------+
   Manager의 `activate()`를 호출한다.
 
 현재 Runtime 카탈로그는 ID 1 ByteTrack, ID 2 BoT-SORT, ID 3 ByteTrack+
-Post-ReID, ID 4 필터·GMC + Post-ReID, ID 5 OC-SORT형 설정, ID 6 SORT형
-설정이다. `tracking.id`가 초기 모드를 선택하며 Runtime 기본값은 ID 1이다.
+Post-ReID, ID 4 필터·GMC + Post-ReID, ID 5 OC-SORT XYWH 변형, ID 6 SORT,
+ID 7 독립 OC-SORT 구현이다. ID 5는 `ocsort_xywh.yaml`, ID 7은 `ocsort.yaml`을 사용한다.
+기존 `type: ocsort`와 ByteTrack 키를 쓰는 외부 설정은 XYWH 변형으로 해석하고,
+독립 OC-SORT 키와의 혼합은 오류로 처리한다. `tracking.id`가 초기 모드를 선택하며 Runtime 기본값은 ID 1이다.
 기존 `TrackerChangeService`가 이 카탈로그의 새 ID도 교체한다. Benchmark의 기존
 `reid.enabled: true`는 ID 1에서도 사후 ReID를 켜는 호환 동작이다.
 세부 설정과 출력 파일 의미는 [`multitracker.md`](multitracker.md)에 있다.
@@ -184,3 +186,17 @@ PC의 Python 데스크톱 프로세스는 원본 model-bank 페이지를 WebKit�
 그 수를 LAN 상태로 보낸다. Tracker·Detection·Control 결과와 프레임 정책은
 녹화 경로에 의해 바뀌지 않는다. 단일 PC는 기존 TCP 5002의 카테고리 5로
 시작·종료·상태를 제어한다. 재생/파일 전송/측정 세션은 아직 연결되지 않았다.
+
+## Encoder CPU 및 telemetry 통합
+
+`FrameTelemetryCollector`는 측정 sink를 감싸 CSV 기록을 전달하고 프레임 단계·RTP
+완료 이벤트를 유한 큐에 수집한다. GUI telemetry가 활성화되면 CSV 저장이 꺼져도
+측정 시각을 수집한다. `GuiSender`가 집계한 telemetry를 metadata trailer로 전송한다.
+녹화는 기존 `RawRecorder` 경로를 사용한다.
+
+`--encoder-cpu`는 H.264 GUI 송신이 켜진 실행에서 첫 RTP 출력 뒤 10초 워밍업,
+60초 프로세스 CPU·송신 FPS 계측을 추가한다. SW/HW 비교 설정은 통합 runtime
+설정을 공유하며 encoder만 다르다. 하위 `config/local` 경로의 `path_base`는 `../..`이다.
+
+자동 모델 선택기 소유권은 runtime 루프에 한정한다. GUI 상태 조회는 생성 시 확정한
+가용 여부와 atomic 설정값만 읽으며 교체되는 unique_ptr를 참조하지 않는다.

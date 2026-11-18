@@ -78,6 +78,7 @@ int main(int argc, char** argv)
 {
     const std::string encoder = argc > 1 ? argv[1] : "x264enc";
     const bool test_bypass = argc > 2 && std::string(argv[2]) == "bypass";
+    const bool test_telemetry = argc > 2 && std::string(argv[2]) == "telemetry";
     const bool jpeg = encoder == "jpegenc" || encoder == "mppjpegenc";
     std::uint16_t video_port = 0, metadata_port = 0;
     const int video_fd = open_udp_receiver(video_port);
@@ -96,7 +97,9 @@ int main(int argc, char** argv)
     meta.host = "127.0.0.1";
     meta.port = metadata_port;
     meta.max_packet_bytes = 1200;
-    GuiSender sender(video, meta, 8000, 24000);
+    FrameTelemetryCollector collector;
+    collector.activate(1, 1);
+    GuiSender sender(video, meta, 8000, 24000, test_telemetry ? &collector : nullptr);
     std::map<std::uint32_t, GuiTrackingMetadata> metadata;
     std::set<std::uint32_t> markers;
     const auto drain_both = [&] {
@@ -110,8 +113,19 @@ int main(int argc, char** argv)
         auto frame = std::make_shared<FrameContext>();
         frame->image = cv::Mat(480, 640, CV_16UC1, cv::Scalar(16000 + i * 100));
         frame->metadata.frame_id = i + 1;
+        frame->metadata.captured_at = std::chrono::steady_clock::now();
         TrackingResult result;
         result.frame = frame;
+        result.model_generation = 1;
+        result.enqueued_at = std::chrono::steady_clock::now();
+        if (test_telemetry) {
+            // Transport timing fixture only: these values are not inference outputs.
+            StageMetric metric; metric.frame_id = i + 1; metric.processing_ms = 1;
+            collector.record(1, MetricStage::Camera, metric);
+            collector.record(1, MetricStage::Detection, metric);
+            collector.bind_tracking(1, i + 1, 0, 1, frame->metadata.captured_at);
+            collector.record(1, MetricStage::Tracking, metric);
+        }
         // Exercise video-only model-switch bypass between normal PC metadata frames.
         const bool bypass = test_bypass && i >= 3 && i < 6;
         if (!(bypass ? sender.send_bypass(frame, 123456) : sender.send(result, 123456))) return 2;
@@ -137,6 +151,7 @@ int main(int argc, char** argv)
     if (markers.size() < 5 || stats.encoded_frames != markers.size() ||
         stats.processing_samples != stats.encoded_frames || !stats.encode_rtp_ns ||
         !stats.preprocessing_ns || stats.submitted_frames != 45) return 5;
+    std::size_t telemetry_samples = 0;
     for (const auto timestamp : markers)
     {
         const auto found = metadata.find(timestamp);
@@ -146,8 +161,17 @@ int main(int argc, char** argv)
         }
         if (found == metadata.end()) { std::cerr << "Missing metadata timestamp=" << timestamp << "\n"; return 6; }
         const auto& decoded = found->second;
+        if (decoded.telemetry) {
+            ++telemetry_samples;
+            const auto& t = *decoded.telemetry;
+            if (!test_telemetry || t.frame_id >= decoded.frame_id || t.model_generation != 1 ||
+                t.model_id != 1 || t.tracker_id != 1 ||
+                (t.valid_mask & ((1U << 15) | (1U << 16) | (1U << 17))) !=
+                    ((1U << 15) | (1U << 16) | (1U << 17))) return 9;
+        }
         if (decoded.rtp_timestamp != (decoded.frame_id - 1) * 3000 || decoded.width != 640 ||
             decoded.height != 480 || decoded.gui_started_us != 123456 || !decoded.tracks.empty()) return 7;
     }
+    if (test_telemetry && !telemetry_samples) return 10;
     return 0;
 }

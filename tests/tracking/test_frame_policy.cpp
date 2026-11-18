@@ -152,7 +152,7 @@ int main()
         try {config_parser::load_tracking_config(YAML::Load(std::string("track_threshold: .5\nmatch_threshold: .8\ntrack_buffer: 30\n")+key));}
         catch(const std::runtime_error&) {rejected=true;} assert(rejected);
     }
-    const auto oc=load_tracker_config("config/tracking/ocsort.yaml");
+    const auto oc=load_tracker_config("config/tracking/ocsort_xywh.yaml");
     assert(oc.type==TrackerType::OcSort && oc.oru && oc.ocr && oc.ocm_weight>0);
     assert(std::string(TrackerFactory::for_type(oc.type)->name())=="ocsort");
 }

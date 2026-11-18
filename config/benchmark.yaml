@@ -58,6 +58,12 @@ tracking_catalog:
     config: config/tracking/bytetrack_post_reid.yaml
   - id: 4
     config: config/tracking/bytetrack_filtered.yaml
+  - id: 5
+    config: config/tracking/ocsort_xywh.yaml
+  - id: 6
+    config: config/tracking/sort.yaml
+  - id: 7
+    config: config/tracking/ocsort.yaml
 
 
 # ============================================================
