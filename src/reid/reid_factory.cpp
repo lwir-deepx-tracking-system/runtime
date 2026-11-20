@@ -1,28 +1,26 @@
 #include "reid/reid_factory.hpp"
 #include "reid/reid_pipeline.hpp"
-#include "common/dxrt_inference_option.hpp"
+#include "inference/dxrt_session.hpp"
 
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
-#include <dxrt/dxrt_cxx_api.h>
 
 namespace {
 class RepVggReidModel final : public IReidModel
 {
 public:
     RepVggReidModel(const ReidModelConfig& config, const InferenceConfig& inference)
-        : config_(config), inference_option_(make_dxrt_inference_option(inference)),
-          engine_(config.path, inference_option_)
+        : config_(config), session_(config.path, inference)
     {
-        const auto inputs = engine_.GetInputs();
-        const auto outputs = engine_.GetOutputs();
+        const auto inputs = session_.inputs();
+        const auto outputs = session_.outputs();
         const std::vector<int64_t> input_shape =
             {1, config.input_height, config.input_width, config.input_channels};
         const std::vector<int64_t> output_shape = {1, config.output_dimensions};
         if (inputs.size() != 1 || inputs[0].shape() != input_shape ||
             inputs[0].type() != dxrt::DataType::UINT8 ||
-            engine_.GetInputSize() !=
+            session_.input_size() !=
                 static_cast<std::uint64_t>(config.input_height) *
                 static_cast<std::uint64_t>(config.input_width) *
                 static_cast<std::uint64_t>(config.input_channels))
@@ -37,7 +35,7 @@ public:
         if (input.type() != CV_8UC3 || input.cols != config_.input_width ||
             input.rows != config_.input_height || !input.isContinuous())
             throw std::invalid_argument("ReID input does not match the DXNN tensor contract");
-        const auto outputs = engine_.Run(input.data);
+        const auto outputs = session_.run(input.data);
         if (outputs.size() != 1 || !outputs[0] ||
             outputs[0]->name() != config_.output_name ||
             outputs[0]->shape() != std::vector<int64_t>{1, config_.output_dimensions} ||
@@ -50,8 +48,7 @@ public:
 
 private:
     ReidModelConfig config_;
-    dxrt::InferenceOption inference_option_;
-    dxrt::InferenceEngine engine_;
+    DxrtSession session_;
 };
 
 class RepVggReidFactory final : public ReidFactory

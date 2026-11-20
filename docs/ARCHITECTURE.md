@@ -200,3 +200,19 @@ PC의 Python 데스크톱 프로세스는 원본 model-bank 페이지를 WebKit�
 
 자동 모델 선택기 소유권은 runtime 루프에 한정한다. GUI 상태 조회는 생성 시 확정한
 가용 여부와 atomic 설정값만 읽으며 교체되는 unique_ptr를 참조하지 않는다.
+
+## DXRT 엔진 소유권
+
+탐지와 RepVGG는 각자의 `DxrtSession`을 소유한다. 세션은 엔진 생성·해제,
+옵션 변환, 텐서 조회, SDK 제출·대기를 담당한다. 탐지 파이프라인은 입력
+버퍼와 콜백 합류를 관리하며, ReID 모델은 동기 추론과 임베딩 계약을 담당한다.
+
+`NpuCoreReservation`은 프로세스 내부에서 DXRT 코어 중복을 엔진 생성 전에
+검사한다. 현재 DXRT 설정이 장치를 따로 고르지 않으므로 예약도 같은 장치
+범위를 가정한다. 세션은 엔진을 먼저 파괴하고 예약을 반환한다.
+
+런타임은 모델 요청 접수와 완료를 `ModelChangeRequests`에, 자동 관측 처리와
+전환 요청을 `AutoModelCoordinator`에 위임한다. 모델 매니저는 엔진 전환과
+복구를 담당한다. 녹화 조회는 `RecordingArchive`가 처리한다. `GuiSender`가
+영상과 메타데이터에 대응하는 RTP 시각을 계산하고 `GuiMetadataSender`가
+패킷 직렬화와 UDP 소켓을 담당한다.

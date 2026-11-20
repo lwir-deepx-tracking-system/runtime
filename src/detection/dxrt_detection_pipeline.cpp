@@ -12,7 +12,7 @@
 #include <utility>
 
 #include "common/common_util.hpp"
-#include "common/dxrt_inference_option.hpp"
+#include "inference/dxrt_session.hpp"
 
 struct DxrtDetectionPipeline::NpuState
 {
@@ -30,8 +30,7 @@ struct DxrtDetectionPipeline::NpuState
     int                     job_id = -1;
   };
 
-  dxrt::InferenceOption inference_option;
-  dxrt::InferenceEngine engine;
+  DxrtSession session;
   bool                  is_float_input = false;
   bool                  is_nhwc        = false;
 
@@ -46,28 +45,17 @@ struct DxrtDetectionPipeline::NpuState
   bool                               stopping = false;
   std::thread                        completion_worker;
 
-  static dxrt::InferenceOption make_inference_option(
-      const InferenceConfig &config)
-  {
-    // job별 NPU core 시간을 얻기 위해 engine 생성 전에 profiler를 켠다.
-    dxrt::Configuration::GetInstance().SetEnable(
-        dxrt::Configuration::ITEM::PROFILER, true);
-
-    return make_dxrt_inference_option(config);
-  }
-
   NpuState(
       const ModelConfig &model_config,
       const InferenceConfig &inference_config)
-      : inference_option(make_inference_option(inference_config)),
-        engine(model_config.path, inference_option),
+      : session(model_config.path, inference_config, true),
         max_inflight(std::max<std::size_t>(
             1, inference_config.max_inflight))
   {
-    if(!dxapp::minversionforRTandCompiler(&engine))
+    if(!session.supports_model_version())
       throw std::runtime_error("DXRT runtime/compiler version is incompatible with this model");
 
-    const auto &inputs = engine.GetInputs();
+    const auto &inputs = session.inputs();
     if(inputs.empty())
       throw std::runtime_error("DXNN model has no input tensor");
 
@@ -206,14 +194,7 @@ struct DxrtDetectionPipeline::NpuState
         const int job_id = wait_for_job_id(request);
 
         // callback 반환 뒤 Wait해야 job별 profiler 값이 완성된다.
-        const dxrt_status_t wait_status =
-            dxrt_engine_wait(engine.handle(), job_id, nullptr);
-        if(wait_status != DXRT_OK)
-        {
-          const char *message = dxrt_last_error_message();
-          throw std::runtime_error(
-              message ? message : "DXRT failed while waiting for a job");
-        }
+        session.wait(job_id);
         populate_npu_timing(job_id, request->timing);
       }
       catch(...)
@@ -246,7 +227,7 @@ struct DxrtDetectionPipeline::NpuState
       throw std::invalid_argument("Preprocessed NPU input must be non-empty and contiguous");
 
     auto request = std::make_shared<Request>();
-    request->input_buffer.resize(engine.GetInputSize());
+    request->input_buffer.resize(session.input_size());
     request->context    = context;
     request->completion = std::move(completion);
     request->timing     = timing;
@@ -276,7 +257,7 @@ struct DxrtDetectionPipeline::NpuState
     int job_id = -1;
     try
     {
-      job_id = engine.RunAsync(request->input_buffer.data(), user_data);
+      job_id = session.submit(request->input_buffer.data(), user_data);
     }
     catch(...)
     {
@@ -297,7 +278,7 @@ struct DxrtDetectionPipeline::NpuState
 
   void register_callback(IPostprocessor *postprocessor)
   {
-    engine.RegisterCallback(
+    session.set_callback(
         [this, postprocessor](dxrt::TensorPtrs &outputs, void *user_data) -> int
         {
           std::unique_ptr<std::shared_ptr<Request>> holder(

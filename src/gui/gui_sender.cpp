@@ -92,9 +92,8 @@ GuiSender::GuiSender(
     std::uint16_t clip_max,
     FrameTelemetryCollector* telemetry)
     : video_config_(std::move(video_config)),
-      metadata_config_(std::move(metadata_config)),
-      protocol_(std::make_unique<PcGuiProtocol>()),
-      telemetry_(metadata_config_.telemetry_enabled ? telemetry : nullptr),
+      metadata_sender_(metadata_config),
+      telemetry_(metadata_config.telemetry_enabled ? telemetry : nullptr),
       clip_min_(clip_min),
       clip_max_(clip_max)
 {
@@ -279,112 +278,6 @@ bool GuiSender::push_frame_to_gstreamer(const cv::Mat& image,
     return !log_pipeline_error(pipeline_);
 }
 
-// 설정된 PC GUI 주소로 metadata를 보낼 UDP socket과 목적지 주소를 준비한다.
-bool GuiSender::open_metadata_socket()
-{
-    if (!metadata_config_.enabled || metadata_fd_ >= 0) return true;
-
-    // metadata는 JPEG or H.264/RTP pipeline과 독립된 UDP datagram 채널이다.
-    // getaddrinfo를 사용해 IPv4/IPv6 어느 주소든 설정값으로 지정할 수 있게 한다.
-    addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = IPPROTO_UDP;
-
-    addrinfo* addresses = nullptr;
-    const std::string port = std::to_string(metadata_config_.port);
-    const int lookup = ::getaddrinfo(
-        metadata_config_.host.c_str(), port.c_str(), &hints, &addresses);
-    if (lookup != 0)
-    {
-        Logger::error(
-            "[GuiSender] metadata 주소 해석 실패: " +
-            std::string(gai_strerror(lookup)));
-        return false;
-    }
-
-    for (addrinfo* address = addresses; address; address = address->ai_next)
-    {
-        if (address->ai_addrlen > sizeof(metadata_address_)) continue;
-        const int fd = ::socket(
-            address->ai_family, address->ai_socktype, address->ai_protocol);
-        if (fd < 0) continue;
-
-        metadata_fd_ = fd;
-        std::memcpy(
-            &metadata_address_, address->ai_addr, address->ai_addrlen);
-        metadata_address_size_ = address->ai_addrlen;
-        break;
-    }
-    ::freeaddrinfo(addresses);
-
-    if (metadata_fd_ < 0)
-    {
-        Logger::error("[GuiSender] metadata UDP socket 생성 실패");
-        return false;
-    }
-    Logger::info(
-        "[GuiSender] bbox metadata UDP 송신 시작: " +
-        metadata_config_.host + ":" + port);
-    return true;
-}
-
-// 현재 TrackingResult를 영상 frame과 대응 가능한 metadata datagram으로 보낸다.
-bool GuiSender::send_tracking_metadata(
-    const TrackingResult& result,
-    std::uint64_t gui_started_us)
-{
-    if (!metadata_config_.enabled) return true;
-    if (!open_metadata_socket()) return false;
-
-    // GUI는 frame_id와 RTP timestamp로 metadata를 영상 frame에 대응시키고,
-    // 원본 frame 크기와 bbox를 사용해 영상 위에 Track을 표시한다.
-    GuiTrackingMetadata metadata;
-    metadata.frame_id = result.frame->metadata.frame_id;
-    // metadata와 RTP 영상을 같은 frame으로 대응시키기 위한 timestamp이다.
-    // GStreamer H.264 RTP clock의 90kHz 기준으로 현재 frame index를 변환한다.
-    const GstClockTime frame_pts =
-        frame_presentation_time(frame_index_, video_config_.fps);
-    metadata.rtp_timestamp = static_cast<std::uint32_t>(
-        gst_util_uint64_scale(frame_pts, 90000, GST_SECOND));
-    metadata.gui_started_us = gui_started_us;
-    metadata.telemetry_enabled = metadata_config_.telemetry_enabled;
-    if (telemetry_)
-        metadata.telemetry = telemetry_->latest_before(metadata.frame_id,
-            result.model_generation, result.tracker_epoch);
-    metadata.width = static_cast<std::uint32_t>(result.frame->image.cols);
-    metadata.height = static_cast<std::uint32_t>(result.frame->image.rows);
-    metadata.tracks.reserve(result.tracks.size());
-    for (const auto& source : result.tracks) {
-        // Adapt internal int/-1 IDs and class sentinel at the communication
-        // boundary. Do not cast invalid signed IDs into valid uint32 IDs.
-        if (source.track_id <= 0 || source.class_id < -1 || source.class_id > 255) continue;
-        GuiTrackMetadata track;
-        track.track_id = static_cast<std::uint32_t>(source.track_id);
-        track.x = source.x; track.y = source.y;
-        track.width = source.width; track.height = source.height;
-        track.confidence = source.confidence;
-        track.class_id = source.class_id < 0 ? 255 : static_cast<std::uint8_t>(source.class_id);
-        metadata.tracks.push_back(track);
-    }
-
-    // C++ Track 구조체를 직접 보내지 않고 protocol의 고정 byte layout으로 만든다.
-    std::vector<std::uint8_t> packet;
-    if (!protocol_->encode_metadata(
-            metadata, metadata_config_.max_packet_bytes, packet))
-    {
-        Logger::error(
-            "[GuiSender] Metadata is not representable in the configured protocol/packet limit");
-        return false;
-    }
-
-    const ssize_t sent = ::sendto(
-        metadata_fd_, packet.data(), packet.size(), 0,
-        reinterpret_cast<const sockaddr*>(&metadata_address_),
-        metadata_address_size_);
-    return sent == static_cast<ssize_t>(packet.size());
-}
-
 // 원본 LWIR frame을 표시 영상으로 변환하고 영상/metadata 두 채널에 전달한다.
 bool GuiSender::send(
     const TrackingResult& result,
@@ -400,7 +293,7 @@ bool GuiSender::send(
         return false;
 
     const cv::Mat& source = result.frame->image;
-    if (!protocol_->accepts_frame(source.cols, source.rows)) {
+    if (!protocol_.accepts_frame(source.cols, source.rows)) {
         Logger::error("[GuiSender] Original frame dimensions do not match GUI protocol");
         return false;
     }
@@ -425,7 +318,9 @@ bool GuiSender::send(
     // Video: BGR -> JPEG/H.264 -> RTP -> UDP
     // Metadata: frame_id / RTP timestamp / bbox / track_id -> custom UDP packet
     if (include_metadata &&
-        !send_tracking_metadata(result, gui_started_us))
+        !metadata_sender_.send(result, gui_started_us, static_cast<std::uint32_t>(
+            gst_util_uint64_scale(frame_presentation_time(frame_index_, video_config_.fps),
+                90000, GST_SECOND)), telemetry_))
         return false;
     const double queue_ms = result.enqueued_at == std::chrono::steady_clock::time_point{} ?
         std::numeric_limits<double>::quiet_NaN() :
@@ -481,12 +376,7 @@ void GuiSender::stop()
         processing_started_.clear();
     }
     if (telemetry_) telemetry_->reset_context();
-    if (metadata_fd_ >= 0)
-    {
-        ::close(metadata_fd_);
-        metadata_fd_ = -1;
-        metadata_address_size_ = 0;
-    }
+    metadata_sender_.close();
 }
 
 GstPadProbeReturn GuiSender::observe_rtp(GstPad*, GstPadProbeInfo* info, gpointer data)

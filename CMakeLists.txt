@@ -196,6 +196,7 @@ if(LWIR_NEEDS_VISION)
 
     if(LWIR_ENABLE_DX_APP)
         target_sources(lwir_vision PRIVATE
+            src/inference/dxrt_session.cpp
             src/detection/dxrt_detection_pipeline.cpp
             src/detection/yolo_postprocessor_core.cpp
             src/detection/yolov8_postprocessor.cpp
@@ -233,6 +234,7 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         src/control/tracking_command_handler.cpp
         src/gui/gui_command_handler.cpp
         src/gui/gui_protocol.cpp
+        src/gui/gui_metadata_sender.cpp
         src/gui/gui_sender.cpp
         src/gui/gui_receiver.cpp
         src/app/raw_recorder.cpp

@@ -11,6 +11,7 @@
 #include "config/app_config.hpp"
 #include "common/track.hpp"
 #include "gui/gui_protocol.hpp"
+#include "gui/gui_metadata_sender.hpp"
 #include "common/frame_telemetry_collector.hpp"
 
 struct _GstAppSrc;
@@ -45,8 +46,8 @@ class GuiSender
 {
 private:
     GuiVideoConfig video_config_;
-    GuiMetadataConfig metadata_config_;
-    std::unique_ptr<IGuiProtocol> protocol_;
+    GuiMetadataSender metadata_sender_;
+    PcGuiProtocol protocol_;
     FrameTelemetryCollector* telemetry_ = nullptr; // Application owns it beyond probe teardown.
     std::uint16_t clip_min_;
     std::uint16_t clip_max_;
@@ -65,11 +66,6 @@ private:
     std::map<std::uint32_t, std::uint64_t> processing_started_;
     static GstPadProbeReturn observe_rtp(GstPad*, GstPadProbeInfo*, gpointer);
 
-    // bbox metadata용 POSIX UDP socket과 목적지 주소도 GuiSender가 소유한다.
-    int metadata_fd_ = -1;
-    sockaddr_storage metadata_address_{};
-    socklen_t metadata_address_size_ = 0;
-
     // 최초 frame 크기로 영상 pipeline을 만들고 PLAYING 상태로 시작한다.
     // 이미 시작된 경우에는 입력 크기가 기존 pipeline과 같은지만 확인한다.
     bool start_gstreamer_pipeline(int width, int height);
@@ -78,14 +74,6 @@ private:
     // downstream GStreamer element가 비동기로 수행한다.
     bool push_frame_to_gstreamer(const cv::Mat& image,
         const TrackingResult* result = nullptr, double queue_ms = 0, double convert_ms = 0);
-
-    // 영상 RTP 포트와 독립된 metadata UDP 목적지를 최초 1회 준비한다.
-    bool open_metadata_socket();
-
-    // 현재 frame의 Track 목록을 명시적 wire format으로 직렬화해 전송한다.
-    bool send_tracking_metadata(
-        const TrackingResult& result,
-        std::uint64_t gui_started_us);
 
 public:
     GuiSender(

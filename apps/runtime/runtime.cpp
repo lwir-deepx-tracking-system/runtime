@@ -1,4 +1,7 @@
 #include "runtime.hpp"
+#include "auto_model_coordinator.hpp"
+#include "model_change_requests.hpp"
+#include "recording_archive.hpp"
 #include "encoder_cpu_monitor.hpp"
 #include "app/pipeline_console.hpp"
 #include "app/metrics_writer.hpp"
@@ -59,6 +62,10 @@ class RuntimeApplication : public IPipelineRequests
 {
 private:
     RuntimeConfig config_;
+    std::filesystem::path recording_root() const
+    {
+        return std::filesystem::path(config_.measurement.output_root) / "recordings";
+    }
     std::unique_ptr<MetricsWriter> metrics_writer_;
     std::unique_ptr<RawRecorder> recorder_;
     std::unique_ptr<FrameTelemetryCollector> telemetry_collector_;
@@ -69,14 +76,7 @@ private:
 
     // Detection 목록 다음 Stage로 전달
     ThreadSafeQueue<DetectionResult> detection_queue_;
-    ThreadSafeQueue<AutoModelObservation> auto_observation_queue_;
-    std::unique_ptr<AutoModelSelector> auto_selector_;
-    // GUI는 생성 시 확정된 가용 여부만 읽고 selector 소유권은 runtime 루프가 관리한다.
-    bool auto_selector_available_ = false;
-    std::atomic<bool> auto_detection_enabled_{false};
-    std::atomic<float> auto_far_px_{100.0f}, auto_near_px_{140.0f};
-    std::atomic<std::uint64_t> auto_settings_generation_{0};
-    std::shared_future<PipelineResult> auto_completion_;
+    AutoModelCoordinator auto_models_;
 
     // 같은 TrackingResult를 제어와 GUI 경로가 공유한다.
     ThreadSafeQueue<TrackingResultPtr> control_track_queue_;
@@ -90,13 +90,10 @@ private:
     bool encoder_cpu_enabled_ = false;
     RuntimeControl runtime_control_;
     ActivePipelineSlot active_pipeline_;
-    std::mutex model_change_mutex_;
-    std::uint64_t next_model_request_id_ = 1;
     ThreadSafeQueue<ModelChangeRequest> model_change_requests_;
     ThreadSafeQueue<ModelChangeResult> model_change_results_;
-    std::map<std::uint64_t, std::shared_ptr<std::promise<GuiPipelineResult>>> model_completions_;
+    ModelChangeRequests model_requests_;
     std::atomic<bool> pipeline_ready_{false};
-    std::atomic<bool> suspend_for_model_{false};
 /************************************************************************/
     // Camera 객체
     std::unique_ptr<Camera> camera_;
@@ -163,7 +160,7 @@ public:
 // YAML을 읽고 설정에 맞는 Component들을 생성한다.
 RuntimeApplication::RuntimeApplication(const std::string& config_path, bool console_enabled,
     bool encoder_cpu_enabled)
-    : config_(load_runtime_config(config_path)), config_path_(config_path),
+    : config_(load_runtime_config(config_path)), auto_models_(config_), config_path_(config_path),
       console_enabled_(console_enabled), encoder_cpu_enabled_(encoder_cpu_enabled)
 {
     if (encoder_cpu_enabled_ && (!config_.gui.enabled ||
@@ -230,7 +227,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
     camera_ = std::make_unique<Camera>();
     if (config_.measurement.recording_enabled)
         recorder_ = std::make_unique<RawRecorder>(
-            std::filesystem::path(config_.measurement.output_root) / "recordings");
+            recording_root());
 
     model_manager_thread_ = std::make_unique<ModelManagerThread>(
         config_.detection_catalog.at(config_.initial_detection_id),
@@ -243,14 +240,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         config_.resident_detection_pair ? std::optional<ModelCatalogEntry>(
             config_.detection_catalog.at(config_.initial_detection_id == config_.auto_near_model_id ?
                 config_.auto_far_model_id : config_.auto_near_model_id)) : std::nullopt);
-    if (config_.auto_near_model_id>0 && config_.auto_far_model_id>0 &&
-        config_.detection_catalog.count(config_.auto_near_model_id) &&
-        config_.detection_catalog.count(config_.auto_far_model_id)) {
-        auto_selector_ = std::make_unique<AutoModelSelector>(
-            AutoModelSelector::Config{config_.auto_near_model_id, config_.auto_far_model_id});
-        auto_selector_available_ = true;
-        auto_detection_enabled_.store(config_.auto_detection_enabled);
-    }
+
 
     auto tracker_factory = TrackerFactory::for_type(config_.tracking.type);
     tracker_name_ = tracker_factory->name();
@@ -293,7 +283,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             control_track_queue_,
             gui_track_queue_,
             measurement_enabled_, measurement_sink_, recorder_.get(),
-            auto_selector_ ? &auto_observation_queue_ : nullptr
+            auto_models_.observations()
         );
 
     // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
@@ -375,29 +365,11 @@ PipelineTrackerPolicy RuntimeApplication::tracker_policy() const
             c.box_refine.lost_same,static_cast<float>(c.box_refine.aim_y)};
 }
 
-PipelineAutoDetection RuntimeApplication::auto_detection() const {
-    const bool present=auto_selector_available_ &&
-        std::filesystem::is_regular_file(config_.detection_catalog.at(config_.auto_near_model_id).model.path) &&
-        std::filesystem::is_regular_file(config_.detection_catalog.at(config_.auto_far_model_id).model.path);
-    return {auto_detection_enabled_.load(),present,
-        static_cast<std::uint32_t>(config_.auto_near_model_id),
-        static_cast<std::uint32_t>(config_.auto_far_model_id),
-        auto_far_px_.load(),auto_near_px_.load()};
-}
-
-bool RuntimeApplication::set_auto_detection(bool enabled) {
-    if(enabled && !auto_detection().available)return false;
-    auto_detection_enabled_.store(enabled);
-    auto_settings_generation_.fetch_add(1);
-    return true;
-}
-
-bool RuntimeApplication::set_auto_detection_thresholds(float far_px,float near_px) {
-    if(!std::isfinite(far_px) || !std::isfinite(near_px) || far_px<20 ||
-       near_px<=far_px || near_px>1000)return false;
-    auto_far_px_.store(far_px);auto_near_px_.store(near_px);
-    auto_settings_generation_.fetch_add(1);
-    return true;
+PipelineAutoDetection RuntimeApplication::auto_detection() const { return auto_models_.auto_detection(); }
+bool RuntimeApplication::set_auto_detection(bool enabled) { return auto_models_.set_auto_detection(enabled); }
+bool RuntimeApplication::set_auto_detection_thresholds(float far_px,float near_px)
+{
+    return auto_models_.set_auto_detection_thresholds(far_px, near_px);
 }
 
 PipelineRecordingStatus RuntimeApplication::recording_status() const
@@ -419,103 +391,28 @@ bool RuntimeApplication::stop_recording()
 
 std::string RuntimeApplication::latest_recording() const
 {
-    if (!recorder_) return {};
-    const auto root = std::filesystem::path(config_.measurement.output_root) / "recordings";
-    std::string latest;
-    try {
-        for (const auto& entry : std::filesystem::directory_iterator(root)) {
-            if (!entry.is_directory()) continue;
-            const auto name = entry.path().filename().string();
-            if (name.size() > 64 || name.rfind("MEASURE_", 0) != 0) continue;
-            if (!std::all_of(name.begin() + 8, name.end(), [](unsigned char c) {
-                    return (c >= '0' && c <= '9') || c == '_'; })) continue;
-            if (recorder_ && recorder_->status().active &&
-                recorder_->directory().filename() == entry.path().filename()) continue;
-            if (name > latest) latest = name;
-        }
-    } catch (const std::filesystem::filesystem_error&) {}
-    return latest;
+    const auto names = list_recordings();
+    return names.empty() ? std::string{} : names.front();
 }
 
 std::vector<std::string> RuntimeApplication::list_recordings() const
 {
-    if (!recorder_) return {};
-    const auto root = std::filesystem::path(config_.measurement.output_root) / "recordings";
-    std::vector<std::string> names;
-    try {
-        for (const auto& entry : std::filesystem::directory_iterator(root)) {
-            if (!entry.is_directory()) continue;
-            const auto name = entry.path().filename().string();
-            if (name.size() < 10 || name.size() > 64 || name.rfind("MEASURE_", 0) != 0 ||
-                !std::all_of(name.begin() + 8, name.end(), [](unsigned char c) {
-                    return (c >= '0' && c <= '9') || c == '_'; })) continue;
-            if (recorder_->status().active &&
-                recorder_->directory().filename() == entry.path().filename()) continue;
-            names.push_back(name);
-        }
-    } catch (const std::filesystem::filesystem_error&) {}
-    std::sort(names.begin(), names.end(), std::greater<>());
-    if (names.size() > 32) names.resize(32);
-    return names;
+    return recorder_ ? RecordingArchive(*recorder_, recording_root()).list_recordings()
+        : std::vector<std::string>{};
 }
 
 PipelineRecordingFileChunk RuntimeApplication::read_recording_file(
-    const std::string& name, std::uint8_t file_id, std::uint64_t offset,
-    std::uint16_t limit) const
+    const std::string& name, std::uint8_t file_id, std::uint64_t offset, std::uint16_t limit) const
 {
-    if (!recorder_) return {};
-    if (name.size() < 10 || name.size() > 64 || name.rfind("MEASURE_", 0) != 0 ||
-        !std::all_of(name.begin() + 8, name.end(), [](unsigned char c) {
-            return (c >= '0' && c <= '9') || c == '_'; }) ||
-        !limit || limit > 32768 || file_id < 1 || file_id > 4 ||
-        offset > std::uint64_t(std::numeric_limits<std::streamoff>::max())) return {};
-    if (recorder_ && recorder_->status().active && recorder_->directory().filename() == name)
-        return {};
-    static const char* files[] = {"", "frames.raw.gz", "frames.csv", "tracks.csv", "recording.txt"};
-    const auto path = std::filesystem::path(config_.measurement.output_root) /
-        "recordings" / name / files[file_id];
-    try {
-        if (!std::filesystem::is_regular_file(path)) return {};
-        const auto total = std::filesystem::file_size(path);
-        if (offset > total) return {};
-        std::ifstream stream(path, std::ios::binary);
-        if (!stream) return {};
-        stream.seekg(static_cast<std::streamoff>(offset));
-        std::vector<std::uint8_t> data(static_cast<std::size_t>(
-            std::min<std::uint64_t>(limit, total - offset)));
-        if (!data.empty()) stream.read(reinterpret_cast<char*>(data.data()), data.size());
-        if (!stream || static_cast<std::uint64_t>(stream.gcount()) != data.size()) return {};
-        return {true, total, std::move(data)};
-    } catch (const std::filesystem::filesystem_error&) { return {}; }
+    return recorder_ ? RecordingArchive(*recorder_, recording_root()).read_recording_file(name, file_id, offset, limit)
+        : PipelineRecordingFileChunk{};
 }
 
 PipelineChangeTicket RuntimeApplication::request_model_change(std::uint32_t model_id)
 {
-    if (model_id == 0 || model_id > model_count()) return {GuiPipelineResult::InvalidId, {}};
-    std::lock_guard<std::mutex> lock(model_change_mutex_);
-    if (!pipeline_ready_.load() || runtime_control_.stop_requested.load())
-        return {GuiPipelineResult::NotReady, {}};
-    const auto state = runtime_control_.state.load();
-    if (!model_completions_.empty() || (state != RuntimeState::Running && state != RuntimeState::SwitchFailed))
-        return {GuiPipelineResult::Busy, {}};
-    auto completion = std::make_shared<std::promise<GuiPipelineResult>>();
-    auto future = completion->get_future().share();
-    if (state == RuntimeState::Running && model_manager_thread_->active_model_id() == static_cast<int>(model_id)) {
-        completion->set_value(GuiPipelineResult::Ok);
-        return {GuiPipelineResult::Ok, std::move(future)};
-    }
-    const auto request_id = next_model_request_id_++;
-    model_completions_.emplace(request_id, completion);
-    runtime_control_.set_detection_quiesced(false);
-    runtime_control_.state.store(RuntimeState::Switching);
-    frame_queue_.interrupt_waiters();
-    suspend_for_model_.store(true);
-    if (!model_change_requests_.push({request_id, config_.detection_catalog.at(static_cast<int>(model_id))})) {
-        model_completions_.erase(request_id);
-        runtime_control_.state.store(state);
-        return {GuiPipelineResult::NotReady, {}};
-    }
-    return {GuiPipelineResult::Ok, std::move(future)};
+    return model_requests_.request(model_id, config_.detection_catalog, pipeline_ready_,
+        runtime_control_, frame_queue_, model_change_requests_,
+        [this] { return model_manager_thread_->active_model_id(); });
 }
 
 // GUI와 콘솔 요청은 같은 서비스의 접수·완료 경로를 사용한다.
@@ -551,15 +448,7 @@ void RuntimeApplication::run()
         while (model_change_results_.try_pop(result))
         {
             if (metrics_writer_ && !app_shutdown::discard_results) metrics_writer_->flush();
-            {
-                std::lock_guard<std::mutex> lock(model_change_mutex_);
-                const auto pending = model_completions_.find(result.request_id);
-                if (pending != model_completions_.end()) {
-                    pending->second->set_value(result.outcome == ModelChangeOutcome::Activated ? GuiPipelineResult::Ok :
-                        result.outcome == ModelChangeOutcome::Restored ? GuiPipelineResult::Restored : GuiPipelineResult::RestoreFailed);
-                    model_completions_.erase(pending);
-                }
-            }
+            model_requests_.complete(result);
             const char* outcome = result.outcome == ModelChangeOutcome::Activated ?
                 "activated" : result.outcome == ModelChangeOutcome::Restored ?
                 "restored" : "failed";
@@ -578,7 +467,6 @@ void RuntimeApplication::run()
         std::unique_ptr<PipelineConsole> console;
         if (console_enabled_) console = std::make_unique<PipelineConsole>(*this, std::cout);
 
-        std::uint64_t applied_auto_generation=auto_settings_generation_.load();
         EncoderCpuMonitor encoder_cpu;
         if (encoder_cpu_enabled_)
             std::cout << "[EncoderCPU] encoder=" << config_.gui.video.encoder
@@ -590,13 +478,6 @@ void RuntimeApplication::run()
 
         while (!camera_thread_->finished())
         {
-            const auto auto_generation=auto_settings_generation_.load();
-            if(auto_selector_ && applied_auto_generation!=auto_generation) {
-                auto_selector_=std::make_unique<AutoModelSelector>(AutoModelSelector::Config{
-                    config_.auto_near_model_id,config_.auto_far_model_id,
-                    auto_far_px_.load(),auto_near_px_.load()});
-                applied_auto_generation=auto_generation;
-            }
             if (console && !console->poll()) app_shutdown::request_stop();
             if (app_shutdown::requested) {
                 pipeline_ready_.store(false);
@@ -607,33 +488,10 @@ void RuntimeApplication::run()
                 workers_->stop();
                 break;
             }
-            if (suspend_for_model_.exchange(false) && gimbal_executor_) gimbal_executor_->suspend();
+            if (model_requests_.take_suspend_request() && gimbal_executor_) gimbal_executor_->suspend();
             report_model_changes();
-            if (auto_selector_) {
-                if (auto_completion_.valid() &&
-                    auto_completion_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-                    if (auto_completion_.get() != PipelineResult::Ok)
-                        auto_selector_->request_failed();
-                    auto_completion_ = {};
-                }
-                AutoModelObservation observation;
-                while (auto_observation_queue_.try_pop(observation)) {
-                    const auto control = gimbal_executor_ ? gimbal_executor_->snapshot() : ControlSnapshot{};
-                    const int followed_id = control.automatic &&
-                        control.selected_id<=static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ?
-                        static_cast<int>(control.selected_id) : 0;
-                    if(!auto_detection_enabled_.load())continue;
-                    const auto target = auto_selector_->observe(
-                        observation.detections, *observation.tracks,
-                        model_manager_thread_->active_model_id(), followed_id);
-                    if (target) {
-                        auto ticket = request_model_change(static_cast<std::uint32_t>(*target));
-                        if (ticket.result == PipelineResult::Ok)
-                            auto_completion_ = std::move(ticket.completion);
-                        else auto_selector_->request_failed();
-                    }
-                }
-            }
+            auto_models_.poll(runtime_control_, gimbal_executor_.get(), model_manager_thread_->active_model_id(),
+                [this](std::uint32_t id) { return request_model_change(id); });
             const bool worker_failed = (metrics_writer_ && metrics_writer_->failed()) || detection_thread_->failed() ||
                 (model_manager_thread_ && model_manager_thread_->failed()) ||
                 tracking_thread_->failed() || control_thread_->failed() ||
@@ -685,6 +543,7 @@ void RuntimeApplication::run()
         workers_->join();
         discard_if_requested();
         report_model_changes();
+        model_requests_.cancel_pending();
         if (metrics_writer_) {
             if (!results_discarded) metrics_writer_->close();
             discard_if_requested(); // close 도중 도착한 SIGQUIT도 저장 종료로 바뀌지 않는다.
@@ -720,6 +579,7 @@ void RuntimeApplication::run()
         tracker_changes_->close();
         workers_->stop();
         workers_->join();
+        model_requests_.cancel_pending();
 
         // SIGQUIT은 오류 경로에서도 결과를 폐기하고, 그 외 오류는 기록을 보존한다.
         discard_if_requested();
