@@ -736,3 +736,12 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   TCP 수신 핸들러에 도달하며, 웹 서버 재생성 후 포트를 다시 사용할 수
   있음을 확인했다. PC 전용 호스트 빌드와 웹 모드 선택 시의 오류도 확인했다.
 - Orange Pi, DXNN·카메라 및 브라우저 장치 연동은 이번 변경에서 미검증이다.
+
+## 2026-11-23 DXRT 공용 헤더 제거
+
+- `include/common/common_util.hpp`를 제거했다. DXRT 버전 검사는
+  `src/inference/dxrt_session.cpp`, 탐지 입력 shape 및 float 변환은
+  `src/detection/dxrt_detection_pipeline.cpp`의 내부 함수로 옮겼다.
+  `CMakeLists.txt`의 소스 경로 매크로 설명을 테스트 사용처에 맞췄다.
+- 기존 호스트 빌드 CTest 53/53 및 변경된 두 DXRT 소스의 SDK 헤더
+  구문 검사를 통과했다. DXRT 링크, DXNN 로딩과 NPU 추론은 미검증이다.

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(lwir_deepx_tracking_system LANGUAGES CXX)
 
-# PROJECT_ROOT_DIR is consumed by common_util.hpp in several targets.
+# Test fixtures use the source root to locate repository resources.
 add_compile_definitions(PROJECT_ROOT_DIR="${CMAKE_SOURCE_DIR}")
 
 

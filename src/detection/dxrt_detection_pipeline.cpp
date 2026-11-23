@@ -9,9 +9,108 @@
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#include <vector>
 
-#include "common/common_util.hpp"
+#include <opencv2/core.hpp>
+
 #include "inference/dxrt_session.hpp"
+
+namespace {
+/**
+ * @brief Detect if a 4D input shape is NHWC layout.
+ *
+ * Heuristic: if the last dimension is small (≤4, typical for image channels)
+ * and the second dimension is larger, it's likely NHWC [N,H,W,C].
+ * Otherwise, assume NCHW [N,C,H,W].
+ */
+bool isInputNHWC(const std::vector<int64_t>& shape) {
+    if (shape.size() >= 4) {
+        return (shape[3] <= 4 && shape[1] > shape[3]);
+    }
+    return false;
+}
+
+/**
+ * @brief Parse model input shape to get spatial dimensions (H, W).
+ *
+ * Handles NCHW [N,C,H,W] and NHWC [N,H,W,C] tensor layouts automatically.
+ * For 3D shapes [N/C, H, W], uses shape[1] and shape[2].
+ * For 2D shapes [H, W], uses shape[0] and shape[1].
+ */
+void parseInputShape(const std::vector<int64_t>& shape, int& width, int& height) {
+    if (shape.size() >= 4) {
+        if (isInputNHWC(shape)) {
+            // NHWC: [N, H, W, C]
+            height = static_cast<int>(shape[1]);
+            width  = static_cast<int>(shape[2]);
+        } else {
+            // NCHW: [N, C, H, W]
+            height = static_cast<int>(shape[2]);
+            width  = static_cast<int>(shape[3]);
+        }
+    } else if (shape.size() == 3) {
+        height = static_cast<int>(shape[1]);
+        width  = static_cast<int>(shape[2]);
+    } else if (shape.size() >= 2) {
+        height = static_cast<int>(shape[0]);
+        width  = static_cast<int>(shape[1]);
+    } else {
+        height = 0;
+        width  = 0;
+    }
+}
+
+/**
+ * @brief Fill a flat float buffer from a single-channel uint8 image.
+ */
+void fillGrayscaleBuffer(const cv::Mat& img, int h, int w,
+                                std::vector<float>& buf) {
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            buf[y * w + x] = img.at<uint8_t>(y, x) / 255.0f;
+}
+
+/**
+ * @brief Fill a flat float buffer from a 3-channel image in NHWC (HWC) layout.
+ */
+void fillNHWCBuffer(const cv::Mat& img, int h, int w, int c,
+                           std::vector<float>& buf) {
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            for (int ch = 0; ch < c; ++ch)
+                buf[y * w * c + x * c + ch] = img.at<cv::Vec3b>(y, x)[ch] / 255.0f;
+}
+
+/**
+ * @brief Fill a flat float buffer from a 3-channel image in NCHW (CHW) layout.
+ */
+void fillNCHWBuffer(const cv::Mat& img, int h, int w, int c,
+                           std::vector<float>& buf) {
+    for (int ch = 0; ch < c; ++ch)
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                buf[ch * h * w + y * w + x] = img.at<cv::Vec3b>(y, x)[ch] / 255.0f;
+}
+
+/**
+ * @brief Convert uint8 image to float32 buffer with specified layout.
+ * @param img Input image (CV_8UC3 or CV_8UC1)
+ * @param nhwc If true, output is HWC layout; if false, CHW layout
+ * @return Float buffer normalized to [0, 1]
+ */
+std::vector<float> convertToFloatBuffer(const cv::Mat& img, bool nhwc) {
+    int h = img.rows, w = img.cols, c = img.channels();
+    std::vector<float> buf(h * w * c);
+    if (c == 1) {
+        fillGrayscaleBuffer(img, h, w, buf);
+    } else if (nhwc) {
+        fillNHWCBuffer(img, h, w, c, buf);
+    } else {
+        fillNCHWBuffer(img, h, w, c, buf);
+    }
+    return buf;
+}
+}
 
 struct DxrtDetectionPipeline::NpuState
 {
@@ -60,13 +159,13 @@ struct DxrtDetectionPipeline::NpuState
     const auto input_shape  = inputs.front().shape();
     int        input_width  = 0;
     int        input_height = 0;
-    ::parseInputShape(input_shape, input_width, input_height);
+    parseInputShape(input_shape, input_width, input_height);
     if(input_width != model_config.input.width ||
        input_height != model_config.input.height)
       throw std::runtime_error("DXNN input dimensions do not match model configuration");
 
     is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
-    is_nhwc        = ::isInputNHWC(input_shape);
+    is_nhwc        = isInputNHWC(input_shape);
 
     const auto count = std::max<std::size_t>(1, inference_config.max_inflight);
     input_buffers.resize(count);
