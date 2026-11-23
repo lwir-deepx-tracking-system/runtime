@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "app/pipeline_result.hpp"
+#include "detection/npu_feed_state.hpp"
 #include "tracking/tracker_policy_update.hpp"
 
 struct PipelineCatalogItem
@@ -71,6 +72,9 @@ class IPipelineRequests
     virtual PipelineAutoDetection auto_detection() const { return {}; }
     virtual bool set_auto_detection(bool) { return false; }
     virtual bool set_auto_detection_thresholds(float,float) { return false; }
+    virtual NpuFeedState npu_feed_state() const { return {}; }
+    virtual bool set_npu_feed(std::uint8_t) { return false; }
+    virtual bool request_camera_reopen() { return false; }
     virtual bool recording_available() const { return false; }
     virtual PipelineRecordingStatus recording_status() const { return {}; }
     virtual bool start_recording(const std::string&) { return false; }

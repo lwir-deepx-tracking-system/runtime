@@ -1,6 +1,7 @@
 #include <future>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include "gui/gui_command_handler.hpp"
 #include "app/pipeline_requests.hpp"
 
@@ -36,6 +37,11 @@ public:
     bool set_auto_detection_thresholds(float far,float near) override {
         auto_far=far;auto_near=near;return far<near;
     }
+    std::uint8_t feed = 0;
+    bool reopen_requested = false;
+    NpuFeedState npu_feed_state() const override { return {true, feed, feed != 0, 2, 3}; }
+    bool set_npu_feed(std::uint8_t mode) override { feed = mode; return true; }
+    bool request_camera_reopen() override { return !std::exchange(reopen_requested, true); }
     bool auto_enabled=false;
     float auto_far=0,auto_near=0;
     PipelineRecordingStatus recording_status() const override { return rec; }
@@ -83,6 +89,13 @@ int main() {
             !handler->handle(command, replies) || replies.size() != 1) return false;
         return encode_gui_command(replies[0]) == hex(expected);
     };
+    if (!handle("4c57495201050000", "4c57495201010003010500") || !requests.reopen_requested ||
+        !handle("4c57495201050000", "4c57495201010003010505")) return 38;
+    if (!handle("4c574952040f00080000002100000002", "4c574952048f0006000000210200") ||
+        !handle("4c574952040e000400000022",
+                "4c574952048e00140000002200000003000000020000000200000003") ||
+        !handle("4c574952040f00080000002300000003", "4c574952048f0006000000230207"))
+        return 39;
     if (!handle("4c5749520401000412345678", "4c574952048100081234567800000002")) return 1;
     if (!handle("4c5749520402000487654321", "4c574952048200088765432100000001")) return 2;
     if (!handle("4c5749520407000400000005",

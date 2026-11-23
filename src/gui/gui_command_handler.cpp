@@ -115,6 +115,16 @@ public:
     }
 
     bool handle(const GuiCommand& command, std::vector<GuiCommand>& replies) override {
+        if (command.category == GuiCategory::System &&
+            command.command == static_cast<std::uint8_t>(GuiSystem::CameraReopen)) {
+            if (!command.payload.empty()) return false;
+            const auto result = requests_ && requests_->request_camera_reopen()
+                ? GuiResult::Ok : GuiResult::NotReady;
+            replies = {{GuiCategory::System, static_cast<std::uint8_t>(GuiSystem::Ack),
+                        {static_cast<std::uint8_t>(command.category), command.command,
+                         static_cast<std::uint8_t>(result)}}};
+            return true;
+        }
         if (command.category == GuiCategory::Recording) {
             replies.clear();
             const auto code = command.command;
@@ -179,11 +189,30 @@ public:
         if (command.category != GuiCategory::Pipeline) return control_->handle(command, replies);
         replies.clear();
         const auto code = command.command;
-        if (code < 1 || code > 13 || command.payload.size() !=
+        if (code < 1 || code > 15 || command.payload.size() !=
             (code == 8 ? 28u : code == 10 ? 24u : code == 13 ? 12u :
-             ((code <= 2 || code == 7 || code == 9 || code == 11) ? 4u : 8u)))
+             ((code <= 2 || code == 7 || code == 9 || code == 11 || code == 14) ? 4u : 8u)))
             return false; // 보드 응답을 PC가 보내는 경우도 거부한다.
         const auto request_id = read32(command.payload, 0);
+        if (code == 14) {
+            const auto state = requests_ ? requests_->npu_feed_state() : NpuFeedState{};
+            GuiCommand reply{GuiCategory::Pipeline, 0x8e, {}};
+            write32(reply.payload, request_id);
+            write32(reply.payload, (state.available ? 1u : 0u) | (state.alternating ? 2u : 0u));
+            write32(reply.payload, state.requested);
+            write32(reply.payload, state.core0);
+            write32(reply.payload, state.core1);
+            replies.push_back(std::move(reply));
+            return true;
+        }
+        if (code == 15) {
+            const auto mode = read32(command.payload, 4);
+            const auto result = mode > 2 ? GuiPipelineResult::InvalidConfiguration :
+                requests_ && requests_->set_npu_feed(static_cast<std::uint8_t>(mode))
+                    ? GuiPipelineResult::Ok : GuiPipelineResult::NotReady;
+            replies.push_back(response(code, request_id, GuiPipelinePhase::Completed, result));
+            return true;
+        }
         if (code == 9) {
             const auto policy=requests_ ? requests_->tracker_policy() : PipelineTrackerPolicy{};
             GuiCommand reply{GuiCategory::Pipeline,0x89,{}};

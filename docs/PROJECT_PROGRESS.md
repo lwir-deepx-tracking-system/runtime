@@ -637,3 +637,13 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   벤치마크와 model-bank 출력 대응은 미검증이다. 출력 버퍼 재사용은
   실기에서 SDK 버퍼 계약을 확인한 뒤 적용한다. 자동 코어 전환, 운영
   자동 복구와 새 모델 카탈로그 전체 이식은 별도 작업이다.
+
+## 2026-11-23 refactor/pipeline NPU 투입 모드와 카메라 복구
+
+- `FrameFeedPipeline` 및 두 코어 예약, 자동 전환, 카메라 수신 시간 초과와
+  선택형 반복 프레임 진단, CameraThread의 제한적 재연결을 추가했다.
+  설정은 AppConfig가 검증한다. TCP에 투입 모드 조회/변경과 재연결 요청을
+  연결했다. 파일과 기본 실행 설정은 Git diff 및 ARCHITECTURE에 기록했다.
+- 호스트에서 관련 CTest 6/6 통과. 로컬 DXRT SDK 헤더로 DetectorFactory
+  구문 검사를 통과했다. 실기 DXNN과 카메라 재연결 및 교대 성능은 미검증이다.
+  SDK 호출이 반환하지 않는 경우에는 외부 프로세스 복구가 필요하다.

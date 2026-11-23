@@ -867,6 +867,30 @@ RuntimeConfig load_runtime_config(const std::string& path)
     c.detection.inference = config_parser::load_inference_config(
         root["detection"]["inference"], "detection.inference");
 
+    {
+        const auto inference = root["detection"]["inference"];
+        const auto feed = optional_value<std::string>(inference, "npu_feed", "detection.inference", "single");
+        if (feed == "alternate") c.detection.inference.npu_feed = NpuFeedMode::Alternate;
+        else if (feed == "auto") c.detection.inference.npu_feed = NpuFeedMode::Auto;
+        else if (feed != "single") throw std::runtime_error("npu_feed must be single, alternate or auto");
+        if (feed != "single" && c.detection.inference.npu_cores != NpuCoreBinding::Core01)
+            throw std::runtime_error("alternate/auto npu_feed requires npu_cores: 01");
+
+        if (const auto recovery = root["camera_recovery"]) {
+            if (!recovery.IsMap()) throw std::runtime_error("camera_recovery must be a map");
+            const auto read = [&](const char* key, int fallback, int minimum, int maximum) {
+                const int value = optional_value<int>(recovery, key, "camera_recovery", fallback);
+                if (value < minimum || value > maximum)
+                    throw std::runtime_error(std::string("camera_recovery.") + key + " is out of range");
+                return static_cast<unsigned>(value);
+            };
+            c.camera_recovery.attempts = read("attempts", 0, 0, 20);
+            c.camera_recovery.stall_ms = read("stall_ms", 1500, 100, 60000);
+            c.camera_recovery.retry_ms = read("retry_ms", 500, 0, 60000);
+            c.camera_recovery.identical_frames = read("identical_frames", 0, 0, 1800);
+        }
+    }
+
     const YAML::Node detection_catalog = root["detection_catalog"];
     if (detection_catalog && !detection_catalog.IsSequence())
         throw std::runtime_error("detection_catalog must be a sequence");
@@ -919,6 +943,8 @@ RuntimeConfig load_runtime_config(const std::string& path)
     if (resident_pair)
         c.resident_detection_pair = optional_value<bool>(
             resident_pair, "enabled", "detection.resident_pair", false);
+    if (c.resident_detection_pair && c.detection.inference.npu_feed != NpuFeedMode::Single)
+        throw std::runtime_error("resident detection pair cannot share the frame feed's two cores");
     if (c.resident_detection_pair && !c.auto_detection_enabled)
         throw std::runtime_error("detection.resident_pair requires auto_select.enabled");
     const std::string active_config =

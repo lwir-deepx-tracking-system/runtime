@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <thread>
 #include <string>
 
 #include "camera/camera.hpp"
+#include "config/app_config.hpp"
 #include "common/frame.hpp"
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
@@ -24,6 +26,11 @@ private:
     bool retain_metrics_;
     RawRecorder* recorder_ = nullptr;
     PipelinePerformance* performance_;
+    CameraRecoveryConfig recovery_;
+    std::array<std::uint16_t, 64> previous_scene_{};
+    unsigned identical_ = 0;
+    bool have_scene_ = false;
+    std::atomic<bool> reopen_requested_{false};
     std::atomic<bool> stop_requested_{false};
     std::atomic<bool> finished_{false};
     std::atomic<bool> failed_{false};
@@ -32,6 +39,9 @@ private:
 
     static void* thread_func(void* arg);
     void run();
+    bool open_camera();
+    bool reopen_camera(const char* reason, unsigned& attempts);
+    bool repeated_scene(const cv::Mat& image);
 
 public:
     CameraThread(
@@ -39,12 +49,14 @@ public:
         ThreadSafeQueue<FrameMessage>& output_queue,
         bool measurement_enabled,
         bool retain_metrics = true,
-        RawRecorder* recorder = nullptr, PipelinePerformance* performance = nullptr
+        RawRecorder* recorder = nullptr, PipelinePerformance* performance = nullptr,
+        CameraRecoveryConfig recovery = {}
     );
 
     void start();
     void join();
     void request_stop();
+    bool request_reopen();
     bool finished() const { return finished_.load(); }
     bool failed() const { return failed_.load(); }
     const std::string& error_message() const { return error_message_; }

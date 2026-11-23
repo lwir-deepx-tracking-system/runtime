@@ -346,6 +346,11 @@ endif()
 
 if(BUILD_TESTING)
 
+    add_executable(test_frame_feed tests/pipeline/test_frame_feed.cpp)
+    target_include_directories(test_frame_feed PRIVATE src/detection ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(test_frame_feed PRIVATE lwir_common ${OpenCV_LIBS})
+    add_test(NAME frame_feed COMMAND test_frame_feed)
+
     add_executable(test_tile_completion tests/pipeline/test_tile_completion.cpp)
     target_include_directories(test_tile_completion PRIVATE src/detection)
     target_link_libraries(test_tile_completion PRIVATE lwir_vision)
