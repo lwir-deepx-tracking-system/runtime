@@ -22,7 +22,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LWIR_BUILD_RUNTIME "Build runtime application" ON)
 option(LWIR_BUILD_BENCHMARK "Build benchmark application" ON)
-option(LWIR_BUILD_WEB_GUI "Build the standalone C++ browser adapter" OFF)
+option(LWIR_BUILD_WEB_GUI "Enable the embedded Runtime web GUI" OFF)
 option(LWIR_BUILD_CAPTURE "Build capture application" ON)
 option(LWIR_ENABLE_SYSTEMD_WATCHDOG "Notify a systemd supervisor of camera progress" OFF)
 option(LWIR_ENABLE_I3_CAMERA "Enable i3system Thermal Expert camera SDK" OFF)
@@ -80,10 +80,6 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         gstreamer-1.0>=1.20
         gstreamer-app-1.0>=1.20
     )
-endif()
-
-if(LWIR_BUILD_WEB_GUI)
-    add_subdirectory(apps/web_gui)
 endif()
 
 if(LWIR_NEEDS_CAMERA AND LWIR_ENABLE_I3_CAMERA)
@@ -292,6 +288,10 @@ endif()
 # Runtime
 # ------------------------------------------------------------------------------
 
+if(LWIR_BUILD_WEB_GUI AND LWIR_NEEDS_RUNTIME_CORE)
+    add_subdirectory(apps/web_gui)
+endif()
+
 if(LWIR_BUILD_RUNTIME)
     add_executable(lwir_video_send tools/video_send.cpp)
     target_link_libraries(lwir_video_send PRIVATE lwir_runtime_core)
@@ -310,6 +310,9 @@ if(LWIR_BUILD_RUNTIME)
             lwir_vision
             lwir_runtime_core
     )
+    if(TARGET lwir_web_gui)
+        target_link_libraries(lwir_runtime PRIVATE lwir_web_gui)
+    endif()
 endif()
 
 
@@ -466,6 +469,9 @@ if(BUILD_TESTING)
         lwir_vision
         lwir_runtime_core
     )
+    if(TARGET lwir_web_gui)
+        target_link_libraries(test_app_config PRIVATE lwir_web_gui)
+    endif()
     add_test(NAME app_config COMMAND test_app_config)
 
     add_executable(test_runtime_metrics_writer

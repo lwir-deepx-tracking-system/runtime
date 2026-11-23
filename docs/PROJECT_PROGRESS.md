@@ -726,3 +726,13 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   DXRT SDK 헤더 구문 검사 및 watchdog 통지 데이터그램 시험도 통과했다.
 - Orange Pi에 배포하지 않았다. 실제 USB 장애 복구 및 systemd 재시작,
   DXNN 추론과 두 코어 처리량, 짐벌 실기, 브라우저 UI는 미검증이다.
+
+## 2026-11-23 Runtime 내장 웹 GUI 모드
+
+- `gui.mode: pc|web`를 AppConfig에 추가했다. PC 기본값은 기존 주소를
+  사용하고 웹 모드는 영상·메타데이터·명령 주소를 루프백으로 지정한다.
+  웹 서버를 Runtime에 링크하고 Runtime의 시작·종료에 연결했다.
+- 웹 지원 호스트 빌드와 CTest 53/53 통과. HTTP 모델 변경 요청이 기존
+  TCP 수신 핸들러에 도달하며, 웹 서버 재생성 후 포트를 다시 사용할 수
+  있음을 확인했다. PC 전용 호스트 빌드와 웹 모드 선택 시의 오류도 확인했다.
+- Orange Pi, DXNN·카메라 및 브라우저 장치 연동은 이번 변경에서 미검증이다.

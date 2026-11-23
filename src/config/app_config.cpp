@@ -2,7 +2,9 @@
 #include "common/logger.hpp"
 #include "gui/gui_protocol.hpp"
 
+#include <charconv>
 #include <cmath>
+#include <string_view>
 #include <filesystem>
 #include <limits>
 #include <set>
@@ -102,6 +104,7 @@ YAML::Node load_yaml(const std::string& path)
             resolve(root["detection"],"config");
             resolve(root["reid"],"config");
             resolve(root["reid"],"matcher_config");
+            if (const auto gui = root["gui"]) resolve(gui["web"], "page");
             for (const char* key:{"detection_catalog","tracking_catalog"}) {
                 if (root[key] && root[key].IsSequence())
                     for (auto item:root[key]) resolve(item,"config");
@@ -481,15 +484,46 @@ MeasurementConfig load_measurement_config(const YAML::Node& node)
     return c;
 }
 
+// Require a concrete, canonical IPv4 address for HTTP binding and Host validation.
+static bool valid_web_bind(std::string_view address)
+{
+    if (address == "0.0.0.0") return false;
+    for (int part = 0; part < 4; ++part) {
+        const auto dot = address.find('.');
+        if ((part == 3) != (dot == address.npos)) return false;
+        const auto octet = address.substr(0, dot);
+        if (octet.empty() || (octet.size() > 1 && octet.front() == '0')) return false;
+        unsigned value;
+        const auto parsed = std::from_chars(octet.data(), octet.data() + octet.size(), value);
+        if (parsed.ec != std::errc{} || parsed.ptr != octet.data() + octet.size() || value > 255)
+            return false;
+        if (part < 3) address.remove_prefix(dot + 1);
+    }
+    return true;
+}
+
 GuiConfig load_gui_config(const YAML::Node& node)
 {
     // YAML 파싱과 범위 검증을 여기서 끝내 GUI 컴포넌트에는 typed 설정만 전달한다.
     GuiConfig c{};
     c.enabled = required<bool>(node, "enabled", "gui");
+    const auto mode = optional_value<std::string>(node, "mode", "gui", "pc");
+    if (mode == "web") c.mode = GuiMode::Web;
+    else if (mode != "pc") throw std::runtime_error("gui.mode must be pc or web");
+    const bool web = c.enabled && c.mode == GuiMode::Web;
+    if (web) {
+        const auto http = node["web"];
+        c.web.bind_address = required<std::string>(http, "bind_address", "gui.web");
+        c.web.port = parse_port(http, "port", "gui.web");
+        c.web.page = required_string(http, "page", "gui.web");
+        c.web.gimbal = optional_value<bool>(http, "gimbal", "gui.web", false);
+        if (!valid_web_bind(c.web.bind_address) || c.web.page.empty())
+            throw std::runtime_error("gui.web requires a specific IPv4 bind_address and a nonempty page");
+    }
 
     // 영상 전송 설정: Orange Pi -> GUI 방향의 JPEG or H.264/RTP/UDP 채널이다.
     const YAML::Node video = node["video"];
-    c.video.host = required<std::string>(video, "host", "gui.video");
+    c.video.host = web ? "127.0.0.1" : required<std::string>(video, "host", "gui.video");
     c.video.port = parse_port(video, "port", "gui.video");
     c.video.codec = parse_gui_video_codec(
         required<std::string>(video, "codec", "gui.video"));
@@ -519,7 +553,7 @@ GuiConfig load_gui_config(const YAML::Node& node)
     // Track metadata는 영상과 다른 UDP 포트로 보내 GUI가 원본 좌표 bbox를 그린다.
     const YAML::Node metadata = node["metadata"];
     c.metadata.enabled = required<bool>(metadata, "enabled", "gui.metadata");
-    c.metadata.host = required<std::string>(metadata, "host", "gui.metadata");
+    c.metadata.host = web ? "127.0.0.1" : required<std::string>(metadata, "host", "gui.metadata");
     c.metadata.port = parse_port(metadata, "port", "gui.metadata");
     const int max_packet_bytes = required<int>(
         metadata, "max_packet_bytes", "gui.metadata");
@@ -545,8 +579,8 @@ GuiConfig load_gui_config(const YAML::Node& node)
     else if (handler == "tracking") c.command.handler = GuiCommandHandlerType::Tracking;
     else throw std::runtime_error("gui.command.handler must be deferred or tracking");
     c.command.enabled = required<bool>(command, "enabled", "gui.command");
-    c.command.bind_address = required<std::string>(
-        command, "bind_address", "gui.command");
+    c.command.bind_address = web ? "127.0.0.1" :
+        required<std::string>(command, "bind_address", "gui.command");
     c.command.port = parse_port(command, "port", "gui.command");
     c.command.receive_timeout_ms = required<int>(
         command, "receive_timeout_ms", "gui.command");
@@ -554,6 +588,10 @@ GuiConfig load_gui_config(const YAML::Node& node)
         throw std::runtime_error("gui.command.bind_address must not be empty");
     if (c.command.receive_timeout_ms <= 0)
         throw std::runtime_error("gui.command.receive_timeout_ms must be positive");
+    if (web && (!c.metadata.enabled || !c.command.enabled))
+        throw std::runtime_error("gui.mode=web requires gui.metadata.enabled and gui.command.enabled");
+    if (web && (c.video.port == c.metadata.port || c.web.port == c.command.port))
+        throw std::runtime_error("gui.mode=web requires separate video/metadata UDP ports and HTTP/command TCP ports");
     return c;
 }
 
@@ -1021,6 +1059,8 @@ RuntimeConfig load_runtime_config(const std::string& path)
     if ((active_tracking_handler && !c.control.enabled) ||
         (c.control.enabled && (!c.gui.enabled || !c.gui.command.enabled || !tracking_handler)))
         throw std::runtime_error("Gimbal control requires control.enabled=true, GUI command enabled and handler=tracking");
+    if (c.gui.enabled && c.gui.mode == GuiMode::Web && c.gui.web.gimbal && !c.control.enabled)
+        throw std::runtime_error("gui.web.gimbal requires control.enabled=true");
 
     return c;
 }

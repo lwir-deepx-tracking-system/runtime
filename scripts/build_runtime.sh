@@ -9,6 +9,7 @@ cmake -G Ninja -S "${project_dir}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_TESTING=OFF \
     -DLWIR_BUILD_RUNTIME=ON \
+    -DLWIR_BUILD_WEB_GUI="${LWIR_BUILD_WEB_GUI:-OFF}" \
     -DLWIR_BUILD_BENCHMARK=OFF \
     -DLWIR_BUILD_CAPTURE=OFF \
     -DLWIR_ENABLE_I3_CAMERA=ON \

@@ -72,6 +72,25 @@ int main()
         !config.measurement.enabled || !config.measurement.recording_enabled ||
         config.measurement.output_root != "/mnt/lwir_data/results/runtime")
         return 2;
+    {
+        if (config.gui.mode != GuiMode::Pc || config.gui.video.host != "192.168.50.1") return 84;
+        auto gui = YAML::Clone(yaml["gui"]);
+        gui.remove("mode");
+        if (config_parser::load_gui_config(gui).mode != GuiMode::Pc) return 85;
+        gui["mode"] = "web";
+        auto web = config_parser::load_gui_config(gui);
+        if (web.mode != GuiMode::Web || web.web.port != 8080 || web.web.page.empty() ||
+            web.video.host != "127.0.0.1" || web.metadata.host != "127.0.0.1" ||
+            web.command.bind_address != "127.0.0.1") return 86;
+        gui["web"]["bind_address"] = "0.0.0.0";
+        try { config_parser::load_gui_config(gui); return 87; }
+        catch (const std::runtime_error&) {}
+        gui["web"]["bind_address"] = "127.0.0.1";
+        gui["command"]["enabled"] = false;
+        try { config_parser::load_gui_config(gui); return 88; }
+        catch (const std::runtime_error&) {}
+    }
+
     auto no_record = YAML::Clone(yaml["measurement"]);
     no_record["recording_enabled"] = false;
     if (config_parser::load_measurement_config(no_record).recording_enabled) return 58;

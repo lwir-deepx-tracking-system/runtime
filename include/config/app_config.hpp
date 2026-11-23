@@ -240,10 +240,22 @@ struct GuiCommandConfig
     int receive_timeout_ms = 0;
 };
 
+enum class GuiMode { Pc, Web };
+
+struct GuiWebConfig
+{
+    std::string bind_address;
+    std::uint16_t port = 0;
+    std::string page;
+    bool gimbal = false;
+};
+
 struct GuiConfig
 {
     // enabled가 false이면 Application은 GUI sender/receiver worker를 만들지 않는다.
     bool enabled = false;
+    GuiMode mode = GuiMode::Pc;
+    GuiWebConfig web;
     GuiVideoConfig video;
     GuiMetadataConfig metadata;
     GuiCommandConfig command;

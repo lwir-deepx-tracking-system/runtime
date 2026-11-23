@@ -1,17 +1,17 @@
+#include "gui/web_server.hpp"
+#include "config/app_config.hpp"
+#include "common/logger.hpp"
 #include "replay.hpp"
 
-#include <glib-unix.h>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <csignal>
 #include <cmath>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <iterator>
 #include <stdexcept>
 #include <string_view>
@@ -32,67 +32,24 @@ std::uint32_t number(std::string_view text)
     return value;
 }
 
-std::vector<std::uint32_t> ids(std::string_view text)
-{
-    std::vector<std::uint32_t> result;
-    for (;;) {
-        const auto comma = text.find(',');
-        result.push_back(number(text.substr(0, comma)));
-        if (comma == text.npos) return result;
-        text.remove_prefix(comma + 1);
-    }
-}
-
 struct Settings {
-    std::string bind = "127.0.0.1";
-    std::string board = "127.0.0.1";
-    std::string page = PROJECT_ROOT_DIR "/../model-bank/tracking_server/page/live_page.html";
-    unsigned http_port = 8080;
-    unsigned video_port = 5000;
-    unsigned metadata_port = 5001;
-    unsigned command_port = 5002;
-    bool jpeg = false;
-    bool gimbal = false;
-    std::string recordings = "/mnt/lwir_data/results/runtime/recordings";
-    std::vector<std::uint32_t> model_ids = ids("1,2,3,4,5,6,7,8,9,10,11,12,13");
-    std::vector<std::uint32_t> tracker_ids = ids("1,2,3,4,5,6,7");
-};
+    std::string bind, page;
+    unsigned http_port, video_port, metadata_port, command_port;
+    bool jpeg, gimbal;
+    std::filesystem::path recordings;
+    std::vector<std::uint32_t> model_ids, tracker_ids;
 
-unsigned port(std::string_view text)
-{
-    const auto value = number(text);
-    if (value > 65535) throw std::invalid_argument("Port exceeds 65535");
-    return value;
-}
-
-Settings arguments(int argc, char** argv)
-{
-    Settings settings;
-    for (int index = 1; index < argc; ++index) {
-        const std::string_view option = argv[index];
-        if (++index == argc) throw std::invalid_argument("Missing value for " + std::string(option));
-        const std::string_view value = argv[index];
-        if (option == "--bind") settings.bind = value;
-        else if (option == "--board") settings.board = value;
-        else if (option == "--page") settings.page = value;
-        else if (option == "--recordings") settings.recordings = value;
-        else if (option == "--gimbal" && (value == "off" || value == "on"))
-            settings.gimbal = value == "on";
-        else if (option == "--http-port") settings.http_port = port(value);
-        else if (option == "--video-port") settings.video_port = port(value);
-        else if (option == "--metadata-port") settings.metadata_port = port(value);
-        else if (option == "--command-port") settings.command_port = port(value);
-        else if (option == "--model-ids") settings.model_ids = ids(value);
-        else if (option == "--tracker-ids") settings.tracker_ids = ids(value);
-        else if (option == "--codec" && (value == "h264" || value == "jpeg"))
-            settings.jpeg = value == "jpeg";
-        else throw std::invalid_argument("Invalid option or value: " + std::string(option));
+    Settings(const RuntimeConfig& config, const std::filesystem::path& root)
+        : bind(config.gui.web.bind_address), page(config.gui.web.page),
+          http_port(config.gui.web.port), video_port(config.gui.video.port),
+          metadata_port(config.gui.metadata.port), command_port(config.gui.command.port),
+          jpeg(config.gui.video.codec == GuiVideoCodec::JPEG), gimbal(config.gui.web.gimbal),
+          recordings(root)
+    {
+        for (const auto& entry : config.detection_catalog) model_ids.push_back(entry.first);
+        for (const auto& entry : config.tracking_catalog) tracker_ids.push_back(entry.first);
     }
-    if (!g_hostname_is_ip_address(settings.bind.c_str()) ||
-        settings.bind.find(':') != std::string::npos || settings.bind == "0.0.0.0")
-        throw std::invalid_argument("--bind requires a specific local IPv4 address");
-    return settings;
-}
+};
 
 void json(Response& response, const Json& body, int status = 200)
 {
@@ -648,7 +605,7 @@ bool valid_host(const Request& request, const Settings& settings)
     return matches(settings.bind) || (settings.bind == "127.0.0.1" && matches("localhost"));
 }
 
-int run(const Settings& settings)
+std::string load_page(const Settings& settings)
 {
     std::ifstream html(settings.page, std::ios::binary);
     if (!html) throw std::runtime_error("Cannot read model-bank page: " + settings.page);
@@ -676,81 +633,83 @@ int run(const Settings& settings)
     }
     if (page.empty()) throw std::runtime_error("model-bank page is empty");
 
-    gst_init(nullptr, nullptr);
-    CommandClient client(settings.board, settings.command_port);
-    VideoReceiver video(settings.video_port, settings.metadata_port, settings.jpeg);
-    WebApi api(client, video, settings);
+    return page;
+}
+}
+
+struct WebServer::Impl {
+    Settings settings;
+    std::string page;
+    CommandClient client;
+    VideoReceiver video;
+    WebApi api;
     httplib::Server server;
-    server.new_task_queue = [] { return new httplib::ThreadPool(16, 64); };
-    server.set_read_timeout(3).set_write_timeout(3);
-    server.set_payload_max_length(8192);
-    server.set_default_headers({{"Cache-Control", "no-store"}});
-    server.set_pre_routing_handler([&settings](const Request& request, Response& response) {
-        if (valid_host(request, settings) &&
-            (request.method != "POST" || (request.get_header_value("X-Gimbal") == "1" &&
-             (!request.has_header("Origin") ||
-              request.get_header_value("Origin") == "http://" + request.get_header_value("Host")))))
-            return httplib::Server::HandlerResponse::Unhandled;
-        json(response, {{"ok", false}, {"text", "요청 주소 또는 출처가 일치하지 않습니다"}}, 403);
-        return httplib::Server::HandlerResponse::Handled;
-    });
-    server.set_exception_handler([](const Request&, Response& response, std::exception_ptr error) {
-        try { std::rethrow_exception(error); }
-        catch (const std::invalid_argument& e) { json(response, {{"ok", false}, {"text", e.what()}}, 400); }
-        catch (const std::exception& e) { json(response, {{"ok", false}, {"text", e.what()}}, 503); }
-    });
-    server.set_error_handler([](const Request&, Response& response) {
-        if (response.status == 404)
-            json(response, {{"ok", false}, {"text", "아직 연결되지 않은 기능입니다"}}, 501);
-    });
-    api.routes(server, page);
-    if (!server.bind_to_port(settings.bind, settings.http_port))
-        throw std::runtime_error("Cannot bind HTTP server to " + settings.bind);
+    std::atomic_bool stopping{false};
+    std::atomic_bool failed{false};
+    std::thread worker;
 
-    auto* loop = g_main_loop_new(nullptr, false);
-    const auto stop_loop = [](gpointer data) -> gboolean {
-        g_main_loop_quit(static_cast<GMainLoop*>(data));
-        return G_SOURCE_CONTINUE;
-    };
-    const auto interrupt = g_unix_signal_add(SIGINT, stop_loop, loop);
-    const auto terminate = g_unix_signal_add(SIGTERM, stop_loop, loop);
-    bool listening = false;
-    std::thread worker([&] {
-        listening = server.listen_after_bind();
-        g_idle_add([](gpointer data) -> gboolean {
-            g_main_loop_quit(static_cast<GMainLoop*>(data));
-            return G_SOURCE_REMOVE;
-        }, loop);
-    });
-    std::cout << "http://" << settings.bind << ':' << settings.http_port << '/' << std::endl;
-    g_main_loop_run(loop);
-    api.stop();
-    server.stop();
-    worker.join();
-    // Dispatch any pending worker-exit notification before releasing the loop.
-    while (g_main_context_iteration(nullptr, false)) {}
-    g_source_remove(interrupt);
-    g_source_remove(terminate);
-    g_main_loop_unref(loop);
-    return listening ? 0 : 1;
-}
-}
-}
+    Impl(const RuntimeConfig& config, const std::filesystem::path& recordings)
+        : settings(config, recordings), page(load_page(settings)),
+          client("127.0.0.1", settings.command_port),
+          video(settings.video_port, settings.metadata_port, settings.jpeg),
+          api(client, video, settings)
+    {
+        server.new_task_queue = [] { return new httplib::ThreadPool(16, 64); };
+        server.set_read_timeout(3).set_write_timeout(3);
+        server.set_payload_max_length(8192);
+        server.set_default_headers({{"Cache-Control", "no-store"}});
+        server.set_pre_routing_handler([this](const Request& request, Response& response) {
+            if (valid_host(request, settings) &&
+                (request.method != "POST" || (request.get_header_value("X-Gimbal") == "1" &&
+                 (!request.has_header("Origin") ||
+                  request.get_header_value("Origin") == "http://" + request.get_header_value("Host")))))
+                return httplib::Server::HandlerResponse::Unhandled;
+            json(response, {{"ok", false}, {"text", "요청 주소 또는 출처가 일치하지 않습니다"}}, 403);
+            return httplib::Server::HandlerResponse::Handled;
+        });
+        server.set_exception_handler([](const Request&, Response& response, std::exception_ptr error) {
+            try { std::rethrow_exception(error); }
+            catch (const std::invalid_argument& e) { json(response, {{"ok", false}, {"text", e.what()}}, 400); }
+            catch (const std::exception& e) { json(response, {{"ok", false}, {"text", e.what()}}, 503); }
+        });
+        server.set_error_handler([](const Request&, Response& response) {
+            if (response.status == 404)
+                json(response, {{"ok", false}, {"text", "아직 연결되지 않은 기능입니다"}}, 501);
+        });
+        api.routes(server, page);
+        if (!server.bind_to_port(settings.bind, settings.http_port))
+            throw std::runtime_error("Cannot bind HTTP server to " + settings.bind);
 
-int main(int argc, char** argv)
+        worker = std::thread([this] {
+            try {
+                const bool listened = server.listen_after_bind();
+                if (!listened || !stopping) failed = true;
+            } catch (...) {
+                failed = true;
+            }
+        });
+        while (!server.is_running() && !failed)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    ~Impl()
+    {
+        stopping = true;
+        api.stop();
+        server.stop();
+        worker.join();
+    }
+};
+
+WebServer::WebServer(const RuntimeConfig& config, const std::filesystem::path& recordings)
 {
-    if (argc == 2 && std::string_view(argv[1]) == "--help") {
-        std::cout << "lwir_web_gui [--bind IPv4] [--http-port PORT] [--page FILE]\n"
-                     "             [--board HOST] [--command-port PORT] [--codec h264|jpeg]\n"
-                     "             [--video-port PORT] [--metadata-port PORT]\n"
-                     "             [--model-ids ID,...] [--tracker-ids ID,...]\n"
-                     "             [--recordings DIRECTORY] [--gimbal on|off]\n";
-        return 0;
-    }
-    try {
-        return web_gui::run(web_gui::arguments(argc, argv));
-    } catch (const std::exception& e) {
-        std::cerr << "lwir_web_gui: " << e.what() << '\n';
-        return 1;
-    }
+    gst_init(nullptr, nullptr);
+    impl_ = std::make_unique<Impl>(config, recordings);
+    if (failed()) throw std::runtime_error("Web GUI listener failed to start");
+    Logger::info("[WebGUI] http://" + config.gui.web.bind_address + ':' +
+                 std::to_string(config.gui.web.port) + '/');
+}
+
+WebServer::~WebServer() = default;
+bool WebServer::failed() const noexcept { return impl_->failed; }
 }

@@ -266,72 +266,56 @@ C++ 이식은 Python의 세 책임을 기준으로 한다.
 C++ 버전으로 교체할 때 같은 HTML을 사용하고, TCP 부분 수신/비동기 응답,
 RTP 박스 결합, JPEG 스냅샷, 멀티파트 경계, 미지원 요청 응답을 비교한다.
 
-## Orange Pi의 C++ 웹 GUI
+## Orange Pi Runtime의 PC GUI 및 웹 모드
 
-`lwir_web_gui`는 Orange Pi에서 `lwir_runtime`과 별도 프로세스로 실행한다.
-브라우저가 직접 연결하는 주소는 웹 서버의 `--bind`와 `--http-port`다.
-웹 어댑터가 사용하는 Runtime 연결은 보드 내부 UDP 5000·5001과 TCP 5002다.
-Runtime의 `GuiReceiver`가 HTTP에서 전달된 모델·트래커 변경을 기존
-`IPipelineRequests` 경로로 처리하고, 각 Manager가 교체 결과를 돌려준다.
-웹 어댑터는 Runtime의 `PcGuiProtocol` 인코더·디코더를 공유한다.
+`gui.enabled: true`일 때 `gui.mode`가 접속 방식을 선택한다. 생략하면
+기존 YAML과 호환되는 `pc`가 적용된다.
 
-### 빌드 및 실행
+| 모드 | Runtime 통신 | PC 접속 |
+|---|---|---|
+| `pc` | YAML에 지정한 영상·메타데이터 목적지와 명령 바인딩 | 기존 PC GUI |
+| `web` | GUI 채널을 보드 내부 루프백으로 연결하고 Runtime의 WebServer가 HTTP를 제공 | 브라우저로 Orange Pi LAN IP와 HTTP 포트에 접속 |
 
-C++ 어댑터 빌드에는 cpp-httplib, nlohmann JSON, GIO, GStreamer App,
-Cairo, OpenSSL 개발 패키지가 필요하다. 호스트에서 cpp-httplib 0.26과
-GStreamer 1.28로 검증했다. 실행 시 GStreamer의 RTP, JPEG, cairooverlay와
-선택한 코덱의 디코더(H.264는 `avdec_h264`)가 필요하다.
+웹 모드 빌드는 CMake `-DLWIR_BUILD_WEB_GUI=ON` 옵션 또는
+`LWIR_BUILD_WEB_GUI=ON ./scripts/build_runtime.sh`를 사용한다. cpp-httplib,
+nlohmann JSON, GIO, GStreamer App, Cairo, OpenSSL, OpenCV, ZLIB 개발
+패키지와 실행 시 RTP, JPEG, cairooverlay, 선택 코덱 디코더가 필요하다.
+웹 모드를 포함해 빌드한 바이너리도 YAML에서 PC 모드를 선택할 수 있다.
 
-```sh
-cmake -S . -B build/web-gui -DLWIR_BUILD_WEB_GUI=ON \
-  -DLWIR_BUILD_RUNTIME=OFF -DLWIR_BUILD_BENCHMARK=OFF \
-  -DLWIR_BUILD_CAPTURE=OFF -DBUILD_TESTING=OFF
-cmake --build build/web-gui --target lwir_web_gui
+기존 Runtime YAML의 `gui`에서 아래 값을 바꾼다. 포트, 코덱 등 기존
+`video`, `metadata`, `command` 설정을 계속 사용하고, 웹 모드의 호스트
+주소 세 가지는 AppConfig가 자동으로 `127.0.0.1`로 지정한다.
+`metadata.enabled`와 `command.enabled`는 둘 다 `true`여야 한다.
+
+```yaml
+gui:
+  enabled: true
+  mode: web
+  web:
+    bind_address: 192.168.50.2
+    port: 8080
+    page: ../model-bank/tracking_server/page/live_page.html
+    gimbal: false
 ```
 
-1. Orange Pi에 `config/runtime.yaml`을 복사해 보드용 설정을 작성한다.
-   `config/local/`에 복사하면 최상위 `path_base`를 `../..`로 맞춘다.
-   다음 주소를 변경하고 `gui.enabled`, `gui.metadata.enabled`,
-   `gui.command.enabled`를 켠다. 웹 서버에 맞춰 UDP 5000·5001과 TCP
-   5002를 사용하고 현재 Runtime의 제어 설정 조합을 유지한다.
-
-   | Runtime YAML 필드 | 값 |
-   |---|---|
-   | `gui.video.host` | `127.0.0.1` |
-   | `gui.metadata.host` | `127.0.0.1` |
-   | `gui.command.bind_address` | `127.0.0.1` |
-
-2. Orange Pi에서 기존 Runtime 바이너리와 웹 어댑터를 각각 실행한다.
-   아래의 `192.168.50.2`는 Orange Pi의 유선 LAN IP 예시다.
-   `--page`는 model-bank의 생성된 HTML 파일 경로다.
-
-   ```sh
-   ./build/runtime/lwir_runtime config/local/web-runtime.yaml
-   ./build/web-gui/apps/web_gui/lwir_web_gui --bind 192.168.50.2 \
-     --page ../model-bank/tracking_server/page/live_page.html
-   ```
-
-3. 랜선으로 연결된 PC에서 `http://192.168.50.2:8080/`을 연다.
-   보드에서만 접속하려면 `--bind 127.0.0.1`을 사용한다. Runtime이 JPEG/RTP
-   구성으로 실행 중이면 웹 어댑터에도 `--codec jpeg`를 지정한다.
-   모델·트래커 ID가 팀 기본 카탈로그와 다르면 `--model-ids`와
-   `--tracker-ids`에 쉼표로 구분한 ID를 지정한다.
-
-HTTP는 지정한 IPv4 주소에서 열리며 사용자 인증 기능이 없으므로 직접
-연결한 LAN에서 사용한다. 아래 후속 절의 녹화, 재생, 짐벌 및 운용 조작도
-같은 접속 경로를 사용한다.
+Orange Pi에서 `./build/runtime/lwir_runtime config/runtime.yaml`을 실행한 뒤
+직결 PC에서 `http://192.168.50.2:8080/`을 연다. 예시 IP는 Orange Pi의 실제
+LAN IP로 바꾼다. 페이지 경로는 YAML의 `path_base` 기준이다. 개인 설정을
+`config/local/`로 옮기면 `path_base`를 `../..`로 맞춘다. 웹 서버의
+수명은 Runtime이 관리한다. HTTP에는 사용자 인증이 없으므로 직접 연결한
+LAN에서 사용한다.
 
 ## C++ 웹 어댑터의 녹화·재생과 짐벌 입력
 
 웹 어댑터는 Recording TCP로 원본 녹화 시작·종료와 완료 목록을 조회한다.
-같은 보드의 녹화 디렉터리(`--recordings`)를 열어 `frames.csv`의 frame ID로
+Runtime의 녹화 디렉터리(`measurement.output_root/recordings`)를 열어 `frames.csv`의 frame ID로
 `tracks.csv`와 결합하고 `frames.raw.gz`를 순차 디코딩한다. Replay가 재생,
 일시정지, 탐색, 한 장 이동, 속도, 반복과 가상 확대·추종을 소유한다.
 `<녹화>/gt/gt.txt`의 MOT 정답은 비교용으로 읽으며, 저장된 사람 Track의
 IoU 0.5 일대일 매칭으로 precision/recall, ID 변경 및 MOTA를 표시한다.
 원본 model-bank의 HOTA/검출 mAP, 추론 재실행, ignore 영역 평가는 별도다.
 
-`--gimbal on`으로 브라우저 조작을 활성화할 수 있다. PC가 클릭한 프레임
+`gui.web.gimbal: true`로 브라우저 조작을 활성화할 수 있다. PC가 클릭한 프레임
 식별자는 JPEG 주석과 브라우저 콜백에서 얻고 최근 프레임의 해당 ID에만
 좌표를 적용한다. 명령은 Runtime의 기존 단일 제어 경로로 전달한다.
 페이지별 heartbeat와 재생 중 실시간 명령 차단을 적용한다. Runtime에서
@@ -375,7 +359,6 @@ System 5에 연결된다. 보드에서 `alternate` 또는 `auto`로 생성한 �
 0보다 크게 설정하면 소실 후 같은 ID가 돌아와도 이전 중심과 너무 멀면
 추종 재개를 보류한다. 기본값 0은 기존 정책이다.
 
-위 C++ 웹 어댑터 확장 빌드에는 OpenCV core/imgproc/imgcodecs와 ZLIB도
-필요하다. 모델·트래커 전환, 원본 녹화, 카메라 복구, NPU 모드, 짐벌 조작은
+위 C++ 웹 어댑터는 모델·트래커 전환, 원본 녹화, 카메라 복구, NPU 모드, 짐벌 조작은
 기존 Runtime 서비스의 요청으로 연결된다. 보드와 랜선으로 직접 연결된 PC
 배치는 그대로 사용할 수 있다.

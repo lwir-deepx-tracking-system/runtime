@@ -23,6 +23,9 @@
 
 #include "camera/camera.hpp"
 #include "gui/gui_receiver.hpp"
+#ifdef LWIR_HAS_WEB_GUI
+#include "gui/web_server.hpp"
+#endif
 #include "app/pipeline_requests.hpp"
 #include "gui/gui_sender.hpp"
 #include "tracking/tracker.hpp"
@@ -171,6 +174,10 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
     : config_(load_runtime_config(config_path)), auto_models_(config_), config_path_(config_path),
       console_enabled_(console_enabled), encoder_cpu_enabled_(encoder_cpu_enabled)
 {
+#ifndef LWIR_HAS_WEB_GUI
+    if (config_.gui.enabled && config_.gui.mode == GuiMode::Web)
+        throw std::runtime_error("gui.mode=web requires a build with LWIR_BUILD_WEB_GUI=ON");
+#endif
     if (encoder_cpu_enabled_ && (!config_.gui.enabled ||
         config_.gui.video.codec != GuiVideoCodec::H264))
         throw std::runtime_error("--encoder-cpu requires enabled H.264 GUI video");
@@ -442,6 +449,9 @@ PipelineChangeTicket RuntimeApplication::request_policy_change(const TrackerPoli
 void RuntimeApplication::run()
 {
     app_shutdown::SignalScope signals;
+#ifdef LWIR_HAS_WEB_GUI
+    std::unique_ptr<web_gui::WebServer> web_server;
+#endif
 
     bool results_discarded = false;
     // SIGQUIT은 이전 실행을 보존하고 현재 실행의 큐와 저장 결과만 폐기한다.
@@ -472,8 +482,12 @@ void RuntimeApplication::run()
     try
     {
         workers_->start();
-        CameraWatchdog::ready();
         pipeline_ready_.store(true);
+#ifdef LWIR_HAS_WEB_GUI
+        if (config_.gui.enabled && config_.gui.mode == GuiMode::Web)
+            web_server = std::make_unique<web_gui::WebServer>(config_, recording_root());
+#endif
+        CameraWatchdog::ready();
         std::unique_ptr<PipelineConsole> console;
         if (console_enabled_) console = std::make_unique<PipelineConsole>(*this, std::cout);
 
@@ -508,6 +522,10 @@ void RuntimeApplication::run()
                 (gui_sender_thread_ && gui_sender_thread_->failed()) ||
                 (gui_receiver_thread_ && gui_receiver_thread_->failed());
 
+#ifdef LWIR_HAS_WEB_GUI
+            if (web_server && web_server->failed())
+                throw std::runtime_error("Web GUI listener stopped unexpectedly");
+#endif
             if (worker_failed || runtime_control_.stop_requested.load())
             {
                 workers_->stop();
@@ -552,6 +570,9 @@ void RuntimeApplication::run()
         }
 
         pipeline_ready_.store(false);
+#ifdef LWIR_HAS_WEB_GUI
+        web_server.reset();
+#endif
         tracker_changes_->close();
         discard_if_requested();
         workers_->join();
@@ -590,6 +611,9 @@ void RuntimeApplication::run()
     catch (...)
     {
         pipeline_ready_.store(false);
+#ifdef LWIR_HAS_WEB_GUI
+        web_server.reset();
+#endif
         tracker_changes_->close();
         workers_->stop();
         workers_->join();

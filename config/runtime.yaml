@@ -142,6 +142,12 @@ control:
 # ============================================================
 
 gui:
+  mode: pc   # pc | web. web routes the existing GUI channels over loopback.
+  web:
+    bind_address: 192.168.50.2
+    port: 8080
+    page: ../model-bank/tracking_server/page/live_page.html
+    gimbal: false
   enabled: true
 
   # ----------------------------------------------------------
