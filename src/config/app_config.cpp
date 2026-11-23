@@ -383,6 +383,7 @@ ControlConfig load_control_config(const YAML::Node& node)
         c.gimbal.device = gimbal["device"].as<std::string>("/dev/ttyUSB0");
         c.gimbal.baud_rate = gimbal["baud_rate"].as<int>(115200);
         c.gimbal.write_timeout_ms = gimbal["write_timeout_ms"].as<int>(100);
+        c.gimbal.pose_feedback = gimbal["pose_feedback"].as<bool>(false);
         c.gimbal.speed = gimbal["speed"].as<int>(c.gimbal.speed);
         c.gimbal.speed_limit = gimbal["speed_limit"].as<int>(c.gimbal.speed_limit);
         c.gimbal.acceleration = gimbal["acceleration"].as<int>(50);

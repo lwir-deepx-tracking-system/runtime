@@ -30,8 +30,13 @@ public:
     ~CommandClient();
     Bytes pipeline(std::uint8_t code, Bytes args = {});
     Change change(std::uint8_t code, std::uint32_t target);
+    Change change_policy(std::uint8_t code, Bytes args, std::uint32_t target = 0);
     std::optional<Change> change_state(std::uint8_t code);
     void ping();
+    Bytes recording(std::uint8_t code, Bytes args = {});
+    std::uint8_t control(GuiCategory category, std::uint8_t code, Bytes args = {});
+    Bytes status();
+    Bytes pose();
 
 private:
     GuiCommand exchange(const GuiCommand&, std::uint32_t id);
@@ -44,6 +49,7 @@ private:
     PcGuiProtocol codec_;
     std::mutex mutex_;
     std::uint32_t id_ = 0;
+    Bytes status_;
     std::map<std::uint32_t, std::uint8_t> pending_;
     std::map<std::uint8_t, Change> changes_;
 };

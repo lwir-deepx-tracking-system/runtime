@@ -24,6 +24,7 @@ public:
 
     std::shared_ptr<const Frame> latest();
     std::shared_ptr<const Frame> next(std::uint64_t after);
+    std::optional<GuiTrackingMetadata> shown_metadata(std::uint64_t frame_id);
 
 private:
     void receive_metadata();
@@ -42,6 +43,7 @@ private:
     std::map<std::uint32_t, std::pair<Clock::time_point, GuiTrackingMetadata>> metadata_;
     std::map<GstClockTime, GuiTrackingMetadata> drawn_;
     std::shared_ptr<const Frame> latest_;
+    std::map<std::uint64_t, std::pair<Clock::time_point, GuiTrackingMetadata>> displayed_;
     std::uint64_t sequence_ = 0;
 };
 }

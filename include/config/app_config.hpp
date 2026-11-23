@@ -138,6 +138,7 @@ struct GimbalConfig {
     std::string device = "/dev/ttyUSB0";
     int baud_rate = 115200;
     int write_timeout_ms = 100;
+    bool pose_feedback = false;
     int speed = 50; // manual/HOME command speed
     int speed_limit = 100; // shared software command ceiling, independent of manual speed
     int acceleration = 50;

@@ -14,7 +14,18 @@ GimbalCommandExecutor::GimbalCommandExecutor(ControlConfig config,
 {
     if (!config.enabled || !device_) throw std::invalid_argument("Tracking control needs an enabled device");
     worker_ = std::thread([this] { run(); });
-    const bool started = invoke([this] { stop("startup"); return !state_.error; });
+    const bool started = invoke([this] {
+        stop("startup");
+        if (!state_.error && config_.gimbal.pose_feedback) {
+            try {
+                device_->start_pose_feedback();
+                pose_enabled_ = true;
+            } catch (const std::exception& e) {
+                Logger::warn(std::string("Gimbal pose feedback unavailable: ") + e.what());
+            }
+        }
+        return !state_.error;
+    });
     if (!started) {
         { std::lock_guard<std::mutex> lock(mutex_); closing_ = true; }
         wake_.notify_one(); worker_.join();
@@ -155,6 +166,12 @@ void GimbalCommandExecutor::send(int x, int y, int speed, bool automatic)
 }
 void GimbalCommandExecutor::tick()
 {
+    if (pose_enabled_) {
+        if (const auto pose = device_->read_pose()) {
+            state_.measured_pose = pose;
+            pose_at_ = Clock::now();
+        }
+    }
     if (runtime_.generation.load() != model_generation_ ||
         runtime_.tracker_epoch.load() != tracker_epoch_ ||
         runtime_.state.load() != RuntimeState::Running || runtime_.stop_requested.load()) {
@@ -245,6 +262,8 @@ void GimbalCommandExecutor::shutdown() { invoke([this] { stopped_ = true; connec
 ControlSnapshot GimbalCommandExecutor::snapshot() { return invoke([this] {
     position_estimate_.advance(Clock::now());
     auto state = state_;
+    if (Clock::now() - pose_at_ >= std::chrono::milliseconds(1500))
+        state.measured_pose.reset();
     state.position_valid = fresh() && connected_ && !state_.error;
     state.pan_estimate = position_estimate_.pan();
     state.tilt_estimate = position_estimate_.tilt();

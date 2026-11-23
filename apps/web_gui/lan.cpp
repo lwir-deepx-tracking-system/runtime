@@ -44,6 +44,7 @@ CommandClient::~CommandClient() { disconnect(); }
 void CommandClient::disconnect()
 {
     g_clear_object(&connection_);
+    status_.clear();
     for (const auto& entry : pending_) {
         auto& change = changes_.at(entry.second);
         change.phase = 2;
@@ -91,6 +92,8 @@ GuiCommand CommandClient::exchange(const GuiCommand& command, std::uint32_t id)
         if (!g_output_stream_write_all(stream, bytes.data(), bytes.size(), nullptr, nullptr, &error))
             throw network_error(error);
 
+        if (command.category == GuiCategory::Gimbal && command.command == 1)
+            return {};
         const auto deadline = Clock::now() + std::chrono::milliseconds(600);
         for (;;) {
             Bytes packet(kGuiCommandHeaderSize);
@@ -103,6 +106,13 @@ GuiCommand CommandClient::exchange(const GuiCommand& command, std::uint32_t id)
             if (!codec_.decode_command(packet.data(), packet.size(), reply))
                 throw std::runtime_error("Invalid Runtime reply");
             const auto& body = reply.payload;
+            if (reply.category == GuiCategory::System &&
+                (reply.command == 2 || reply.command == 3)) status_ = body;
+            if (reply.category == GuiCategory::Recording && command.category == reply.category &&
+                reply.command == command.command + 128 && read_u32(body.data()) == id) return reply;
+            if (command.category == GuiCategory::Gimbal &&
+                command.command == static_cast<std::uint8_t>(GuiGimbalCommand::Pose) &&
+                reply.category == command.category && reply.command == 0x85) return reply;
             if (reply.category == GuiCategory::Pipeline && body.size() >= 4) {
                 const auto request = read_u32(body.data());
                 const auto pending = pending_.find(request);
@@ -116,7 +126,7 @@ GuiCommand CommandClient::exchange(const GuiCommand& command, std::uint32_t id)
                 if (command.category == reply.category && reply.command == command.command + 128 &&
                     request == id) return reply;
             }
-            if (command.category == GuiCategory::System && reply.category == GuiCategory::System &&
+            if (reply.category == GuiCategory::System &&
                 reply.command == 1 && body.size() == 3 &&
                 body[0] == static_cast<std::uint8_t>(command.category) &&
                 body[1] == command.command) return reply;
@@ -140,11 +150,18 @@ Bytes CommandClient::pipeline(std::uint8_t code, Bytes args)
 
 Change CommandClient::change(std::uint8_t code, std::uint32_t target)
 {
+    Bytes args;
+    append_u32(args, target);
+    return change_policy(code, std::move(args), target);
+}
+
+Change CommandClient::change_policy(std::uint8_t code, Bytes args, std::uint32_t target)
+{
     std::lock_guard lock(mutex_);
     if (++id_ == 0) ++id_;
     Bytes payload;
     append_u32(payload, id_);
-    append_u32(payload, target);
+    payload.insert(payload.end(), args.begin(), args.end());
     const auto reply = exchange({GuiCategory::Pipeline, code, std::move(payload)}, id_);
     const Change change{target, reply.payload[4], reply.payload[5]};
     if (change.phase == 1 && change.result == 0) {
@@ -162,6 +179,36 @@ std::optional<Change> CommandClient::change_state(std::uint8_t code)
     const auto found = changes_.find(code);
     if (found == changes_.end()) return std::nullopt;
     return found->second;
+}
+
+Bytes CommandClient::recording(std::uint8_t code, Bytes args)
+{
+    std::lock_guard lock(mutex_);
+    if (++id_ == 0) ++id_;
+    Bytes payload;
+    append_u32(payload, id_);
+    payload.insert(payload.end(), args.begin(), args.end());
+    auto reply = exchange({GuiCategory::Recording, code, std::move(payload)}, id_);
+    return {reply.payload.begin() + 4, reply.payload.end()};
+}
+
+std::uint8_t CommandClient::control(GuiCategory category, std::uint8_t code, Bytes args)
+{
+    std::lock_guard lock(mutex_);
+    const auto reply = exchange({category, code, std::move(args)}, 0);
+    return reply.payload.empty() ? 0 : reply.payload[2];
+}
+
+Bytes CommandClient::pose()
+{
+    std::lock_guard lock(mutex_);
+    return exchange({GuiCategory::Gimbal, static_cast<std::uint8_t>(GuiGimbalCommand::Pose), {}}, 0).payload;
+}
+
+Bytes CommandClient::status()
+{
+    std::lock_guard lock(mutex_);
+    return status_;
 }
 
 void CommandClient::ping()

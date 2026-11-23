@@ -19,6 +19,7 @@ struct ControlSnapshot {
     std::uint32_t selected_id = 0;
     std::uint64_t command_generation = 0;
     // Command-based display estimate; valid only while a fresh live frame exists.
+    std::optional<GimbalPose> measured_pose;
     bool position_valid = false;
     double pan_estimate = 50.0;
     double tilt_estimate = 50.0;
@@ -48,6 +49,8 @@ class GimbalCommandExecutor {
     bool connected_ = false;
     bool stopped_ = false;
     Clock::time_point ping_{}, lost_since_{}, last_output_{}, next_auto_{};
+    Clock::time_point pose_at_{};
+    bool pose_enabled_ = false;
     int x_ = 0, y_ = 0, sent_speed_ = 0;
     double limited_speed_ = 0;
 

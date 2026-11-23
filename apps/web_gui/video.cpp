@@ -114,6 +114,7 @@ GstPadProbeReturn VideoReceiver::rtp(GstPad*, GstPadProbeInfo* info, gpointer us
         if (self.source_ && self.source_ != source) {
             self.timestamps_.clear();
             self.drawn_.clear();
+            self.displayed_.clear();
             self.metadata_.clear();
         }
         self.source_ = source;
@@ -162,7 +163,15 @@ GstFlowReturn VideoReceiver::sample(GstAppSink* sink, gpointer userdata)
         std::lock_guard lock(self.mutex_);
         GuiTrackingMetadata metadata;
         auto match = self.drawn_.extract(GST_BUFFER_PTS(buffer));
-        if (match) metadata = std::move(match.mapped());
+        if (match) {
+            metadata = std::move(match.mapped());
+            const auto comment = "LWIR k=" + std::to_string(metadata.frame_id);
+            const unsigned length = comment.size() + 2;
+            std::string marker{char(0xff), char(0xfe), char(length >> 8), char(length)};
+            if (jpeg.size() > 2) jpeg.insert(2, marker + comment);
+            self.displayed_[metadata.frame_id] = {Clock::now(), metadata};
+            if (self.displayed_.size() > 60) self.displayed_.erase(self.displayed_.begin());
+        }
         self.latest_ = std::make_shared<Frame>(
             Frame{++self.sequence_, std::move(jpeg), std::move(metadata), Clock::now()});
     }
@@ -174,6 +183,15 @@ std::shared_ptr<const Frame> VideoReceiver::latest()
 {
     std::lock_guard lock(mutex_);
     return latest_;
+}
+
+std::optional<GuiTrackingMetadata> VideoReceiver::shown_metadata(std::uint64_t frame_id)
+{
+    std::lock_guard lock(mutex_);
+    const auto frame = displayed_.find(frame_id);
+    if (frame == displayed_.end() || Clock::now() - frame->second.first > kMetadataLifetime)
+        return std::nullopt;
+    return frame->second.second;
 }
 
 std::shared_ptr<const Frame> VideoReceiver::next(std::uint64_t after)

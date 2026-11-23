@@ -320,3 +320,20 @@ cmake --build build/web-gui --target lwir_web_gui
 모델·트래커 목록/전환, 추적 박스를 포함한 영상과 JPEG 스냅샷을 제공한다.
 짐벌 조작, 녹화·재생, 원본의 고급 설정 변경은 미연결이다. HTTP는 지정한
 IPv4 주소에서 열리며 사용자 인증 기능이 없으므로 직접 연결한 LAN에서 사용한다.
+
+## C++ 웹 어댑터의 녹화·재생과 짐벌 입력
+
+웹 어댑터는 Recording TCP로 원본 녹화 시작·종료와 완료 목록을 조회한다.
+같은 보드의 녹화 디렉터리(`--recordings`)를 열어 `frames.csv`의 frame ID로
+`tracks.csv`와 결합하고 `frames.raw.gz`를 순차 디코딩한다. Replay가 재생,
+일시정지, 탐색, 한 장 이동, 속도, 반복과 가상 확대·추종을 소유한다.
+`<녹화>/gt/gt.txt`의 MOT 정답은 비교용으로 읽으며, 저장된 사람 Track의
+IoU 0.5 일대일 매칭으로 precision/recall, ID 변경 및 MOTA를 표시한다.
+원본 model-bank의 HOTA/검출 mAP, 추론 재실행, ignore 영역 평가는 별도다.
+
+`--gimbal on`으로 브라우저 조작을 활성화할 수 있다. PC가 클릭한 프레임
+식별자는 JPEG 주석과 브라우저 콜백에서 얻고 최근 프레임의 해당 ID에만
+좌표를 적용한다. 명령은 Runtime의 기존 단일 제어 경로로 전달한다.
+페이지별 heartbeat와 재생 중 실시간 명령 차단을 적용한다. Runtime에서
+`control.gimbal.pose_feedback: true`이면 기존 직렬 소유자가 실제 pan/tilt
+응답을 읽고 1.5초 안의 유효 표본만 Gimbal Pose 명령(5)에 반환한다.
