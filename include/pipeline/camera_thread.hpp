@@ -5,6 +5,7 @@
 #include <thread>
 #include <string>
 
+#include "app/camera_watchdog.hpp"
 #include "camera/camera.hpp"
 #include "config/app_config.hpp"
 #include "common/frame.hpp"
@@ -27,6 +28,7 @@ private:
     RawRecorder* recorder_ = nullptr;
     PipelinePerformance* performance_;
     CameraRecoveryConfig recovery_;
+    CameraWatchdog watchdog_;
     std::array<std::uint16_t, 64> previous_scene_{};
     unsigned identical_ = 0;
     bool have_scene_ = false;

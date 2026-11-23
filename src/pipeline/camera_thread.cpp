@@ -68,6 +68,7 @@ bool CameraThread::open_camera()
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(recovery_.stall_ms);
     return camera_.open([&] {
+        watchdog_.progress();
         return stop_requested_.load() ||
             (recovery_.attempts && std::chrono::steady_clock::now() >= deadline);
     });
@@ -82,8 +83,10 @@ bool CameraThread::reopen_camera(const char* reason, unsigned& attempts)
         ++attempts;
         const auto deadline = std::chrono::steady_clock::now() +
             std::chrono::milliseconds(recovery_.retry_ms);
-        while (!stop_requested_.load() && std::chrono::steady_clock::now() < deadline)
+        while (!stop_requested_.load() && std::chrono::steady_clock::now() < deadline) {
+            watchdog_.progress();
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
         if (!stop_requested_.load() && open_camera()) {
             Logger::info("[CameraThread] 카메라 다시 열기 성공");
             have_scene_ = false;
@@ -127,6 +130,7 @@ void CameraThread::run()
         std::uint64_t next_frame_id = 1;
         while (!stop_requested_.load())
         {
+            watchdog_.progress();
             if (reopen_requested_.exchange(false)) {
                 attempts = 0;
                 if (!reopen_camera("카메라 다시 열기 요청", attempts)) break;

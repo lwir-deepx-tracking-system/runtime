@@ -647,3 +647,7 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
 - 호스트에서 관련 CTest 6/6 통과. 로컬 DXRT SDK 헤더로 DetectorFactory
   구문 검사를 통과했다. 실기 DXNN과 카메라 재연결 및 교대 성능은 미검증이다.
   SDK 호출이 반환하지 않는 경우에는 외부 프로세스 복구가 필요하다.
+
+- SDK 호출 자체가 반환하지 않는 경우를 위해 opt-in systemd watchdog을
+  추가했다. 카메라 작업의 진행만 heartbeat를 갱신하며 서비스 관리자가
+  프로세스 재시작을 맡는다. 서비스 설정과 물리 장치 시험은 남아 있다.

@@ -266,3 +266,13 @@ SDK 핸들을 닫고 다시 연다. `camera_recovery.attempts`, `stall_ms`,
 진단을 선택적으로 켠다. 복구 후 카메라 frame ID는 계속 증가한다.
 TCP의 카메라 다시 열기 명령은 요청만 게시한다. SDK 함수 자체가 반환하지
 않는 상황에서는 현재 프로세스 내부 복구를 수행할 수 없다.
+
+### 반환하지 않는 카메라 SDK 호출
+
+`-DLWIR_ENABLE_SYSTEMD_WATCHDOG=ON` 빌드는 선택적으로 libsystemd를 사용한다.
+서비스를 배치할 때는 기존 Runtime 서비스에 `Type=notify`, `NotifyAccess=main`,
+`WatchdogSec=30s`, `Restart=on-failure`, `RestartSec=3s`, 시작 횟수 제한을
+설정한다. 프로세스는 워커 시작 후 READY를 보내고, 평상시에는 CameraThread의
+진행만 WATCHDOG를 갱신한다. SDK 함수가 멈추면 서비스 관리자가 전체 Runtime을
+재시작한다. 재시작은 그 시점의 녹화를 중단할 수 있다. 장비 설정 및 서비스 배치는
+별도이며 일반 터미널 실행에는 watchdog 통지가 필요 없다.

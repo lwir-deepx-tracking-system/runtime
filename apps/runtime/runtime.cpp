@@ -1,3 +1,4 @@
+#include "app/camera_watchdog.hpp"
 #include "runtime.hpp"
 #include "common/pipeline_performance.hpp"
 #include "auto_model_coordinator.hpp"
@@ -471,6 +472,7 @@ void RuntimeApplication::run()
     try
     {
         workers_->start();
+        CameraWatchdog::ready();
         pipeline_ready_.store(true);
         std::unique_ptr<PipelineConsole> console;
         if (console_enabled_) console = std::make_unique<PipelineConsole>(*this, std::cout);

@@ -23,6 +23,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LWIR_BUILD_RUNTIME "Build runtime application" ON)
 option(LWIR_BUILD_BENCHMARK "Build benchmark application" ON)
 option(LWIR_BUILD_CAPTURE "Build capture application" ON)
+option(LWIR_ENABLE_SYSTEMD_WATCHDOG "Notify a systemd supervisor of camera progress" OFF)
 option(LWIR_ENABLE_I3_CAMERA "Enable i3system Thermal Expert camera SDK" OFF)
 option(LWIR_ENABLE_DX_APP "Enable dx_app and DX-RT dependencies" OFF)
 
@@ -257,6 +258,12 @@ if(LWIR_NEEDS_RUNTIME_CORE)
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${OpenCV_INCLUDE_DIRS}
     )
+
+    if(LWIR_ENABLE_SYSTEMD_WATCHDOG)
+        pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+        target_compile_definitions(lwir_runtime_core PUBLIC LWIR_ENABLE_SYSTEMD_WATCHDOG)
+        target_link_libraries(lwir_runtime_core PUBLIC PkgConfig::SYSTEMD)
+    endif()
 
     target_link_libraries(lwir_runtime_core
         PUBLIC
