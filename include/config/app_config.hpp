@@ -18,11 +18,14 @@ struct LoggingConfig {
 
 enum class NpuCoreBinding { All, Core0, Core1, Core2, Core01, Core12, Core02 };
 
+enum class NpuFeedMode { Single, Alternate, Auto };
+
 struct InferenceConfig {
     std::size_t max_inflight = 1;
     int buffer_count = 0;
     bool use_ort = false;
     NpuCoreBinding npu_cores = NpuCoreBinding::All;
+    NpuFeedMode npu_feed = NpuFeedMode::Single;
 };
 
 // OcSort는 기존 XYWH 변형, OCSort는 독립적인 OC-SORT 구현이다.
@@ -434,9 +437,17 @@ struct TrackingCatalogEntry
 };
 
 // runtime YAML과 참조된 모델·트래커 YAML을 합친 실행 설정이다.
+struct CameraRecoveryConfig {
+    unsigned attempts = 0;
+    unsigned stall_ms = 1500;
+    unsigned retry_ms = 500;
+    unsigned identical_frames = 0;
+};
+
 struct RuntimeConfig
 {
     LoggingConfig logging;
+    CameraRecoveryConfig camera_recovery;
     DetectionSettings detection;
     int initial_detection_id = 0;
     std::map<int, ModelCatalogEntry> detection_catalog;

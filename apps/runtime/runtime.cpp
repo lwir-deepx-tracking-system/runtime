@@ -143,6 +143,11 @@ public:
     PipelineAutoDetection auto_detection() const override;
     bool set_auto_detection(bool enabled) override;
     bool set_auto_detection_thresholds(float far_px,float near_px) override;
+    NpuFeedState npu_feed_state() const override { return active_pipeline_.npu_feed_state(); }
+    bool set_npu_feed(std::uint8_t mode) override { return active_pipeline_.set_npu_feed(mode); }
+    bool request_camera_reopen() override {
+        return camera_thread_ && camera_thread_->request_reopen();
+    }
     bool recording_available() const override { return recorder_ != nullptr; }
     PipelineRecordingStatus recording_status() const override;
     bool start_recording(const std::string& name) override;
@@ -263,7 +268,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         std::make_unique<CameraThread>(
             *camera_,
             frame_queue_,
-            measurement_enabled_, false, recorder_.get(), performance_.get()
+            measurement_enabled_, false, recorder_.get(), performance_.get(), config_.camera_recovery
         );
 
     detection_thread_ =

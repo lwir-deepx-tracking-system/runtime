@@ -697,3 +697,12 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
 - 기존 제어 스레드에 웹 짐벌 입력과 선택형 Waveshare 각도 피드백을
   연결했다. 장치 소유권과 실제 움직임은 기존 실행기에 남고 재생 중
   브라우저의 실시간 조작 요청은 차단된다.
+## 2026-11-23 refactor/pipeline NPU 투입 모드와 카메라 복구
+
+- `FrameFeedPipeline` 및 두 코어 예약, 자동 전환, 카메라 수신 시간 초과와
+  선택형 반복 프레임 진단, CameraThread의 제한적 재연결을 추가했다.
+  설정은 AppConfig가 검증한다. TCP에 투입 모드 조회/변경과 재연결 요청을
+  연결했다. 파일과 기본 실행 설정은 Git diff 및 ARCHITECTURE에 기록했다.
+- 호스트에서 관련 CTest 6/6 통과. 로컬 DXRT SDK 헤더로 DetectorFactory
+  구문 검사를 통과했다. 실기 DXNN과 카메라 재연결 및 교대 성능은 미검증이다.
+  SDK 호출이 반환하지 않는 경우에는 외부 프로세스 복구가 필요하다.

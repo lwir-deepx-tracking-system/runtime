@@ -320,3 +320,15 @@ end-to-end behavior or board hardware performance.
 
 DXNN loading, inference, tensor validation, NPU benchmarks and board MPP/gimbal
 execution require actual hardware verification.
+
+## NPU 투입 모드 및 카메라 다시 열기
+
+Pipeline 14의 payload는 `request_id:u32`이고 응답 `0x8e`는
+`request_id:u32, flags:u32, requested:u32, core0_submits:u32, core1_submits:u32`다.
+flags 비트 0은 활성 파이프라인의 모드 변경 지원 여부, 비트 1은 현재 교대
+상태다. Pipeline 15는 `request_id:u32, mode:u32` (0 단독, 1 교대, 2 자동)를
+받아 `0x8f` Completed 결과를 보낸다. 변경은 현재 파이프라인에 적용하고
+모델 교체 후 모드는 YAML에서 다시 정한다.
+
+System 5는 payload 없이 카메라 다시 열기를 요청한다. System ACK는
+요청 수락 여부만 나타내며, 복구의 실제 진행은 CameraThread 로그에 남는다.

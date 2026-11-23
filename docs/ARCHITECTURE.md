@@ -337,3 +337,21 @@ IoU 0.5 일대일 매칭으로 precision/recall, ID 변경 및 MOTA를 표시한
 페이지별 heartbeat와 재생 중 실시간 명령 차단을 적용한다. Runtime에서
 `control.gimbal.pose_feedback: true`이면 기존 직렬 소유자가 실제 pan/tilt
 응답을 읽고 1.5초 안의 유효 표본만 Gimbal Pose 명령(5)에 반환한다.
+## 탐지 NPU 프레임 투입과 카메라 복구
+
+`detection.inference.npu_feed`의 기본값은 `single`이다. 전체 프레임
+모델에서 `npu_cores: "01"`과 `alternate` 또는 `auto`를 설정하면
+`DetectorFactory`가 코어별 세션 둘을 생성하고 `FrameFeedPipeline`에
+넘긴다. 세션마다 한 프레임 전체를 처리하고 결과 순서 및 모델 세대 검사는
+기존 DetectionThread에서 수행한다. `auto`는 0번 코어로 시작해 카메라
+주기와 처리 시간의 이동평균을 비교한다. 연속 초과 시 교대하고 충분히
+빠른 상태가 지속되면 단독 사용으로 복귀한다. 정지나 모델 교체에서는
+두 세션 모두 완료를 기다린다. 코어 1도 실행 중 전환을 위해 예약 상태다.
+같은 코어를 쓰는 상주 모델 또는 타일 모드와 조합할 수 없다.
+
+`CameraThread`는 유효 프레임이 일정 시간 돌아오지 않으면 자기 스레드에서
+SDK 핸들을 닫고 다시 연다. `camera_recovery.attempts`, `stall_ms`,
+`retry_ms`가 재시도를 제한하고 `identical_frames`는 원본 표본 반복
+진단을 선택적으로 켠다. 복구 후 카메라 frame ID는 계속 증가한다.
+TCP의 카메라 다시 열기 명령은 요청만 게시한다. SDK 함수 자체가 반환하지
+않는 상황에서는 현재 프로세스 내부 복구를 수행할 수 없다.

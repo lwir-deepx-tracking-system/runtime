@@ -38,7 +38,7 @@ int payload_size(GuiCategory category, std::uint8_t command)
         switch (static_cast<GuiSystem>(command)) {
         case GuiSystem::Ack: return 3;
         case GuiSystem::Init: case GuiSystem::Status: return 8;
-        case GuiSystem::Ping: return 0;
+        case GuiSystem::Ping: case GuiSystem::CameraReopen: return 0;
         }
         break;
     case GuiCategory::Mode:
@@ -53,18 +53,19 @@ int payload_size(GuiCategory category, std::uint8_t command)
         if (command == 0x84 || command == 0x85) return 9;
         break;
     case GuiCategory::Pipeline:
-        if (command == 1 || command == 2 || command == 7 || command == 9 || command == 11) return 4;
-        if (command == 3 || command == 4 || command == 5 || command == 6 || command == 12) return 8;
+        if (command == 1 || command == 2 || command == 7 || command == 9 || command == 11 || command == 14) return 4;
+        if (command == 3 || command == 4 || command == 5 || command == 6 || command == 12 || command == 15) return 8;
         if (command == 8) return 28;
         if (command == 10) return 24;
         if (command == 13) return 12;
         if (command == 0x81 || command == 0x82) return 8;
         if (command == 0x83 || command == 0x84) return 6;
-        if (command == 0x88 || command == 0x8a || command == 0x8c || command == 0x8d) return 6;
+        if (command == 0x88 || command == 0x8a || command == 0x8c || command == 0x8d || command == 0x8f) return 6;
         if (command == 0x85 || command == 0x86) return 76;
         if (command == 0x87) return 32;
         if (command == 0x89) return 20;
         if (command == 0x8b) return 28;
+        if (command == 0x8e) return 20;
         break;
     case GuiCategory::Recording:
         if (command == 1 || command == 3 || command == 4 || command == 6) return 4;

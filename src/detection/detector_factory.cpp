@@ -4,6 +4,7 @@
 #include <fstream>
 #include <openssl/evp.h>
 #include "tiled_detection_pipeline.hpp"
+#include "frame_feed_pipeline.hpp"
 #include <utility>
 
 #include "detection/dxrt_detection_pipeline.hpp"
@@ -85,6 +86,19 @@ std::unique_ptr<IDetectionPipeline> DetectorFactory::create(
     const ModelConfig& model_config,
     const InferenceConfig& inference_config) const
 {
+    if (inference_config.npu_feed != NpuFeedMode::Single) {
+        if (inference_config.npu_cores != NpuCoreBinding::Core01 ||
+            !model_config.tile_model_path.empty())
+            throw std::invalid_argument("Frame feed requires a full-frame model and npu_cores: 01");
+        auto binding = inference_config;
+        binding.npu_feed = NpuFeedMode::Single;
+        binding.npu_cores = NpuCoreBinding::Core0;
+        auto first = create(model_config, binding);
+        binding.npu_cores = NpuCoreBinding::Core1;
+        auto second = create(model_config, binding);
+        return std::make_unique<FrameFeedPipeline>(
+            std::move(first), std::move(second), inference_config.npu_feed);
+    }
     if (!model_config.tile_model_path.empty()) {
         if (inference_config.npu_cores != NpuCoreBinding::Core01)
             throw std::invalid_argument("Tiled detection requires npu_cores: 01");
