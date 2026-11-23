@@ -72,6 +72,13 @@ bool TrackingCommandHandler::handle(const GuiCommand& c, std::vector<GuiCommand>
         append_float(reply.payload, static_cast<float>(state.pan_estimate));
         append_float(reply.payload, static_cast<float>(state.tilt_estimate));
         replies.push_back(std::move(reply));
+    } else if (c.category == GuiCategory::Gimbal &&
+               c.command == static_cast<std::uint8_t>(GuiGimbalCommand::Pose) && c.payload.empty()) {
+        const auto pose = executor_.snapshot().measured_pose;
+        GuiCommand reply{GuiCategory::Gimbal, 0x85, {std::uint8_t(pose.has_value())}};
+        append_float(reply.payload, pose ? static_cast<float>(pose->pan) : 0.0F);
+        append_float(reply.payload, pose ? static_cast<float>(pose->tilt) : 0.0F);
+        replies.push_back(std::move(reply));
     } else return false;
     report(replies);
     return true;

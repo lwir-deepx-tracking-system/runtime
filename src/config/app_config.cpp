@@ -383,6 +383,7 @@ ControlConfig load_control_config(const YAML::Node& node)
         c.gimbal.device = gimbal["device"].as<std::string>("/dev/ttyUSB0");
         c.gimbal.baud_rate = gimbal["baud_rate"].as<int>(115200);
         c.gimbal.write_timeout_ms = gimbal["write_timeout_ms"].as<int>(100);
+        c.gimbal.pose_feedback = gimbal["pose_feedback"].as<bool>(false);
         c.gimbal.speed = gimbal["speed"].as<int>(c.gimbal.speed);
         c.gimbal.speed_limit = gimbal["speed_limit"].as<int>(c.gimbal.speed_limit);
         c.gimbal.acceleration = gimbal["acceleration"].as<int>(50);
@@ -398,6 +399,7 @@ ControlConfig load_control_config(const YAML::Node& node)
         AUTO_VALUE(fov_x_deg); AUTO_VALUE(fov_y_deg); AUTO_VALUE(min_confidence);
         AUTO_VALUE(speed_min); AUTO_VALUE(speed_max); AUTO_VALUE(speed_rate);
         AUTO_VALUE(period_ms); AUTO_VALUE(input_timeout_ms); AUTO_VALUE(reacquire_timeout_ms);
+        AUTO_VALUE(reacquire_max_center_fraction);
 #undef AUTO_VALUE
     }
     if (automatic) {
@@ -449,6 +451,9 @@ ControlConfig load_control_config(const YAML::Node& node)
     if (c.heartbeat_timeout_ms < 100 || c.heartbeat_timeout_ms > 60000 ||
         c.poll_interval_ms < 1 || c.poll_interval_ms > c.heartbeat_timeout_ms / 2)
         throw std::runtime_error("control heartbeat/poll interval is invalid");
+    if (!std::isfinite(a.reacquire_max_center_fraction) ||
+        a.reacquire_max_center_fraction < 0.0 || a.reacquire_max_center_fraction > 1.0)
+        throw std::runtime_error("control automatic reacquire_max_center_fraction out of range");
     if (c.gimbal.device.empty() || c.gimbal.write_timeout_ms < 1 ||
         c.gimbal.write_timeout_ms > c.heartbeat_timeout_ms / 2)
         throw std::runtime_error("control.gimbal device/write timeout is invalid");

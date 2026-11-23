@@ -14,7 +14,18 @@ GimbalCommandExecutor::GimbalCommandExecutor(ControlConfig config,
 {
     if (!config.enabled || !device_) throw std::invalid_argument("Tracking control needs an enabled device");
     worker_ = std::thread([this] { run(); });
-    const bool started = invoke([this] { stop("startup"); return !state_.error; });
+    const bool started = invoke([this] {
+        stop("startup");
+        if (!state_.error && config_.gimbal.pose_feedback) {
+            try {
+                device_->start_pose_feedback();
+                pose_enabled_ = true;
+            } catch (const std::exception& e) {
+                Logger::warn(std::string("Gimbal pose feedback unavailable: ") + e.what());
+            }
+        }
+        return !state_.error;
+    });
     if (!started) {
         { std::lock_guard<std::mutex> lock(mutex_); closing_ = true; }
         wake_.notify_one(); worker_.join();
@@ -141,6 +152,7 @@ void GimbalCommandExecutor::invalidate(const char* reason)
     ++state_.command_generation;
     state_.automatic = false; state_.selected_id = 0; state_.lost = false;
     lost_since_ = {}; next_auto_ = {};
+    last_target_center_.reset();
     if (state_.moving) stop(reason);
 }
 void GimbalCommandExecutor::send(int x, int y, int speed, bool automatic)
@@ -155,6 +167,12 @@ void GimbalCommandExecutor::send(int x, int y, int speed, bool automatic)
 }
 void GimbalCommandExecutor::tick()
 {
+    if (pose_enabled_) {
+        if (const auto pose = device_->read_pose()) {
+            state_.measured_pose = pose;
+            pose_at_ = Clock::now();
+        }
+    }
     if (runtime_.generation.load() != model_generation_ ||
         runtime_.tracker_epoch.load() != tracker_epoch_ ||
         runtime_.state.load() != RuntimeState::Running || runtime_.stop_requested.load()) {
@@ -171,12 +189,20 @@ void GimbalCommandExecutor::tick()
     if (state_.lost && now - lost_since_ >= std::chrono::milliseconds(config_.automatic.reacquire_timeout_ms)) {
         invalidate("reacquire timeout"); return;
     }
+    if (t && state_.lost && last_target_center_ && config_.automatic.reacquire_max_center_fraction > 0) {
+        const auto& image = latest_->frame->image;
+        const double delta = std::hypot(t->x + t->width / 2 - last_target_center_->x,
+                                        t->y + t->height / 2 - last_target_center_->y);
+        if (delta > std::hypot(image.cols, image.rows) * config_.automatic.reacquire_max_center_fraction)
+            t = nullptr;
+    }
     if (!t) {
         if (!state_.lost) { controller_.reset(); state_.lost = true; lost_since_ = now; ++state_.command_generation; }
         if (state_.moving) stop("target lost/stale");
         return;
     }
     state_.lost = false; lost_since_ = {};
+    last_target_center_ = cv::Point2d(t->x + t->width / 2, t->y + t->height / 2);
     const auto demand = controller_.calculate(*t, latest_->frame->image.cols, latest_->frame->image.rows,
         latest_->frame->metadata, latest_->model_generation);
     if (demand.stop()) { if (state_.moving) stop("deadband"); return; }
@@ -245,6 +271,8 @@ void GimbalCommandExecutor::shutdown() { invoke([this] { stopped_ = true; connec
 ControlSnapshot GimbalCommandExecutor::snapshot() { return invoke([this] {
     position_estimate_.advance(Clock::now());
     auto state = state_;
+    if (Clock::now() - pose_at_ >= std::chrono::milliseconds(1500))
+        state.measured_pose.reset();
     state.position_valid = fresh() && connected_ && !state_.error;
     state.pan_estimate = position_estimate_.pan();
     state.tilt_estimate = position_estimate_.tilt();

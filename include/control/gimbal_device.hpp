@@ -1,9 +1,12 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <stdexcept>
 #include "config/app_config.hpp"
+
+struct GimbalPose { double pan = 0, tilt = 0; };
 
 // Device strategy: application commands never contain vendor JSON or serial FDs.
 class IGimbalDevice {
@@ -13,6 +16,8 @@ public:
     // Implementations without variable speed must reject AUTO, never silently ignore SPD.
     virtual void move_with_speed(int, int, int) { throw std::logic_error("Variable gimbal speed unsupported"); }
     virtual void stop() = 0;
+    virtual void start_pose_feedback() {}
+    virtual std::optional<GimbalPose> read_pose() { return std::nullopt; }
     virtual void home() = 0; // Request only; does not establish physical completion.
 };
 

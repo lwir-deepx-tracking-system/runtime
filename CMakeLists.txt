@@ -22,6 +22,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LWIR_BUILD_RUNTIME "Build runtime application" ON)
 option(LWIR_BUILD_BENCHMARK "Build benchmark application" ON)
+option(LWIR_BUILD_WEB_GUI "Build the standalone C++ browser adapter" OFF)
 option(LWIR_BUILD_CAPTURE "Build capture application" ON)
 option(LWIR_ENABLE_SYSTEMD_WATCHDOG "Notify a systemd supervisor of camera progress" OFF)
 option(LWIR_ENABLE_I3_CAMERA "Enable i3system Thermal Expert camera SDK" OFF)
@@ -79,6 +80,10 @@ if(LWIR_NEEDS_RUNTIME_CORE)
         gstreamer-1.0>=1.20
         gstreamer-app-1.0>=1.20
     )
+endif()
+
+if(LWIR_BUILD_WEB_GUI)
+    add_subdirectory(apps/web_gui)
 endif()
 
 if(LWIR_NEEDS_CAMERA AND LWIR_ENABLE_I3_CAMERA)

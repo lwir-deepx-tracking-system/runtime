@@ -73,6 +73,21 @@ void serial_commands() {
     try { device->move_with_speed(1,0,101); }
     catch (const std::invalid_argument&) { rejected = true; }
     check(rejected, "shared command speed ceiling was ignored");
+    device->start_pose_feedback();
+    serial_line(master.value, R"({"T":142,"cmd":100})");
+    serial_line(master.value, R"({"T":131,"cmd":1})");
+    const std::string feedback = "{\"T\":1001,\"pan\":12.5,\"tilt\":-4}\n";
+    check(::write(master.value, feedback.data(), 10) == 10, "partial pose write failed");
+    check(!device->read_pose(), "partial pose was accepted");
+    check(::write(master.value, feedback.data() + 10, feedback.size() - 10) ==
+          static_cast<ssize_t>(feedback.size() - 10), "pose write failed");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    std::optional<GimbalPose> pose;
+    while (!pose && std::chrono::steady_clock::now() < deadline) {
+        pose = device->read_pose();
+        if (!pose) ::usleep(1000);
+    }
+    check(pose && pose->pan == 12.5 && pose->tilt == -4, "pose feedback values");
     device->stop();
     serial_line(master.value, "{\"T\":135}");
     device->home(); // encoder contract only; no physical HOME completion assertion

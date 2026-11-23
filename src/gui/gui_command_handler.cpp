@@ -45,6 +45,11 @@ public:
         } else if (command.category == GuiCategory::Gimbal) {
             // MOVE has no ACK in the PC protocol; it has no effect until a real
             // control strategy exists. HOME must not report fake completion.
+            if (command.command == static_cast<std::uint8_t>(GuiGimbalCommand::Pose) &&
+                command.payload.empty()) {
+                replies.push_back({GuiCategory::Gimbal, 0x85, std::vector<std::uint8_t>(9)});
+                return true;
+            }
             if (command.command == static_cast<std::uint8_t>(GuiGimbalCommand::Home))
                 replies.push_back(ack(command, GuiResult::NotReady));
             else if (command.command == static_cast<std::uint8_t>(GuiGimbalCommand::Position) &&

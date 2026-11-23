@@ -1,4 +1,5 @@
 #include "control/gimbal_device.hpp"
+#include "control/waveshare_pose.hpp"
 
 #include <cerrno>
 #include <chrono>
@@ -14,6 +15,8 @@ namespace {
 class SerialPort {
     int fd_ = -1;
     int timeout_ms_;
+    std::string feedback_line_;
+    bool discard_line_ = false;
 public:
     explicit SerialPort(const GimbalConfig& config) : timeout_ms_(config.write_timeout_ms)
     {
@@ -43,6 +46,28 @@ public:
     ~SerialPort() { if (fd_ >= 0) ::close(fd_); }
     SerialPort(const SerialPort&) = delete;
     SerialPort& operator=(const SerialPort&) = delete;
+
+    // Read one bounded batch without delaying the device owner's control loop.
+    std::optional<GimbalPose> read_pose()
+    {
+        char bytes[4096];
+        const auto size = ::read(fd_, bytes, sizeof(bytes));
+        std::optional<GimbalPose> latest;
+        for (ssize_t i = 0; i < size; ++i) {
+            if (bytes[i] == '\n') {
+                if (!discard_line_)
+                    if (auto pose = parse_waveshare_pose(feedback_line_)) latest = pose;
+                feedback_line_.clear();
+                discard_line_ = false;
+            } else if (!discard_line_) {
+                if (feedback_line_.size() == sizeof(bytes)) {
+                    feedback_line_.clear();
+                    discard_line_ = true;
+                } else feedback_line_.push_back(bytes[i]);
+            }
+        }
+        return latest;
+    }
 
     void send(const std::string& json)
     {
@@ -75,6 +100,11 @@ public:
     void move(int x, int y) override { serial_.send(WaveshareCommands::move(config_, x, y)); }
     void move_with_speed(int x, int y, int speed) override { serial_.send(WaveshareCommands::move(config_, x, y, speed)); }
     void stop() override { serial_.send(WaveshareCommands::stop()); }
+    void start_pose_feedback() override {
+        serial_.send(R"({"T":142,"cmd":100})");
+        serial_.send(R"({"T":131,"cmd":1})");
+    }
+    std::optional<GimbalPose> read_pose() override { return serial_.read_pose(); }
     void home() override { serial_.send(WaveshareCommands::home(config_)); }
 };
 }

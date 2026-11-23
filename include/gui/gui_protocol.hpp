@@ -37,7 +37,7 @@ enum class GuiPipelinePhase : std::uint8_t { Accepted = 1, Completed = 2 };
 using GuiPipelineResult = PipelineResult;
 enum class GuiSystem : std::uint8_t { Ack = 1, Init = 2, Status = 3, Ping = 4, CameraReopen = 5 };
 enum class GuiModeCommand : std::uint8_t { Auto = 1, Manual = 2 };
-enum class GuiGimbalCommand : std::uint8_t { Move = 1, Home = 3, Position = 4 };
+enum class GuiGimbalCommand : std::uint8_t { Move = 1, Home = 3, Position = 4, Pose = 5 };
 enum class GuiResult : std::uint8_t {
     Ok, InvalidCommand, InvalidPayload, InvalidState, InvalidTarget, NotReady
 };

@@ -141,6 +141,7 @@ struct GimbalConfig {
     std::string device = "/dev/ttyUSB0";
     int baud_rate = 115200;
     int write_timeout_ms = 100;
+    bool pose_feedback = false;
     int speed = 50; // manual/HOME command speed
     int speed_limit = 100; // shared software command ceiling, independent of manual speed
     int acceleration = 50;
@@ -176,6 +177,7 @@ struct AutoControlConfig {
     int period_ms = 25;
     int input_timeout_ms = 250;
     int reacquire_timeout_ms = 1000;
+    double reacquire_max_center_fraction = 0.0; // Optional position gate relative to image diagonal.
 };
 
 struct ControlConfig {

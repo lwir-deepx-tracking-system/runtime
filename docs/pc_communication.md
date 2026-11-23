@@ -253,6 +253,26 @@ Without an associated runtime request service, count queries return zero and
 switches return NotReady. Board-only Pipeline responses sent by a PC, unsupported
 commands, and incorrect declared payload lengths disconnect that client as before.
 
+### Tracker 기능과 자동 모델 선택 확장
+
+아래 필드는 모두 big endian이며 순서대로 나열한다. 변경 응답 `0x8a`,
+`0x8c`, `0x8d`는 기존 `request_id:u32, phase:u8, result:u8` 형식이다.
+
+| 요청 | 요청 payload | 응답 payload |
+|---|---|---|
+| `0x09` Tracker 기능 조회 | `request_id:u32` (4 B) | `0x89`: `request_id:u32, position_memory:u32, box_refine_mode:u32, lost_same:u32, aim_y:f32` (20 B) |
+| `0x0a` Tracker 기능 변경 | `request_id:u32, mask:u32, position_memory:u32, box_refine_mode:u32, lost_same:u32, aim_y:f32` (24 B) | `0x8a`: 기존 Tracker 변경과 같은 Accepted/Completed 처리 |
+| `0x0b` 자동 모델 선택 조회 | `request_id:u32` (4 B) | `0x8b`: `request_id:u32, enabled:u32, available:u32, near_id:u32, far_id:u32, far_px:f32, near_px:f32` (28 B) |
+| `0x0c` 자동 모델 선택 활성화 변경 | `request_id:u32, enabled:u32` (8 B) | `0x8c`: Completed |
+| `0x0d` 자동 모델 선택 임계값 변경 | `request_id:u32, far_px:f32, near_px:f32` (12 B) | `0x8d`: Completed |
+
+`position_memory` 0–3은 `kalman`, `gru_kpt`, `mamba_kpt`,
+`gru_near_kpt` 순이다. `box_refine_mode` 0–2는 `off`, `size`, `body`
+순이다. `lost_same`, `enabled`, `available`은 0 또는 1이다.
+`0x0a`의 마스크 비트 0–3은 순서대로 position memory, box refine mode,
+lost same, aim Y를 선택한다. 마스크가 선택하지 않은 필드에도 유효한 값을
+넣어야 한다. `aim_y`는 유한한 0–1 값이다.
+
 ## 원본 녹화 명령 — TCP 5002
 
 카테고리 `Recording (5)`는 단일 LAN PC의 녹화 제어에 사용한다. 모든 숫자는
@@ -284,6 +304,12 @@ result:u8, total:u64, offset:u64, bytes[0..32768]`다. 녹화 중인 디렉터�
 gzip 무결성을 검사하고 완료 디렉터리로 바꾼다. 별도 HTTP 서버, SSH,
 Tailscale은 이 전송에 사용하지 않는다.
 
+완료 목록 요청 `6`은 `request_id:u32` (4 B)다. 응답 `0x86`은
+`request_id:u32, result:u8` 뒤에 `directory:ascii[64]`를 0–32개 붙인다.
+별도의 개수 필드는 없으므로 패킷의 payload 길이에서 5를 뺀 뒤 64로 나누어
+개수를 얻는다. `result=0`이면 조회 성공이며 목록은 비어 있을 수 있다.
+`result=1`이면 녹화를 사용할 수 없다.
+
 ## Verification scope
 
 Tests use PC source fixtures for exact metadata and control bytes, TCP loopback
@@ -306,3 +332,7 @@ flags 비트 0은 활성 파이프라인의 모드 변경 지원 여부, 비트 
 
 System 5는 payload 없이 카메라 다시 열기를 요청한다. System ACK는
 요청 수락 여부만 나타내며, 복구의 실제 진행은 CameraThread 로그에 남는다.
+
+Gimbal 5는 실제 장치 자세 조회이며 payload가 없다. 응답 `0x85`는
+`valid:u8, pan_deg:f32, tilt_deg:f32`다. 실제 피드백이 꺼져 있거나
+표본이 만료된 경우 두 각도를 0으로 채우고 `valid=0`을 보낸다.

@@ -73,3 +73,48 @@ bounded writer queue에 전달한다. 모델/정책 변경은 Manager 후보 생
 
 단계별 상태와 실행 증거는 PROJECT_PROGRESS/TEST_RESULTS에 갱신한다. 표의 추가 작업은
 구현 완료 표시가 아니며, 기존 구현도 이번 작업에서 테스트하기 전에는 새 통과로 보고하지 않는다.
+
+## 2026-11-23 model-bank 웹 UI 이식 준비
+
+조사 기준은 model-bank `0e3dd54`의 `tracking_server/`와 Runtime
+`refactor/pipeline`의 `fc5e6eb`이다. 인접 워크스페이스에서
+`pc-application` 또는 `desktop_gui.py`를 찾지 못했다. 과거 이식 기록의
+`lan_protocol.py`, `desktop_routes.py`, `desktop_gui.py`는 PC 저장소를
+확보하면 확인할 기존 진입점이다.
+
+### 원본 구성과 이식 위치
+
+- `page/parts.json`에 나열된 HTML/CSS/JS 34개 조각을 `build_page.py`가
+  `live_page.html`로 합친다. 화면 작업은 조각에서 하고 `--check`로
+  생성본 일치를 확인한다. 특히 `picture_stream.js`, `picture_first.js`와
+  각 패널의 fetch 호출이 전송 방식에 결합된 경계다.
+- `src/web/page_handler.py`가 페이지·설정·제어·측정·재생 요청을 분기한다.
+  `preview_worker.py`와 `stream_sender.py`는 서버 영상 미리보기·전송을,
+  `direct_listeners.py`는 추가 접속 주소와 PC 다운로드 경로를 맡는다.
+- PC의 WebKit 화면과 LAN 브리지 사이에서 페이지 데이터와 조작을 연결한다.
+  PC 영상 디코더는 UDP 5000 H.264/RTP, 추적 표시는 UDP 5001, 장비 명령은
+  TCP 5002를 사용한다. 패킷 계약은 [PC 통신 명세](pc_communication.md)에 있다.
+
+| 원본 화면/API | 이식 시 사용할 계약과 남은 기능 |
+|---|---|
+| `/stream`, `/overlay`, `/snap.jpg`, `/time` | PC에서 디코딩한 영상과 해당 RTP timestamp의 메타데이터를 결합한다. 스냅샷은 PC의 표시 프레임으로 만들 수 있다. 카메라부터 화면까지의 지연은 시계 보정 및 카메라 기준 시각이 필요하다. 현재 UDP의 `gui_started_us`는 GUI 송신 경로 진입 시각이다. |
+| `GET /model`, `POST /model/set`, `/rules`, `/rules/set` | Pipeline 1–13으로 카탈로그, ID 전환, 활성 Tracker 정책·일부 기능과 자동 탐지 설정을 연결한다. 모델·Tracker 전환은 Completed 후 활성 ID를 다시 조회한다. 이름은 표시용으로 쓰며, 카탈로그 열거는 등록 가능한 ID 범위를 확인한다. Python의 모든 옵션과 실시간 NPU feed 설정은 연결 범위 밖이다. |
+| `/gimbal/people`, `/gimbal/ping`, `/gimbal/click-frame`, `/gimbal/move`, `/gimbal/stop`, `/gimbal/home` | 화면에 표시한 프레임에서 Track ID를 고르고 기존 AUTO로 전달한다. 제어 가능 여부와 대상 유효성은 tracking handler가 판단한다. 클릭 프레임의 키는 TCP AUTO에 없으므로 원본과 동일한 서버측 클릭 프레임 검증에는 별도 계약이 필요하다. 수동 입력을 놓으면 MOVE(0,0), 자동 추종 해제에는 MANUAL을 사용한다. HOME은 handler 응답에 따르며 POSITION의 추정 백분율은 실제 각도 눈금에 사용하지 않는다. |
+| `/perf`, `/perf/deadlines`, `/follows` | PC에서 선택적 UDP telemetry로 수신한 지표와 수신 FPS를 그래프로 만들 수 있다. 데드라인 이력, 추종 실패 원인 이력, 원본의 서버 측 집계 지표는 별도 데이터가 필요하다. |
+| `/measure/*`, `/replay/*` | Recording 1–6으로 녹화 시작·정지·상태·완료 목록·내보내기를 연결한다. 원본의 메모 편집, 영상 없는 측정, GT 평가 및 가상 추종은 별도 구현 대상이다. PC 재생은 내보낸 프레임과 `tracks.csv`를 frame ID로 결합하는 것부터 시작한다. |
+| `/network`, `/netinfo`, `/pc/*`, `/healthz`, `/diagnostics/identity`, `/tracker/camera`, `/system/*`, `/camera/reset` | 연결 상태는 PC의 소켓과 실제 수신 상태로 표시한다. PC 다운로드, 보드 관리, 카메라 리셋, 실시간 NPU 투입 변경은 별도 기능이다. 대응 명령이 없는 버튼에는 명시적 미지원 상태를 표시한다. |
+
+### 브리지 구현과 인수 기준
+
+1. PC 저장소를 확보해 기존 세 모듈과 화면 버전을 확인한다. 원본 페이지 조각에서
+   DOM·표시 로직을 재사용하고, HTTP 호출에 대응하던 부분을 PC 브리지 호출로 연결한다.
+2. 첫 화면은 연결 상태, 영상, 동일 RTP timestamp의 박스, 모델·Tracker 목록과
+   전환 결과를 포함한다. RTP 타임스탬프는 32비트이므로 연결 세션마다 짧게
+   보관하고 재접속 시 비운다. 박스 매칭에 실패하면 영상만 표시한다. 화면 좌표를
+   640×480 원본 픽셀로 변환할 때 레터박스 여백을 제외한다.
+3. 수신 PC에서 TCP 부분 수신·묶음 수신, Accepted 이후 Completed 실패,
+   전환 중 단절 및 재접속, UDP 순서 뒤바뀜·누락, 클릭 대상 유효 기간을 검증한다.
+   TCP에 프로토콜 버전 필드가 없고 모르는 명령은 연결을 닫을 수 있으므로
+   배포 대상 Runtime과 명령 세트를 함께 확인한다.
+4. 이후 정책 설정과 telemetry, 녹화 전송을 연결한다. 녹화 재생은 PC에서
+   먼저 검증하며 재생 화면의 입력은 실시간 제어로 보내지 않는다.
