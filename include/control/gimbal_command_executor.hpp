@@ -44,6 +44,7 @@ class GimbalCommandExecutor {
     // Worker-owned state only.
     ControlSnapshot state_;
     TrackingResultPtr latest_;
+    std::optional<cv::Point2d> last_target_center_;
     std::uint64_t model_generation_ = 0, last_frame_id_ = 0;
     std::uint64_t tracker_epoch_ = 0;
     bool connected_ = false;

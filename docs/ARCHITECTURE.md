@@ -355,3 +355,14 @@ SDK 핸들을 닫고 다시 연다. `camera_recovery.attempts`, `stall_ms`,
 진단을 선택적으로 켠다. 복구 후 카메라 frame ID는 계속 증가한다.
 TCP의 카메라 다시 열기 명령은 요청만 게시한다. SDK 함수 자체가 반환하지
 않는 상황에서는 현재 프로세스 내부 복구를 수행할 수 없다.
+
+웹의 NPU 투입 모드와 카메라 복구 버튼은 각각 Runtime의 Pipeline 14/15와
+System 5에 연결된다. 보드에서 `alternate` 또는 `auto`로 생성한 두 세션에
+한해 모드를 바꿀 수 있다. `control.automatic.reacquire_max_center_fraction`을
+0보다 크게 설정하면 소실 후 같은 ID가 돌아와도 이전 중심과 너무 멀면
+추종 재개를 보류한다. 기본값 0은 기존 정책이다.
+
+위 C++ 웹 어댑터 확장 빌드에는 OpenCV core/imgproc/imgcodecs와 ZLIB도
+필요하다. 모델·트래커 전환, 원본 녹화, 카메라 복구, NPU 모드, 짐벌 조작은
+기존 Runtime 서비스의 요청으로 연결된다. 보드와 랜선으로 직접 연결된 PC
+배치는 그대로 사용할 수 있다.

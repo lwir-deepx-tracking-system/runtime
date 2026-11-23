@@ -149,6 +149,37 @@ public:
         });
         server.Post("/replay/(start|stop|seek|pause|play|step|speed|virtual-click|virtual-zoom|eval/draw|eval/reset)",
             [this](const Request& request, Response& response) { replay_command(request, response); });
+        server.Post("/system/npu-feed", [this](const Request& request, Response& response) {
+            std::lock_guard lock(control_mutex_);
+            if (replay_.active()) {
+                json(response, {{"ok", false}, {"text", "녹화 재생 중입니다"}}, 409);
+                return;
+            }
+            const auto requested = request.get_param_value("mode");
+            unsigned mode = 0;
+            if (requested == "arrival") mode = 1;
+            else if (requested == "auto") mode = 2;
+            else if (requested != "normal")
+                throw std::invalid_argument("단독, 교대, 자동 중에서 선택하세요");
+            Bytes args;
+            append_u32(args, mode);
+            const auto code = client_.pipeline(
+                static_cast<std::uint8_t>(GuiPipelineCommand::ChangeNpuFeed), std::move(args));
+            json(response, {{"ok", code[1] == 0}, {"text", result_text(code[1])}});
+        });
+        server.Post("/camera/reset", [this](const Request&, Response& response) {
+            std::lock_guard lock(control_mutex_);
+            if (replay_.active()) {
+                json(response, {{"ok", false}, {"text", "녹화 재생 중입니다"}}, 409);
+                return;
+            }
+            if (settings_.gimbal) halt();
+            controller_.clear();
+            const auto code = client_.control(GuiCategory::System,
+                static_cast<std::uint8_t>(GuiSystem::CameraReopen));
+            json(response, {{"ok", code == 0},
+                {"text", code ? "카메라 복구 요청을 접수할 수 없습니다" : "카메라 복구 요청 접수"}});
+        });
         server.Get("/measure", [this](const Request&, Response& response) {
             json(response, measurement(client_.recording(1)));
         });
@@ -513,6 +544,14 @@ private:
             const auto update = client_.change_state(command);
             if (update) out["policy_last"] = last_change(update);
         }
+        const auto feed = client_.pipeline(static_cast<std::uint8_t>(GuiPipelineCommand::NpuFeed));
+        const auto feed_flags = read_u32(feed.data());
+        const auto requested = read_u32(feed.data()+4);
+        const bool alternating = (feed_flags & 2) != 0;
+        out["npu_feed"] = {{"can_toggle", (feed_flags & 1) != 0}, {"active", alternating},
+                           {"mode", alternating ? "arrival" : "normal"},
+                           {"requested", requested == 2 ? "auto" : requested == 1 ? "arrival" : "normal"},
+                           {"tile_available", false}, {"cores", {read_u32(feed.data()+8), read_u32(feed.data()+12)}}};
         const auto automatic = client_.pipeline(11);
         const auto enabled = read_u32(automatic.data()) != 0;
         const auto available = read_u32(automatic.data() + 4) != 0;

@@ -332,3 +332,7 @@ flags 비트 0은 활성 파이프라인의 모드 변경 지원 여부, 비트 
 
 System 5는 payload 없이 카메라 다시 열기를 요청한다. System ACK는
 요청 수락 여부만 나타내며, 복구의 실제 진행은 CameraThread 로그에 남는다.
+
+Gimbal 5는 실제 장치 자세 조회이며 payload가 없다. 응답 `0x85`는
+`valid:u8, pan_deg:f32, tilt_deg:f32`다. 실제 피드백이 꺼져 있거나
+표본이 만료된 경우 두 각도를 0으로 채우고 `valid=0`을 보낸다.

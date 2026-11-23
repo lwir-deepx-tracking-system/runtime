@@ -177,6 +177,7 @@ struct AutoControlConfig {
     int period_ms = 25;
     int input_timeout_ms = 250;
     int reacquire_timeout_ms = 1000;
+    double reacquire_max_center_fraction = 0.0; // Optional position gate relative to image diagonal.
 };
 
 struct ControlConfig {

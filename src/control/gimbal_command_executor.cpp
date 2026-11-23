@@ -152,6 +152,7 @@ void GimbalCommandExecutor::invalidate(const char* reason)
     ++state_.command_generation;
     state_.automatic = false; state_.selected_id = 0; state_.lost = false;
     lost_since_ = {}; next_auto_ = {};
+    last_target_center_.reset();
     if (state_.moving) stop(reason);
 }
 void GimbalCommandExecutor::send(int x, int y, int speed, bool automatic)
@@ -188,12 +189,20 @@ void GimbalCommandExecutor::tick()
     if (state_.lost && now - lost_since_ >= std::chrono::milliseconds(config_.automatic.reacquire_timeout_ms)) {
         invalidate("reacquire timeout"); return;
     }
+    if (t && state_.lost && last_target_center_ && config_.automatic.reacquire_max_center_fraction > 0) {
+        const auto& image = latest_->frame->image;
+        const double delta = std::hypot(t->x + t->width / 2 - last_target_center_->x,
+                                        t->y + t->height / 2 - last_target_center_->y);
+        if (delta > std::hypot(image.cols, image.rows) * config_.automatic.reacquire_max_center_fraction)
+            t = nullptr;
+    }
     if (!t) {
         if (!state_.lost) { controller_.reset(); state_.lost = true; lost_since_ = now; ++state_.command_generation; }
         if (state_.moving) stop("target lost/stale");
         return;
     }
     state_.lost = false; lost_since_ = {};
+    last_target_center_ = cv::Point2d(t->x + t->width / 2, t->y + t->height / 2);
     const auto demand = controller_.calculate(*t, latest_->frame->image.cols, latest_->frame->image.rows,
         latest_->frame->metadata, latest_->model_generation);
     if (demand.stop()) { if (state_.moving) stop("deadband"); return; }
