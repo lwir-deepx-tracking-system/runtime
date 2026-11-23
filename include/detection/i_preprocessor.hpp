@@ -14,6 +14,7 @@ struct PreprocessContext
     int pad_x = 0;
     int pad_y = 0;
     float scale = 1.0F;
+    bool clip_boxes = true; // Tile results are clipped after merging in full-frame coordinates.
 };
 
 // 모델 입력 영상을 만들고 후처리용 좌표 문맥을 제공하는 인터페이스.

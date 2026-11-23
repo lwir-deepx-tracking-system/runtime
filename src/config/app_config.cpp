@@ -98,6 +98,7 @@ YAML::Node load_yaml(const std::string& path)
                 if (!value.empty()) owner[key]=(base/fs::path(value)).lexically_normal().string();
             };
             resolve(root["model"],"path");
+            resolve(root["model"],"tile_path");
             resolve(root["detection"],"config");
             resolve(root["reid"],"config");
             resolve(root["reid"],"matcher_config");
@@ -299,6 +300,7 @@ TrackingConfig load_tracking_config(const YAML::Node& node)
         c.appearance_threshold = required<float>(node, "appearance_threshold", "tracking");
         c.feature_alpha = optional_value<float>(node, "feature_alpha", "tracking", c.feature_alpha);
         c.appearance_min_crop_height = optional_value<int>(node, "appearance_min_crop_height", "tracking", c.appearance_min_crop_height);
+        c.appearance_async = optional_value<bool>(node, "appearance_async", "tracking", false);
         c.appearance_max_crops_per_frame = optional_value<int>(node, "appearance_max_crops_per_frame", "tracking", c.appearance_max_crops_per_frame);
         if (!std::isfinite(c.proximity_threshold) || c.proximity_threshold < 0 || c.proximity_threshold > 1 ||
             !std::isfinite(c.appearance_threshold) || c.appearance_threshold < 0 || c.appearance_threshold > 1 ||
@@ -687,6 +689,15 @@ ModelConfig load_model_config(const std::string& path)
         throw std::runtime_error("only letterbox with normalize=false is supported");
     if (c.preprocess.pad_value < 0 || c.preprocess.pad_value > 255)
         throw std::runtime_error("preprocess.pad_value must be in [0, 255]");
+    if (root["model"]["tile_path"]) {
+        c.tile_model_path = required<std::string>(root["model"], "tile_path", "model");
+        if (c.tile_model_path.empty() || c.camera_input.width != 640 || c.camera_input.height != 480 ||
+            c.input.width != 640 || c.input.height != 480 || c.postprocess.type != "yolo26" ||
+            c.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose ||
+            c.postprocess.num_classes != 1 || c.postprocess.split_output_levels != 3 ||
+            c.postprocess.split_regression_bins != 1)
+            throw std::runtime_error("tile_path requires the 640x480 single-class YOLO26 pose contract");
+    }
     return c;
 }
 

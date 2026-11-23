@@ -614,18 +614,14 @@ std::vector<Detection> YoloPostprocessorCore::restore_coordinates(
     detections.reserve(candidates.size());
     for (const Candidate& candidate : candidates)
     {
-        const float x1 = std::clamp(
-            (candidate.x1 - static_cast<float>(context.pad_x)) / context.scale,
-            0.0F, static_cast<float>(context.original_width));
-        const float y1 = std::clamp(
-            (candidate.y1 - static_cast<float>(context.pad_y)) / context.scale,
-            0.0F, static_cast<float>(context.original_height));
-        const float x2 = std::clamp(
-            (candidate.x2 - static_cast<float>(context.pad_x)) / context.scale,
-            0.0F, static_cast<float>(context.original_width));
-        const float y2 = std::clamp(
-            (candidate.y2 - static_cast<float>(context.pad_y)) / context.scale,
-            0.0F, static_cast<float>(context.original_height));
+        const auto restore = [&](float value, int pad, int extent) {
+            const auto original = (value - static_cast<float>(pad)) / context.scale;
+            return context.clip_boxes ? std::clamp(original, 0.0F, static_cast<float>(extent)) : original;
+        };
+        const float x1 = restore(candidate.x1, context.pad_x, context.original_width);
+        const float y1 = restore(candidate.y1, context.pad_y, context.original_height);
+        const float x2 = restore(candidate.x2, context.pad_x, context.original_width);
+        const float y2 = restore(candidate.y2, context.pad_y, context.original_height);
         if (x2 <= x1 || y2 <= y1) continue;
 
         Detection detection;

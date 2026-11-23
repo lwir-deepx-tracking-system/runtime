@@ -1,6 +1,9 @@
 #include "detection/detector_factory.hpp"
 
 #include <stdexcept>
+#include <fstream>
+#include <openssl/evp.h>
+#include "tiled_detection_pipeline.hpp"
 #include <utility>
 
 #include "detection/dxrt_detection_pipeline.hpp"
@@ -10,6 +13,31 @@
 
 namespace
 {
+// Refuse mismatched source/tile pairs before reserving or loading either engine.
+void verify_tile_asset(const std::string& path, const std::string& expected)
+{
+    std::ifstream input(path, std::ios::binary);
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> digest(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    if (!input || !digest || EVP_DigestInit_ex(digest.get(), EVP_sha256(), nullptr) != 1)
+        throw std::runtime_error("Cannot verify tiled detector asset: " + path);
+    char buffer[65536];
+    while (input.read(buffer, sizeof(buffer)) || input.gcount()) {
+        if (EVP_DigestUpdate(digest.get(), buffer, static_cast<std::size_t>(input.gcount())) != 1)
+            throw std::runtime_error("Cannot hash tiled detector asset: " + path);
+    }
+    unsigned char raw[EVP_MAX_MD_SIZE];
+    unsigned length = 0;
+    if (input.bad() || EVP_DigestFinal_ex(digest.get(), raw, &length) != 1)
+        throw std::runtime_error("Cannot hash tiled detector asset: " + path);
+    std::string hex;
+    constexpr char digits[] = "0123456789abcdef";
+    for (unsigned i = 0; i < length; ++i) {
+        hex += digits[raw[i] >> 4];
+        hex += digits[raw[i] & 15];
+    }
+    if (hex != expected) throw std::runtime_error("Tiled detector SHA-256 mismatch: " + path);
+}
+
 class YoloV8DetectorFactory final : public DetectorFactory
 {
 protected:
@@ -57,6 +85,27 @@ std::unique_ptr<IDetectionPipeline> DetectorFactory::create(
     const ModelConfig& model_config,
     const InferenceConfig& inference_config) const
 {
+    if (!model_config.tile_model_path.empty()) {
+        if (inference_config.npu_cores != NpuCoreBinding::Core01)
+            throw std::invalid_argument("Tiled detection requires npu_cores: 01");
+        verify_tile_asset(model_config.path,
+            "aea2b454bc9c50c90e6d4c763fc604576064eaac09ecca9e8e268b6abb42c749");
+        verify_tile_asset(model_config.tile_model_path,
+            "e6261f29eeb70863c1352d5cc89d2998d9abe06150317e874706eb3925234db0");
+        auto tile = model_config;
+        tile.path = model_config.tile_model_path;
+        tile.tile_model_path.clear();
+        tile.camera_input.width = tile.input.width = 384;
+        tile.postprocess.nms_mode = PostprocessNmsMode::Disabled;
+        auto binding = inference_config;
+        binding.npu_cores = NpuCoreBinding::Core0;
+        auto left = std::make_unique<DxrtDetectionPipeline>(tile, binding,
+            std::make_unique<TilePreprocessor>(tile), create_postprocessor(tile));
+        binding.npu_cores = NpuCoreBinding::Core1;
+        auto right = std::make_unique<DxrtDetectionPipeline>(tile, binding,
+            std::make_unique<TilePreprocessor>(tile), create_postprocessor(tile));
+        return std::make_unique<TiledDetectionPipeline>(std::move(left), std::move(right));
+    }
     auto preprocessor = create_preprocessor(model_config);
     auto postprocessor = create_postprocessor(model_config);
     return std::make_unique<DxrtDetectionPipeline>(

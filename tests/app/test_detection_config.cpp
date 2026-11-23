@@ -108,5 +108,10 @@ int main()
     }
     catch (const std::runtime_error&) {}
 
+    const auto tiled = load_model_config("config/detection/yolo26m_pose_own9e_s1_tiles.yaml");
+    if (tiled.tile_model_path.empty() || tiled.input.width != 640 || tiled.input.height != 480 ||
+        tiled.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose)
+        return 11;
+
     return 0;
 }

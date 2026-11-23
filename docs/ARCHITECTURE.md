@@ -226,3 +226,24 @@ PC의 Python 데스크톱 프로세스는 원본 model-bank 페이지를 WebKit�
 
 DXRT 탐지 세션은 max_inflight만큼 입력 버퍼를 준비한다. 제출 실패 시
 슬롯을 반환하며, 성공한 요청은 SDK 대기와 완료 콜백 반환 뒤 슬롯을 반환한다.
+
+## 선택형 타일 탐지와 BoT-SORT 특징 작업
+
+`model.tile_path`를 지정한 own9e s1 프로필은 전체 및 타일 DXNN의 SHA-256을
+확인한 뒤 코어 0·1에 각각 세션을 생성한다. 타일 파이프라인은 전체
+640×480 원본에 model-bank 방식의 1·99백분위 명암 변환을 적용한다.
+좌우 384×480 타일은 128px 겹친다. 후처리는 타일별 NMS를 생략하고
+원본 좌표로 이동한 박스의 중심으로 좌우 소유 범위를 나눈 뒤 전역 NMS를
+수행한다. 선택된 검출의 관절을 함께 전달한다. 한쪽 실패 시에도 양쪽
+요청이 끝난 뒤 한 번만 결과를 전달한다.
+
+BoT-SORT에서 `tracking.appearance_async: true`를 지정하면 트래커가
+ReID worker를 생성한다. worker의 crop·임베딩 추출과 추적 스레드의
+후보 분류가 겹치며, 추적 상태는 특징을 받은 뒤 원본 탐지 순서대로
+갱신한다. worker는 트래커가 소유하고 ReID 세션보다 먼저 합류한다.
+
+타일 실험은 `config/detection/yolo26m_pose_own9e_s1_tiles.yaml`을 탐지
+카탈로그 및 초기 탐지 모델로 선택하고 `detection.inference.npu_cores: "01"`
+을 지정한다. ReID를 함께 사용하면 코어 2를 지정한다. 두 모델 파일은
+YAML의 경로에 설치해야 한다. DXRT 활성 빌드는 모델 해시 검사에
+OpenSSL Crypto를 사용한다.

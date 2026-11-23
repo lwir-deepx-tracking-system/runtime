@@ -129,6 +129,7 @@ struct TrackingConfig {
     int appearance_min_crop_height = 32;
     // 0 means all eligible detections; missing features fall back to IoU.
     int appearance_max_crops_per_frame = 0;
+    bool appearance_async = false;
 
     OCSortConfig ocsort;
 };
@@ -316,6 +317,7 @@ struct ModelConfig {
     ModelInputConfig input;
     ModelPreprocessConfig preprocess;
     ModelPostprocessConfig postprocess;
+    std::string tile_model_path; // Opt-in own9e s1 tile artifact.
 };
 
 // ReID 모델과 크롭·embedding 출력 계약. 모델별 YAML에서 검증된 값만 전달한다.

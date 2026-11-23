@@ -86,6 +86,7 @@ endif()
 
 if(LWIR_NEEDS_VISION AND LWIR_ENABLE_DX_APP)
     include(cmake/DxApp.cmake)
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 endif()
 
 
@@ -206,6 +207,7 @@ if(LWIR_NEEDS_VISION)
         target_link_libraries(lwir_vision
             PRIVATE
                 dx_app_dependency
+                OpenSSL::Crypto
         )
         target_compile_definitions(lwir_vision
             PRIVATE
@@ -344,6 +346,17 @@ endif()
 
 if(BUILD_TESTING)
 
+    add_executable(test_tile_completion tests/pipeline/test_tile_completion.cpp)
+    target_include_directories(test_tile_completion PRIVATE src/detection)
+    target_link_libraries(test_tile_completion PRIVATE lwir_vision)
+    add_test(NAME tile_completion COMMAND test_tile_completion)
+    set_tests_properties(tile_completion PROPERTIES TIMEOUT 10)
+
+    add_executable(test_reid_worker tests/reid/test_reid_worker.cpp)
+    target_link_libraries(test_reid_worker PRIVATE lwir_common Threads::Threads)
+    add_test(NAME reid_worker COMMAND test_reid_worker)
+    set_tests_properties(reid_worker PROPERTIES TIMEOUT 10)
+
     add_executable(test_frame_policy tests/tracking/test_frame_policy.cpp)
     target_link_libraries(test_frame_policy PRIVATE lwir_vision)
     add_test(NAME frame_policy COMMAND test_frame_policy)
@@ -363,7 +376,7 @@ if(BUILD_TESTING)
         LWIR_POSITION_WEIGHT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/tracking/position_weights")
     target_include_directories(test_botsort PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(test_botsort PRIVATE ${OpenCV_LIBS})
+    target_link_libraries(test_botsort PRIVATE ${OpenCV_LIBS} Threads::Threads)
     add_test(NAME botsort COMMAND test_botsort)
     add_executable(test_multitracker_config
         tests/tracking/test_multitracker_config.cpp)

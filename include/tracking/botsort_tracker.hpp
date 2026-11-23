@@ -5,6 +5,7 @@
 
 #include "config/app_config.hpp"
 #include "reid/i_reid_pipeline.hpp"
+#include "reid/reid_worker.hpp"
 #include "tracking/kalman_filter.hpp"
 #include "tracking/position_memory.hpp"
 #include "tracking/tracker.hpp"
@@ -49,6 +50,9 @@ private:
     CameraMotion previous_motion_;
     float width_ = 0, height_ = 0;
     std::vector<Target> targets_;
+    std::unique_ptr<ReidWorker> reid_worker_; // Joins before the ReID pipeline is destroyed.
+    using DetectionGroups = std::pair<std::vector<std::size_t>, std::vector<std::size_t>>;
+    DetectionGroups classify(const std::vector<Detection>& detections) const;
     TrackingStep associate(const std::vector<Detection>& detections,
-        const std::vector<std::vector<float>>& features);
+        const std::vector<std::vector<float>>& features, DetectionGroups groups);
 };

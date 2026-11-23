@@ -135,45 +135,61 @@ TrackingStep BotSortTracker::track_with_features(const std::vector<Detection>& d
 {
     if(features.size()!=detections.size())
         throw std::invalid_argument("BoT-SORT features must align with detection indices");
-    return associate(detections,features);
+    return associate(detections, features, classify(detections));
 }
 
 TrackingStep BotSortTracker::process(const DetectionResult& input)
 {
     if(!input.frame) throw std::invalid_argument("BoT-SORT requires a frame");
-    TrackingStep result;
-    std::vector<std::vector<float>> features(input.detections.size());
-    if(reid_) {
-        int crops=0;
-        for(size_t i=0;i<input.detections.size();++i) {
-            const auto& d=input.detections[i];
-            if(d.class_id!=person_class_id_ || d.confidence<config_.low_threshold ||
-                d.height<config_.appearance_min_crop_height ||
-                (config_.appearance_max_crops_per_frame>0 &&
-                 crops>=config_.appearance_max_crops_per_frame)) continue;
-            const cv::Rect rect=crop_rect(d,input.frame->image);
-            if(rect.empty()) continue;
-            const auto started=Clock::now();
-            features[i]=reid_->embed(input.frame->image,rect);
-            const double ms=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
-            result.embeddings.push_back({i,-1,rect,features[i],ms});
-            result.reid_ms+=ms;
-            ++crops;
+    auto collect = [this, &input] {
+        TrackingStep result;
+        std::vector<std::vector<float>> features(input.detections.size());
+        if(reid_) {
+            int crops=0;
+            for(size_t i=0;i<input.detections.size();++i) {
+                const auto& d=input.detections[i];
+                if(d.class_id!=person_class_id_ || d.confidence<config_.low_threshold ||
+                    d.height<config_.appearance_min_crop_height ||
+                    (config_.appearance_max_crops_per_frame>0 &&
+                     crops>=config_.appearance_max_crops_per_frame)) continue;
+                const cv::Rect rect=crop_rect(d,input.frame->image);
+                if(rect.empty()) continue;
+                const auto started=Clock::now();
+                features[i]=reid_->embed(input.frame->image,rect);
+                const double ms=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
+                result.embeddings.push_back({i,-1,rect,features[i],ms});
+                result.reid_ms+=ms;
+                ++crops;
+            }
         }
+        return std::make_pair(std::move(result), std::move(features));
+    };
+    if (reid_ && config_.appearance_async && !reid_worker_)
+        reid_worker_ = std::make_unique<ReidWorker>();
+
+    // Only immutable inputs are touched in parallel. Association runs after the feature join.
+    DetectionGroups groups;
+    std::pair<TrackingStep, std::vector<std::vector<float>>> appearance;
+    if (reid_worker_) {
+        auto pending = reid_worker_->submit(collect);
+        try { groups = classify(input.detections); }
+        catch (...) { pending.wait(); throw; }
+        appearance = pending.get();
+    } else {
+        groups = classify(input.detections);
+        appearance = collect();
     }
-    auto associated=associate(input.detections,features);
+    auto& [result, features] = appearance;
+    auto associated=associate(input.detections, features, std::move(groups));
     associated.embeddings=std::move(result.embeddings);
     associated.reid_ms=result.reid_ms;
     return associated;
 }
 
-TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
-    const std::vector<std::vector<float>>& features)
+BotSortTracker::DetectionGroups BotSortTracker::classify(const std::vector<Detection>& detections) const
 {
-    const auto started=Clock::now();
-    ++frame_;
-    TrackingStep result;
-    std::vector<size_t> high,low,active,unconfirmed;
+    DetectionGroups groups;
+    auto& [high, low] = groups;
     for(size_t i=0;i<detections.size();++i) {
         const auto& d=detections[i];
         if(d.width<=0 || d.height<=0 || !std::isfinite(d.x) || !std::isfinite(d.y) ||
@@ -181,6 +197,17 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
         if(d.confidence>=config_.track_threshold) high.push_back(i);
         else if(d.confidence>config_.low_threshold) low.push_back(i);
     }
+    return groups;
+}
+
+TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
+    const std::vector<std::vector<float>>& features, DetectionGroups groups)
+{
+    const auto started=Clock::now();
+    ++frame_;
+    TrackingStep result;
+    const auto& [high, low] = groups;
+    std::vector<size_t> active, unconfirmed;
     for(size_t i=0;i<targets_.size();++i) if(targets_[i].state!=State::Removed) {
         if(targets_[i].state==State::Lost && frame_-targets_[i].last_frame>config_.track_buffer) {
             targets_[i].state=State::Removed;position_memory_.forget(targets_[i].id);continue;
