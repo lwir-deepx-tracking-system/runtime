@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "common/logger.hpp"
+#include "common/pipeline_performance.hpp"
 #include "app/raw_recorder.hpp"
 
 // 활성 TrackerManager와 입출력 queue를 Tracking worker에 연결한다.
@@ -16,13 +17,13 @@ TrackingThread::TrackingThread(
     ThreadSafeQueue<TrackingResultPtr>& control_output_queue,
     ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
     bool measurement_enabled, IMeasurementSink* measurements, RawRecorder* recorder,
-    ThreadSafeQueue<AutoModelObservation>* auto_output_queue)
+    ThreadSafeQueue<AutoModelObservation>* auto_output_queue, PipelinePerformance* performance)
     : tracker_manager_(tracker_manager),
       runtime_control_(runtime_control),
       input_queue_(input_queue),
       control_output_queue_(control_output_queue),
       gui_output_queue_(gui_output_queue),
-      measurement_enabled_(measurement_enabled), measurements_(measurements), recorder_(recorder),
+      measurement_enabled_(measurement_enabled), measurements_(measurements), recorder_(recorder), performance_(performance),
       auto_output_queue_(auto_output_queue)
 {
 }
@@ -135,6 +136,7 @@ void TrackingThread::run()
             if (!published) continue;
             if (!control_push_ok)
                 throw std::runtime_error("Tracking control result queue is closed");
+            if (performance_) performance_->publish(tracks->frame->metadata.captured_at);
             if (recorder_) {
                 const double tracker_ms = measurement_enabled_ ?
                     std::chrono::duration<double, std::milli>(finished_at - started_at).count() : -1.0;

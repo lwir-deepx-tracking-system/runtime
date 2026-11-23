@@ -9,6 +9,7 @@
 #include "common/stage_metric.hpp"
 #include "common/threadsafequeue.hpp"
 class RawRecorder;
+class PipelinePerformance;
 
 
 // Camera에서 FrameContext를 만들고 shared_ptr로 Detection에 전달한다.
@@ -22,6 +23,7 @@ private:
     bool measurement_enabled_;
     bool retain_metrics_;
     RawRecorder* recorder_ = nullptr;
+    PipelinePerformance* performance_;
     std::atomic<bool> stop_requested_{false};
     std::atomic<bool> finished_{false};
     std::atomic<bool> failed_{false};
@@ -37,7 +39,7 @@ public:
         ThreadSafeQueue<FrameMessage>& output_queue,
         bool measurement_enabled,
         bool retain_metrics = true,
-        RawRecorder* recorder = nullptr
+        RawRecorder* recorder = nullptr, PipelinePerformance* performance = nullptr
     );
 
     void start();

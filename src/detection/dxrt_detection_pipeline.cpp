@@ -4,7 +4,6 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
-#include <deque>
 #include <exception>
 #include <mutex>
 #include <stdexcept>
@@ -18,7 +17,7 @@ struct DxrtDetectionPipeline::NpuState
 {
   struct Request
   {
-    std::vector<std::uint8_t>      input_buffer;
+    std::size_t                    slot = 0;
     PreprocessContext              context;
     IDetectionPipeline::Completion completion;
     DetectionTiming                timing;
@@ -37,20 +36,19 @@ struct DxrtDetectionPipeline::NpuState
   std::mutex              inflight_mutex;
   std::condition_variable inflight_cv;
   std::size_t             inflight     = 0;
-  std::size_t             max_inflight = 1;
+  std::vector<std::vector<std::uint8_t>> input_buffers;
+  std::vector<std::size_t> free_slots;
 
   std::mutex                         completed_mutex;
   std::condition_variable            completed_cv;
-  std::deque<std::shared_ptr<Request>> completed_requests;
+  std::vector<std::shared_ptr<Request>> completed_requests;
   bool                               stopping = false;
   std::thread                        completion_worker;
 
   NpuState(
       const ModelConfig &model_config,
       const InferenceConfig &inference_config)
-      : session(model_config.path, inference_config, true),
-        max_inflight(std::max<std::size_t>(
-            1, inference_config.max_inflight))
+      : session(model_config.path, inference_config, true)
   {
     if(!session.supports_model_version())
       throw std::runtime_error("DXRT runtime/compiler version is incompatible with this model");
@@ -70,6 +68,15 @@ struct DxrtDetectionPipeline::NpuState
     is_float_input = inputs.front().type() == dxrt::DataType::FLOAT;
     is_nhwc        = ::isInputNHWC(input_shape);
 
+    const auto count = std::max<std::size_t>(1, inference_config.max_inflight);
+    input_buffers.resize(count);
+    free_slots.reserve(count);
+    completed_requests.reserve(count);
+    for (std::size_t slot = 0; slot < count; ++slot) {
+      input_buffers[slot].resize(session.input_size());
+      free_slots.push_back(slot);
+    }
+
     completion_worker = std::thread([this]
                                     { complete_requests(); });
   }
@@ -88,20 +95,23 @@ struct DxrtDetectionPipeline::NpuState
       completion_worker.join();
   }
 
-  void acquire_slot()
+  // A slot stays checked out through SDK wait and downstream completion.
+  std::size_t acquire_slot()
   {
     std::unique_lock<std::mutex> lock(inflight_mutex);
-    inflight_cv.wait(lock, [this]
-                     { return inflight < max_inflight; });
+    inflight_cv.wait(lock, [this] { return !free_slots.empty(); });
+    const auto slot = free_slots.back();
+    free_slots.pop_back();
     ++inflight;
+    return slot;
   }
 
-  void release_slot()
+  void release_slot(std::size_t slot)
   {
     {
       std::lock_guard<std::mutex> lock(inflight_mutex);
-      if(inflight > 0)
-        --inflight;
+      free_slots.push_back(slot);
+      --inflight;
     }
     inflight_cv.notify_all();
   }
@@ -186,7 +196,7 @@ struct DxrtDetectionPipeline::NpuState
         if(stopping && completed_requests.empty())
           return;
         request = std::move(completed_requests.front());
-        completed_requests.pop_front();
+        completed_requests.erase(completed_requests.begin());
       }
 
       try
@@ -213,11 +223,12 @@ struct DxrtDetectionPipeline::NpuState
       catch(...)
       {
       }
-      release_slot();
+      release_slot(request->slot);
     }
   }
 
   void run_async(
+      std::size_t slot,
       const cv::Mat                 &model_input,
       const PreprocessContext       &context,
       DetectionTiming                timing,
@@ -227,7 +238,8 @@ struct DxrtDetectionPipeline::NpuState
       throw std::invalid_argument("Preprocessed NPU input must be non-empty and contiguous");
 
     auto request = std::make_shared<Request>();
-    request->input_buffer.resize(session.input_size());
+    request->slot = slot;
+    auto& input_buffer = input_buffers[slot];
     request->context    = context;
     request->completion = std::move(completion);
     request->timing     = timing;
@@ -236,16 +248,16 @@ struct DxrtDetectionPipeline::NpuState
     {
       const auto        float_buffer = convertToFloatBuffer(model_input, is_nhwc);
       const std::size_t byte_count   = float_buffer.size() * sizeof(float);
-      if(byte_count != request->input_buffer.size())
+      if(byte_count != input_buffer.size())
         throw std::runtime_error("Float input tensor size does not match DXRT input size");
-      std::memcpy(request->input_buffer.data(), float_buffer.data(), byte_count);
+      std::memcpy(input_buffer.data(), float_buffer.data(), byte_count);
     }
     else
     {
       const std::size_t byte_count = model_input.total() * model_input.elemSize();
-      if(byte_count != request->input_buffer.size())
+      if(byte_count != input_buffer.size())
         throw std::runtime_error("UInt8 input tensor size does not match DXRT input size");
-      std::memcpy(request->input_buffer.data(), model_input.data, byte_count);
+      std::memcpy(input_buffer.data(), model_input.data, byte_count);
     }
 
     // 모델 입력 tensor 변환과 복사까지 전처리에 포함한다.
@@ -257,7 +269,7 @@ struct DxrtDetectionPipeline::NpuState
     int job_id = -1;
     try
     {
-      job_id = session.submit(request->input_buffer.data(), user_data);
+      job_id = session.submit(input_buffer.data(), user_data);
     }
     catch(...)
     {
@@ -302,22 +314,8 @@ struct DxrtDetectionPipeline::NpuState
           request->timing.postprocess_finished_at = DetectionTiming::Clock::now();
           request->error = error;
           request->detections = std::move(detections);
-          try
-          {
-            enqueue_completed(request);
-          }
-          catch(...)
-          {
-            try
-            {
-              request->completion(
-                  {}, std::current_exception(), request->timing);
-            }
-            catch(...)
-            {
-            }
-            release_slot();
-          }
+          // The queue reserves one entry per slot, so publishing never reallocates.
+          enqueue_completed(request);
           return 0;
         });
   }
@@ -347,7 +345,7 @@ void DxrtDetectionPipeline::submit_async(
   if(!frame)
     throw std::invalid_argument("Cannot submit an empty frame");
 
-  npu_->acquire_slot();
+  const auto slot = npu_->acquire_slot();
   try
   {
     cv::Mat           model_input;
@@ -357,11 +355,11 @@ void DxrtDetectionPipeline::submit_async(
     timing.preprocess_started_at = DetectionTiming::Clock::now();
     preprocessor_->process(frame->image, model_input, context);
     npu_->run_async(
-        model_input, context, timing, std::move(completion));
+        slot, model_input, context, timing, std::move(completion));
   }
   catch(...)
   {
-    npu_->release_slot();
+    npu_->release_slot(slot);
     throw;
   }
 }

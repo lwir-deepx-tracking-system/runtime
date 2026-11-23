@@ -14,6 +14,7 @@
 #include "tracking/tracker_manager.hpp"
 #include "pipeline/runtime_control.hpp"
 class RawRecorder;
+class PipelinePerformance;
 
 struct AutoModelObservation {
     DetectionResult detections;
@@ -36,6 +37,7 @@ private:
     bool measurement_enabled_;
     IMeasurementSink* measurements_;
     RawRecorder* recorder_ = nullptr;
+    PipelinePerformance* performance_;
     ThreadSafeQueue<AutoModelObservation>* auto_output_queue_ = nullptr;
     std::atomic<bool> failed_{false};
     std::string error_message_;
@@ -53,7 +55,7 @@ public:
         ThreadSafeQueue<TrackingResultPtr>& gui_output_queue,
         bool measurement_enabled, IMeasurementSink* measurements = nullptr,
         RawRecorder* recorder = nullptr,
-        ThreadSafeQueue<AutoModelObservation>* auto_output_queue = nullptr
+        ThreadSafeQueue<AutoModelObservation>* auto_output_queue = nullptr, PipelinePerformance* performance = nullptr
     );
 
     void start();

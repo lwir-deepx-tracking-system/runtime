@@ -74,7 +74,8 @@ int main()
     ThreadSafeQueue<int> latest_queue;
     latest_queue.push_latest(1, 2);
     latest_queue.push_latest(2, 2);
-    latest_queue.push_latest(3, 2);
+    std::size_t dropped = 0;
+    if (!latest_queue.push_latest(3, 2, &dropped) || dropped != 1) return 1;
     latest_queue.close();
     int first = 0;
     int second = 0;

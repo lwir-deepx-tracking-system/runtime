@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "common/pipeline_performance.hpp"
 #include "auto_model_coordinator.hpp"
 #include "model_change_requests.hpp"
 #include "recording_archive.hpp"
@@ -66,6 +67,7 @@ private:
     {
         return std::filesystem::path(config_.measurement.output_root) / "recordings";
     }
+    std::unique_ptr<PipelinePerformance> performance_;
     std::unique_ptr<MetricsWriter> metrics_writer_;
     std::unique_ptr<RawRecorder> recorder_;
     std::unique_ptr<FrameTelemetryCollector> telemetry_collector_;
@@ -170,6 +172,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
     const bool telemetry_enabled = config_.gui.enabled && config_.gui.metadata.enabled &&
         config_.gui.metadata.telemetry_enabled;
     measurement_enabled_ = config_.measurement.enabled || telemetry_enabled;
+    if (config_.measurement.enabled) performance_ = std::make_unique<PipelinePerformance>();
 
     // Control은 GUI 선택 ID에 의존하므로 enable 조합만으로 세 모드를 결정한다.
     if (config_.control.enabled)
@@ -260,7 +263,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
         std::make_unique<CameraThread>(
             *camera_,
             frame_queue_,
-            measurement_enabled_, false, recorder_.get()
+            measurement_enabled_, false, recorder_.get(), performance_.get()
         );
 
     detection_thread_ =
@@ -283,7 +286,7 @@ RuntimeApplication::RuntimeApplication(const std::string& config_path, bool cons
             control_track_queue_,
             gui_track_queue_,
             measurement_enabled_, measurement_sink_, recorder_.get(),
-            auto_models_.observations()
+            auto_models_.observations(), performance_.get()
         );
 
     // AppConfig가 검증한 제어 활성 상태에서만 실제 장치와 실행기를 생성한다.
@@ -533,6 +536,10 @@ void RuntimeApplication::run()
                     std::cout << line.str() << std::endl;
                     if (sample->final) encoder_cpu_enabled_ = false;
                 }
+            }
+            if (performance_) {
+                const auto report = performance_->report();
+                if (!report.empty()) Logger::info(report);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }

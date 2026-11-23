@@ -63,7 +63,7 @@ public:
 
     // 최신 상태가 중요한 GUI 경로에서 사용한다.
     // max_size를 넘으면 가장 오래된 항목을 제거하고 새 항목을 넣는다.
-    bool push_latest(T data, std::size_t max_size)
+    bool push_latest(T data, std::size_t max_size, std::size_t* dropped = nullptr)
     {
         {
             std::lock_guard lock(mutex_);
@@ -72,8 +72,11 @@ public:
                 return false;
             }
 
-            while (queue_.size() >= max_size)
+            if (dropped) *dropped = 0;
+            while (queue_.size() >= max_size) {
                 queue_.pop();
+                if (dropped) ++*dropped;
+            }
 
             queue_.push(std::move(data));
         }

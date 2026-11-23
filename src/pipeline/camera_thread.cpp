@@ -6,16 +6,17 @@
 #include <utility>
 
 #include "common/logger.hpp"
+#include "common/pipeline_performance.hpp"
 #include "app/raw_recorder.hpp"
 
 
 CameraThread::CameraThread(
     Camera& camera,
     ThreadSafeQueue<FrameMessage>& output_queue,
-    bool measurement_enabled, bool retain_metrics, RawRecorder* recorder)
+    bool measurement_enabled, bool retain_metrics, RawRecorder* recorder, PipelinePerformance* performance)
     : camera_(camera),
       output_queue_(output_queue),
-      measurement_enabled_(measurement_enabled), retain_metrics_(retain_metrics), recorder_(recorder)
+      measurement_enabled_(measurement_enabled), retain_metrics_(retain_metrics), recorder_(recorder), performance_(performance)
 {
 }
 
@@ -95,8 +96,10 @@ void CameraThread::run()
             }
 
             // Keep only the latest two frames while detection is behind.
-            if (!output_queue_.push_latest(std::move(message), 2))
+            std::size_t dropped = 0;
+            if (!output_queue_.push_latest(std::move(message), 2, performance_ ? &dropped : nullptr))
                 break;
+            if (performance_) performance_->capture(dropped);
         }
     }
     catch (const std::exception& e)
