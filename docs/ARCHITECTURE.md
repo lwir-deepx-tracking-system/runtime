@@ -247,3 +247,76 @@ ReID worker를 생성한다. worker의 crop·임베딩 추출과 추적 스레�
 을 지정한다. ReID를 함께 사용하면 코어 2를 지정한다. 두 모델 파일은
 YAML의 경로에 설치해야 한다. DXRT 활성 빌드는 모델 해시 검사에
 OpenSSL Crypto를 사용한다.
+
+## PC 웹 GUI 프로토타입과 C++ 이식 경계
+
+`tools/web_gui/server.py`는 PC에서 model-bank의 생성된 HTML을 그대로 제공한다.
+브라우저 HTTP는 PC의 루프백에서 열리고, 보드 측 C++ Runtime의 UDP/TCP 계약은
+기존 GUI 계약을 사용한다. 웹 서버를 띄울 PC는 Runtime 영상과 메타데이터의
+UDP 목적지여야 하며 TCP 명령 연결의 소유자다.
+
+C++ 이식은 Python의 세 책임을 기준으로 한다.
+
+| Python 구현 | C++ 이식 계약 |
+|---|---|
+| `lan.py` | 단일 TCP 세션에서 부분 수신을 조립하고, 응답을 요청 ID로 연결한다. 비동기 Accepted와 Completed, 새 연결의 상태를 구분한다. UDP 메타데이터는 원본 픽셀과 RTP timestamp를 전달한다. |
+| `video.py` | RTP 타임스탬프를 디코딩 PTS에 대응시키고 같은 프레임의 추적 박스만 그린다. JPEG는 느린 클라이언트에도 최신 한 장을 전달한다. |
+| `server.py` | `RuntimeWebApi`가 경로의 데이터 형태와 Runtime 작업을 대응시킨다. HTTP 핸들러는 파일·JSON·멀티파트 응답 및 요청 검증을 담당한다. |
+
+C++ 버전으로 교체할 때 같은 HTML을 사용하고, TCP 부분 수신/비동기 응답,
+RTP 박스 결합, JPEG 스냅샷, 멀티파트 경계, 미지원 요청 응답을 비교한다.
+
+## Orange Pi의 C++ 웹 GUI
+
+`lwir_web_gui`는 Orange Pi에서 `lwir_runtime`과 별도 프로세스로 실행한다.
+브라우저가 직접 연결하는 주소는 웹 서버의 `--bind`와 `--http-port`다.
+웹 어댑터가 사용하는 Runtime 연결은 보드 내부 UDP 5000·5001과 TCP 5002다.
+Runtime의 `GuiReceiver`가 HTTP에서 전달된 모델·트래커 변경을 기존
+`IPipelineRequests` 경로로 처리하고, 각 Manager가 교체 결과를 돌려준다.
+웹 어댑터는 Runtime의 `PcGuiProtocol` 인코더·디코더를 공유한다.
+
+### 빌드 및 실행
+
+C++ 어댑터 빌드에는 cpp-httplib, nlohmann JSON, GIO, GStreamer App,
+Cairo, OpenSSL 개발 패키지가 필요하다. 호스트에서 cpp-httplib 0.26과
+GStreamer 1.28로 검증했다. 실행 시 GStreamer의 RTP, JPEG, cairooverlay와
+선택한 코덱의 디코더(H.264는 `avdec_h264`)가 필요하다.
+
+```sh
+cmake -S . -B build/web-gui -DLWIR_BUILD_WEB_GUI=ON \
+  -DLWIR_BUILD_RUNTIME=OFF -DLWIR_BUILD_BENCHMARK=OFF \
+  -DLWIR_BUILD_CAPTURE=OFF -DBUILD_TESTING=OFF
+cmake --build build/web-gui --target lwir_web_gui
+```
+
+1. Orange Pi에 `config/runtime.yaml`을 복사해 보드용 설정을 작성한다.
+   `config/local/`에 복사하면 최상위 `path_base`를 `../..`로 맞춘다.
+   다음 주소를 변경하고 `gui.enabled`, `gui.metadata.enabled`,
+   `gui.command.enabled`를 켠다. 웹 서버에 맞춰 UDP 5000·5001과 TCP
+   5002를 사용하고 현재 Runtime의 제어 설정 조합을 유지한다.
+
+   | Runtime YAML 필드 | 값 |
+   |---|---|
+   | `gui.video.host` | `127.0.0.1` |
+   | `gui.metadata.host` | `127.0.0.1` |
+   | `gui.command.bind_address` | `127.0.0.1` |
+
+2. Orange Pi에서 기존 Runtime 바이너리와 웹 어댑터를 각각 실행한다.
+   아래의 `192.168.50.2`는 Orange Pi의 유선 LAN IP 예시다.
+   `--page`는 model-bank의 생성된 HTML 파일 경로다.
+
+   ```sh
+   ./build/runtime/lwir_runtime config/local/web-runtime.yaml
+   ./build/web-gui/apps/web_gui/lwir_web_gui --bind 192.168.50.2 \
+     --page ../model-bank/tracking_server/page/live_page.html
+   ```
+
+3. 랜선으로 연결된 PC에서 `http://192.168.50.2:8080/`을 연다.
+   보드에서만 접속하려면 `--bind 127.0.0.1`을 사용한다. Runtime이 JPEG/RTP
+   구성으로 실행 중이면 웹 어댑터에도 `--codec jpeg`를 지정한다.
+   모델·트래커 ID가 팀 기본 카탈로그와 다르면 `--model-ids`와
+   `--tracker-ids`에 쉼표로 구분한 ID를 지정한다.
+
+모델·트래커 목록/전환, 추적 박스를 포함한 영상과 JPEG 스냅샷을 제공한다.
+짐벌 조작, 녹화·재생, 원본의 고급 설정 변경은 미연결이다. HTTP는 지정한
+IPv4 주소에서 열리며 사용자 인증 기능이 없으므로 직접 연결한 LAN에서 사용한다.

@@ -637,3 +637,54 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   벤치마크와 model-bank 출력 대응은 미검증이다. 출력 버퍼 재사용은
   실기에서 SDK 버퍼 계약을 확인한 뒤 적용한다. 자동 코어 전환, 운영
   자동 복구와 새 모델 카탈로그 전체 이식은 별도 작업이다.
+
+## 2026-11-23 model-bank 웹 GUI 이식 준비
+
+- Runtime `refactor/pipeline` (`fc5e6eb`)과 model-bank `0e3dd54`를
+  대조했다. `PYTHON_FEATURE_MAP.md`에 원본 화면 구성, 화면별 LAN 계약,
+  RTP 영상·박스 결합과 제어·재생 경계, 첫 연결의 인수 기준을 추가했다.
+- `pc_communication.md`에 소스에 구현돼 있던 Pipeline 9–13과
+  Recording 6의 요청·응답 형식을 기록했다.
+- model-bank의 `python3 build_page.py --check`에서 조각 34개와 HTML
+  244335 바이트의 일치를 확인했다. 기존 호스트 빌드의 `gui_protocol`과
+  `gui_receiver` CTest는 2/2 통과했다. Node.js 실행 파일이 없어 원본
+  JS 테스트는 실행하지 못했다.
+- PC 저장소가 현재 워크스페이스에 없어 브리지 소스 및 PC 실행은 미검증이다.
+  다음 작업은 PC 저장소의 기존 브리지와 원본 화면 버전을 확인하고, 영상과
+  RTP 메타데이터 결합 및 모델·Tracker 상태/전환을 첫 화면에 연결하는 것이다.
+  Orange Pi에는 접속하지 않았다.
+
+## 2026-11-23 refactor/GUI Python 웹 어댑터
+
+- `tools/web_gui/`에 PC용 프로토타입을 추가했다. 원본 HTML을 그대로
+  제공하며 RTP와 UDP 메타데이터를 결합해 박스를 그린 JPEG를 내보낸다.
+  모델·Tracker 목록/전환을 TCP에 연결한다. 실행은 저장소 루트에서
+  `/usr/bin/python3 tools/web_gui/server.py --board 192.168.50.2` 후
+  `http://127.0.0.1:8080/`에 접속한다. GStreamer Python GI, cairo GI,
+  H.264 디코더, JPEG·RTP·cairooverlay 플러그인이 필요하다.
+  `--page`, `--codec`, 각 포트, YAML 카탈로그의 ID 후보를 지정할 수 있다.
+  다른 PC GUI가 같은 수신 포트나 명령 연결을 점유 중이면 먼저 종료한다.
+- Python LAN 클라이언트, 디코더, HTTP 경로의 C++ 이식 계약을
+  `ARCHITECTURE.md`에 기록했다. 보드나 기존 Runtime 설정 변경은 없다.
+- 루프백에서 GStreamer 테스트 패턴, 수신 RTP timestamp를 사용한 UDP 추적
+  테스트 패킷, TCP 계약을 구현한 테스트 서버로 검증했다. 원본 HTML 바이트
+  일치, 모델/Tracker 전환, 같은 timestamp의 Track ID, JPEG, 멀티파트 응답이
+  통과했다. 브라우저 화면 조작과 Orange Pi 영상·DXNN은 미검증이다.
+- 녹화·재생·설정 변경·짐벌 조작 등 연결하지 않은 원본 API는 HTTP 501을
+  반환한다. 다음 단계는 보드 연결에서 첫 화면과 전환을 확인한 뒤 같은
+  HTTP 계약으로 C++ 어댑터를 구현하는 것이다.
+
+## 2026-11-23 Orange Pi 구성을 위한 C++ 웹 GUI
+
+- 선택 빌드 `LWIR_BUILD_WEB_GUI`와 `apps/web_gui/`를 추가했다. Orange Pi의
+  정적 LAN 주소에 브라우저 HTTP를 바인딩하고 Runtime의 UDP/TCP는 보드 내부
+  루프백으로 연결한다. 배치와 실행 방법은 `ARCHITECTURE.md`에 기록했다.
+- 원본 HTML, 모델·트래커 목록/전환, RTP와 일치하는 추적 박스, JPEG 및
+  멀티파트 스트림을 C++로 이식했다. 명령·응답 처리는 기존 Runtime의
+  `PcGuiProtocol` 및 GUI 수신 경로를 사용한다.
+- 호스트 C++ 빌드 및 TCP 응답 테스트 서버·GStreamer 테스트 패턴으로
+  루프백과 호스트 LAN IPv4 바인딩을 모두 확인했다. 원본 HTML 일치,
+  전환 요청/응답, 추적 ID 일치, 스냅샷/스트림, 타 Origin 요청 거부와
+  미지원 경로 응답을 검증했다. Runtime GUI 프로토콜·수신·파이프라인 명령
+  CTest 3/3도 통과했다. Orange Pi 배포, 실제 카메라·DXNN,
+  브라우저 UI 조작은 검증하지 않았다.
