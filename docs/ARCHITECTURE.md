@@ -362,3 +362,20 @@ System 5에 연결된다. 보드에서 `alternate` 또는 `auto`로 생성한 �
 위 C++ 웹 어댑터는 모델·트래커 전환, 원본 녹화, 카메라 복구, NPU 모드, 짐벌 조작은
 기존 Runtime 서비스의 요청으로 연결된다. 보드와 랜선으로 직접 연결된 PC
 배치는 그대로 사용할 수 있다.
+
+## model-bank 2026-11-25 검출 모델 카탈로그
+
+Runtime 카탈로그 ID 14는 LWIR 검증 최고 후보, ID 15는 LLVIP E14다.
+두 항목 모두 640×480 전체 영상용이다. 각 YAML의 `model.path`에
+model-bank 변환 기록의 DXNN을 배치한다. 설정에는 Runtime에서 사용하는
+파일 이름과 SHA-256이 들어 있다. 기본 검출기는 기존 ID를 사용한다.
+
+LWIR 두 타일을 실행하려면
+`config/detection/yolo26m_pose_lwir_val_best_tiles.yaml`을
+`detection_catalog`의 다음 연속 ID로 추가하고 같은 경로를
+`detection.config`에 지정한다. 추론 설정에는
+`npu_cores: "01"`, `npu_feed: single`을 설정한다. 전체·타일 DXNN
+모두 해당 YAML의 경로에 배치한다. AppConfig가 해시 형식을 검증하고
+DetectorFactory가 엔진 생성 전에 파일을 검증한다. 기존 own9e 타일
+프로필도 같은 방식으로 검사한다. 검출 출력은 기존 원본 영상 좌표를
+사용한다. 이 포팅에서 장치 추론·출력 텐서·INT8 정확도·지연은 미검증이다.

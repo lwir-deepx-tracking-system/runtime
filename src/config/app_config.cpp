@@ -732,6 +732,21 @@ ModelConfig load_model_config(const std::string& path)
         throw std::runtime_error("only letterbox with normalize=false is supported");
     if (c.preprocess.pad_value < 0 || c.preprocess.pad_value > 255)
         throw std::runtime_error("preprocess.pad_value must be in [0, 255]");
+    const auto model = root["model"];
+    const auto read_sha256 = [&model](const char* key) {
+        if (!model[key])
+            return std::string{};
+        auto hash = required<std::string>(model, key, "model");
+        if (hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != std::string::npos)
+            throw std::runtime_error(std::string("model.") + key + " must be a lowercase SHA-256");
+        return hash;
+    };
+    c.sha256 = read_sha256("sha256");
+    c.tile_sha256 = read_sha256("tile_sha256");
+    if (model["tile_path"] && (c.sha256.empty() || c.tile_sha256.empty()))
+        throw std::runtime_error("tile_path requires both model.sha256 and model.tile_sha256");
+    if (!model["tile_path"] && !c.tile_sha256.empty())
+        throw std::runtime_error("tile_sha256 requires model.tile_path");
     if (root["model"]["tile_path"]) {
         c.tile_model_path = required<std::string>(root["model"], "tile_path", "model");
         if (c.tile_model_path.empty() || c.camera_input.width != 640 || c.camera_input.height != 480 ||

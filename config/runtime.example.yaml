@@ -1,0 +1,224 @@
+# Runtime 설정 예시. 시작 시에는 GUI, 짐벌, 측정 저장과 녹화를 끈다.
+# 저장소 루트에서 복사하고 설정 파일을 위치 인자로 전달한다.
+#   cp config/runtime.example.yaml config/local/runtime.local.yaml
+#   # 복사본의 path_base를 ../..로 변경
+#   ./build/runtime/lwir_runtime config/local/runtime.local.yaml
+# path_base는 이 파일의 디렉터리 기준이다. 모델별 YAML의 path_base는 별도로 적용된다.
+# config/에 그대로 둘 때는 .., config/local/로 옮길 때는 ../..를 사용한다.
+path_base: ..
+
+# ============================================================
+# 1. Runtime / Logging
+# ============================================================
+
+logging:
+  level: info  # 일반 운용은 info, 상세 진단은 debug.
+
+camera_recovery:
+  attempts: 3           # 연속 복구 시도 상한 0~20. 0이면 자동 복구 해제.
+  stall_ms: 1500        # 프레임 정체를 판단하는 시간, 100~60000 ms.
+  retry_ms: 500         # 재오픈 전 대기, 0~60000 ms.
+  identical_frames: 0  # 같은 원본 샘플 반복을 검사할 프레임 수, 0~1800. 0이면 검사 해제.
+
+measurement:
+  enabled: false            # 처리 시간과 결과를 파일로 저장할 때 true.
+  recording_enabled: false  # 원본 녹화와 LAN 녹화 명령을 허용할 때 true.
+  output_root: results/runtime  # 쓰기 가능한 저장 경로. 장치에서는 절대 경로도 가능.
+
+
+# ============================================================
+# 2. Detection / ReID
+# ============================================================
+
+# 모델에 종속적인 설정은 별도 YAML에서 관리한다.
+# - model path
+# - camera input format
+# - model input size
+# - preprocess
+# - postprocess
+detection:
+  config: config/detection/yolov8n.yaml  # 시작 모델. detection_catalog에도 같은 경로가 필요하다.
+  inference:
+    # 동시에 처리할 수 있는 최대 검출 요청 수
+    max_inflight: 4
+    # DXRT 내부 입력·출력 buffer 수. 0이면 자동 설정
+    buffer_count: 6
+    # false이면 ONNX Runtime CPU fallback을 사용하지 않는다.
+    use_ort: false
+    # all 또는 "0", "1", "2", "01", "12", "02". 코어 조합은 문자열로 쓰는 편이 명확하다.
+    npu_cores: all
+    # single은 일반 투입, alternate는 코어 0과 1에 전체 프레임을 교대 투입,
+    # auto는 프레임 투입 정책을 자동 선택한다. alternate/auto는 전체 프레임 모델과 "01" 필요.
+    # 타일 모델은 별도 YAML을 카탈로그에 추가하고 "01" + single로 실행한다.
+    npu_feed: single
+  # 두 pose 모델을 자동 선택할 때 true. 시작 모델은 near_id 또는 far_id여야 한다.
+  # 두 ID는 서로 달라야 하며 detection_catalog에 등록되어 있어야 한다.
+  auto_select:
+    enabled: false
+    near_id: 12
+    far_id: 13
+  resident_pair:
+    enabled: false  # 자동 모델 선택과 single 필요. 두 엔진 상주 실패 시 기존 교체 경로 사용.
+
+# ReID를 사용하는 트래커를 선택할 때 적용한다. 추적기별 활성 여부는 해당 YAML에 있다.
+reid:
+  config: config/reid/repvgg.yaml       # 특징 추출 DXNN, 입력 크롭과 출력 계약.
+  matcher_config: config/reid/matcher.yaml  # 사후 ReID 매칭 설정.
+  min_crop_height: 32     # 특징 추출에 넘길 최소 검출 높이(px).
+  max_crops_per_frame: 2  # 한 프레임에서 특징을 추출할 크롭 수 상한.
+  inference:
+    # Tracker가 선택되면 해당 구성 객체가 ReID 추론을 수행한다.
+    max_inflight: 1
+    buffer_count: 0
+    use_ort: false
+    npu_cores: all
+
+# id는 1부터 연속이어야 한다. name은 UI에 표시되고 config는 모델별 YAML이다.
+# 카탈로그 전체에서 카메라 입력 크기, 타입과 클리핑 범위를 맞춘다.
+# 모델의 추론 입력 해상도와 후처리 방식은 각 모델 YAML에서 지정한다.
+detection_catalog:
+  - id: 1
+    name: YOLOv8n
+    config: config/detection/yolov8n.yaml
+  - id: 2
+    name: YOLO26s
+    config: config/detection/yolo26s.yaml
+  - {id: 3, name: 'YOLO26m FLIR 640x480', config: config/detection/newmrw480.yaml}
+  - {id: 4, name: 'YOLO26s 640x480', config: config/detection/s480.yaml}
+  - {id: 5, name: 'YOLO26m FLIR 640x640', config: config/detection/m640.yaml}
+  - {id: 6, name: 'YOLO26s 640x640', config: config/detection/s6.yaml}
+  - {id: 7, name: 'YOLO26m inside 20261110 1742', config: config/detection/yolo26m_inside_1742.yaml}
+  - {id: 8, name: 'YOLO26m inside 20261110 2020', config: config/detection/yolo26m_inside_2020.yaml}
+  - {id: 9, name: 'YOLO26m inside patch 20261111', config: config/detection/yolo26m_inside_patch.yaml}
+  - {id: 10, name: 'YOLO26m outside patch 20261110', config: config/detection/yolo26m_outside_patch.yaml}
+  - {id: 11, name: 'YOLO26s NMS-free 640x640', config: config/detection/yolo26s_nmsfree.yaml}
+  - {id: 12, name: 'YOLO26m pose near 640x480', config: config/detection/yolo26m_pose_near.yaml}
+  - {id: 13, name: 'YOLO26m pose far 640x480', config: config/detection/yolo26m_pose_far.yaml}
+  - {id: 14, name: 'YOLO26m pose LWIR val-best 640x480', config: config/detection/yolo26m_pose_lwir_val_best.yaml}
+  - {id: 15, name: 'YOLO26m pose LLVIP E14 640x480', config: config/detection/yolo26m_pose_llvip_e14.yaml}
+
+
+# ============================================================
+# 3. Tracking
+# ============================================================
+
+tracking:
+  id: 1  # 시작 트래커 ID. tracking_catalog에 등록되어 있어야 한다.
+
+# id는 1부터 연속이어야 한다. 세부 추적 인자와 ReID 정책은 각 YAML에서 편집한다.
+tracking_catalog:
+  - id: 1
+    name: ByteTrack
+    config: config/tracking/bytetrack.yaml
+  - id: 2
+    name: BoT-SORT + Appearance ReID
+    config: config/tracking/botsort.yaml
+  - id: 3
+    name: ByteTrack + Post-ReID
+    config: config/tracking/bytetrack_post_reid.yaml
+  - id: 4
+    name: ByteTrack + Filters + GMC + Post-ReID
+    config: config/tracking/bytetrack_filtered.yaml
+  - id: 5
+    name: OC-SORT XYWH
+    config: config/tracking/ocsort_xywh.yaml
+  - id: 6
+    name: SORT
+    config: config/tracking/sort.yaml
+  - id: 7
+    name: OC-SORT
+    config: config/tracking/ocsort.yaml
+
+# ============================================================
+# 4. Target / Control
+# ============================================================
+
+# 짐벌을 쓰는 경우 gui.enabled, gui.command.enabled도 true로 켜고
+# gui.command.handler를 tracking으로 지정한다. 영상/명령만 쓰면 deferred를 선택한다.
+control:
+  enabled: false
+
+  auto:
+    min_confidence: 0.0    # AUTO 제어 대상의 최소 신뢰도
+    input_timeout_ms: 500  # 캡처 시각 기준 입력 유효 시간
+    reacquire_timeout_ms: 2000 # 표적 상실 후 재획득 대기 시간
+    # 흔들림 완화를 위해 P 제어로 기준을 잡고 실기에서 축별 kp를 조정한다.
+    controller: p          # p / pi / pd / pid
+    pid_x: {kp: 40.0, ki: 0.0, kd: 0.0}
+    pid_y: {kp: 40.0, ki: 0.0, kd: 0.0}
+    deadband_x: 0.06
+    deadband_y: 0.06
+    speed_max: 70          # AUTO 전용 상한
+    speed_rate: 100.0       # SPD/초. STOP은 제한 우회
+
+  gimbal:
+    device: /dev/ttyUSB0   # 실제 보드의 직렬 장치 경로로 교체.
+    speed: 30              # 수동 방향키 고정 속도. AUTO 상한과 독립
+
+# ============================================================
+# 5. GUI Communication
+# ============================================================
+
+gui:
+  # pc는 LAN의 PC 앱으로 RTP 영상과 UDP 메타데이터를 보내고 TCP 명령을 받는다.
+  # web은 내장 HTTP 서버를 열고 영상·메타데이터·명령 채널을 루프백으로 연결한다.
+  # web 활성화 시 metadata.enabled와 command.enabled가 모두 true여야 한다.
+  mode: pc
+  web:
+    bind_address: 192.168.50.2  # 접속할 보드의 실제 IPv4. 0.0.0.0은 허용하지 않는다.
+    port: 8080                 # command.port와 다른 TCP 포트를 사용한다.
+    page: ../model-bank/tracking_server/page/live_page.html  # 사용할 HTML 파일.
+    gimbal: false  # 브라우저에서 짐벌을 쓰려면 control.enabled도 true로 설정.
+  enabled: false   # GUI가 필요할 때 true. 아래 채널 설정은 비활성 상태에서도 파싱한다.
+
+  # ----------------------------------------------------------
+  # 5-1. Video
+  # Orange Pi -> GUI
+  # JPEG or H.264 / RTP / UDP
+  # ----------------------------------------------------------
+
+  video:
+    host: 192.168.50.1  # pc 모드에서 수신 PC의 주소.
+    port: 5000
+
+    # JPEG : jpegenc / mppjpegenc
+    # H.264 : x264enc / mpph264enc
+
+    codec: h264
+    encoder: mpph264enc
+
+    bitrate_kbps: 3000    # H.264 목표 영상 비트레이트(kbit/s).
+    jpeg_quality: 80      # JPEG 품질 1~99.
+    keyframe_interval: 30 # H.264 키프레임 간격(프레임).
+    fps: 30               # 송신 파이프라인의 영상 FPS 설정.
+    rtp_mtu: 1200         # RTP 패킷 크기 상한 바이트.
+
+  # ----------------------------------------------------------
+  # 5-2. Tracking Metadata
+  # Orange Pi -> GUI
+  # frame_id / track_id / bbox 등을 UDP로 전송
+  # ----------------------------------------------------------
+
+  metadata:
+    enabled: true
+
+    host: 192.168.50.1  # pc 모드에서 수신 PC의 주소.
+    port: 5001
+
+    max_packet_bytes: 1200  # UDP 페이로드 상한. telemetry가 켜지면 최소 152바이트.
+    telemetry:
+      enabled: true  # 추적 메타데이터에 처리 시간 등 운영 텔레메트리를 함께 송신.
+
+  # ----------------------------------------------------------
+  # 5-3. GUI Command
+  # GUI -> Orange Pi
+  # PC 명령 수신 및 ACK/STATUS 응답
+  # ----------------------------------------------------------
+
+  command:
+    handler: deferred  # tracking은 짐벌 제어와 함께 사용. deferred는 짐벌 제어 없이 통신.
+    enabled: true
+
+    bind_address: 192.168.50.2  # pc 모드에서 수신할 보드 주소.
+    port: 5002                 # PC 명령·ACK/STATUS TCP 포트.
+    receive_timeout_ms: 1000   # 소켓 수신 타임아웃(ms). 양수.

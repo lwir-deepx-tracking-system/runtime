@@ -181,13 +181,17 @@ int main()
         return 7;
     if (config.detection_catalog.at(2).model.postprocess.type != "yolo26")
         return 44;
-    if (config.detection_catalog.size() != 13 ||
+    if (config.detection_catalog.size() != 15 ||
         config.detection_catalog.at(3).display_name != "YOLO26m FLIR 640x480" ||
         config.detection_catalog.at(3).model.input.height != 480 ||
         config.detection_catalog.at(3).model.postprocess.output_format != PostprocessOutputFormat::SplitHead ||
         config.detection_catalog.at(11).model.postprocess.output_format != PostprocessOutputFormat::EndToEndXyxy ||
         config.detection_catalog.at(12).model.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose ||
         config.detection_catalog.at(13).model.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose ||
+        config.detection_catalog.at(14).model.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose ||
+        config.detection_catalog.at(14).model.sha256.size() != 64 ||
+        config.detection_catalog.at(15).model.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose ||
+        config.detection_catalog.at(15).model.sha256.size() != 64 ||
         config.tracking_catalog.at(2).display_name != "BoT-SORT + Appearance ReID")
         return 54;
     if (!YAML::LoadFile("config/detection/yolov8n.yaml")["postprocess"] ||

@@ -191,6 +191,10 @@ SIGQUIT 뒤에 SIGINT나 콘솔 quit가 와도 폐기 종료가 우선합니다.
 
 ## Configuration
 
+[Runtime 설정 템플릿](config/runtime.example.yaml)은 카메라 복구, 검출·추적 카탈로그,
+NPU 옵션과 PC·웹 GUI의 의존 조건을 주석으로 설명합니다. `config/local/`로 복사할 때
+`path_base: ../..`를 사용하고 파일 경로를 `lwir_runtime`의 첫 번째 인자로 전달합니다.
+
 Runtime, Capture, Benchmark는 각각 `config/runtime.yaml`, `config/capture.yaml`,
 `config/benchmark.yaml` 설정을 사용합니다. 검출 모델 설정은 `config/detection/`,
 ReID 모델 설정은 `config/reid/` 아래에서 관리합니다. 검출 후처리 조건은 검출 모델

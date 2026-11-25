@@ -334,7 +334,9 @@ struct ModelConfig {
     ModelInputConfig input;
     ModelPreprocessConfig preprocess;
     ModelPostprocessConfig postprocess;
-    std::string tile_model_path; // Opt-in own9e s1 tile artifact.
+    std::string tile_model_path; // Optional 384x480 tile artifact.
+    std::string sha256;
+    std::string tile_sha256;
 };
 
 // ReID 모델과 크롭·embedding 출력 계약. 모델별 YAML에서 검증된 값만 전달한다.

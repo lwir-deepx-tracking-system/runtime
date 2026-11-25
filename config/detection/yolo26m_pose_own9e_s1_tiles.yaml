@@ -3,7 +3,9 @@ path_base: ../..
 model:
   name: yolo26m_pose_own9e_s1_tiles
   path: models/imported/detect/yolo26m/yolo26m_pose_own9e_20261121_s1_bodybox_kpt_640x480.dxnn
+  sha256: aea2b454bc9c50c90e6d4c763fc604576064eaac09ecca9e8e268b6abb42c749
   tile_path: models/imported/detect/yolo26m/OWN9E_S1_E10_480x384.dxnn
+  tile_sha256: e6261f29eeb70863c1352d5cc89d2998d9abe06150317e874706eb3925234db0
 camera_input:
   opencv_type: CV_16UC1
   width: 640

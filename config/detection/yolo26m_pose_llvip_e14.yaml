@@ -1,0 +1,33 @@
+# model-bank 9b0ba5d staged pose export. See docs/ARCHITECTURE.md for DXNN artifacts.
+path_base: ../..
+model:
+  name: yolo26m_pose_llvip_e14
+  path: models/imported/detect/yolo26m/yolo26m_pose_llvip_e14_640x480.dxnn
+  sha256: 8580b9c9cf215614b6bcef12cb514f6ce03675f9c639c8fbef94e44d1bf20aa2
+camera_input:
+  opencv_type: CV_16UC1
+  width: 640
+  height: 480
+  clip_min: 0
+  clip_max: 65535
+  channel_mode: replicate_gray_to_rgb
+input:
+  width: 640
+  height: 480
+preprocess:
+  type: lwir_letterbox
+  resize: letterbox
+  normalize: false
+  pad_value: 114
+postprocess:
+  type: yolo26
+  output_format: split_head_pose
+  split_output_levels: 3
+  split_regression_bins: 1
+  split_class_score_activation: sigmoid
+  nms_mode: enabled
+  class_agnostic_nms: false
+  confidence_threshold: 0.001
+  nms_threshold: 0.7
+  num_classes: 1
+  class_names: ["person"]

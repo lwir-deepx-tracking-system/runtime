@@ -745,3 +745,24 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   `CMakeLists.txt`의 소스 경로 매크로 설명을 테스트 사용처에 맞췄다.
 - 기존 호스트 빌드 CTest 53/53 및 변경된 두 DXRT 소스의 SDK 헤더
   구문 검사를 통과했다. DXRT 링크, DXNN 로딩과 NPU 추론은 미검증이다.
+
+## 2026-11-25 model-bank 검출 모델 포팅
+
+- Runtime `3678a30`에 model-bank `9b0ba5d`의 검출 모델 계약을 반영했다.
+  `config/runtime.yaml`에 LWIR 검증 최고 후보와 LLVIP E14를 ID 14·15로
+  추가하고 `config/detection/`에 전체 프레임 두 프로필과 LWIR 타일
+  프로필을 추가했다. 타일은 별도 설정으로 선택한다. 기본 모델은 유지했다.
+- AppConfig에서 선택적 DXNN SHA-256과 타일 쌍을 파싱하고,
+  DetectorFactory에서 파일을 검사한다. 기존 own9e 프로필도 같은 방식으로
+  이전했다. 추론 전 짐벌 구동 변경은 이번 포팅에 포함하지 않았다.
+- CPU 빌드·CTest 53/53, DetectorFactory 구문 검사, diff 공백 검사 통과.
+  실제 DXNN 배치·NPU 로딩·추론·텐서 검증 및 전처리 수치 동등성은
+  확인하지 않았다. 다음 단계는 장치에 파일을 배치하고 검증하는 것이다.
+
+## Runtime 설정 예시 템플릿
+
+- `config/runtime.example.yaml`에 경로 기준, 카메라 복구, 측정 및 녹화,
+  검출·추적 카탈로그, NPU 투입, PC·웹 GUI와 제어의 설정 의존 관계를
+  주석으로 정리하고 README에서 연결했다. 예시 기본값은 헤드리스다.
+- 실제 AppConfig로 원본 예시 및 `config/local/` 상대 경로 복사본의
+  파싱을 확인했다. 하드웨어 실행은 이번 문서 작업의 검증 범위 밖이다.

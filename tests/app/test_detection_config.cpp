@@ -113,5 +113,11 @@ int main()
         tiled.postprocess.output_format != PostprocessOutputFormat::SplitHeadPose)
         return 11;
 
+    const auto lwir = load_model_config("config/detection/yolo26m_pose_lwir_val_best.yaml");
+    const auto lwir_tiles = load_model_config("config/detection/yolo26m_pose_lwir_val_best_tiles.yaml");
+    if (!lwir.tile_model_path.empty() || lwir_tiles.path != lwir.path ||
+        lwir_tiles.sha256 != lwir.sha256 || lwir_tiles.tile_sha256.size() != 64)
+        return 12;
+
     return 0;
 }

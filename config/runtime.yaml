@@ -79,6 +79,8 @@ detection_catalog:
   - {id: 11, name: 'YOLO26s NMS-free 640x640', config: config/detection/yolo26s_nmsfree.yaml}
   - {id: 12, name: 'YOLO26m pose near 640x480', config: config/detection/yolo26m_pose_near.yaml}
   - {id: 13, name: 'YOLO26m pose far 640x480', config: config/detection/yolo26m_pose_far.yaml}
+  - {id: 14, name: 'YOLO26m pose LWIR val-best 640x480', config: config/detection/yolo26m_pose_lwir_val_best.yaml}
+  - {id: 15, name: 'YOLO26m pose LLVIP E14 640x480', config: config/detection/yolo26m_pose_llvip_e14.yaml}
 
 
 # ============================================================
