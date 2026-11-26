@@ -57,7 +57,7 @@ public:
     // listen/client socket을 shutdown/close해 다른 thread의 poll/recv를 깨운다.
     void stop();
 
-    bool stop_requested() { return stopped(); }
+    bool stop_requested();
     // Call on the worker after errors/exit, before destroying the receiver.
-    void finish_session() { handler_->disconnected(); }
+    void finish_session();
 };

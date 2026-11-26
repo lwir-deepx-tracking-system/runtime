@@ -94,3 +94,7 @@ void LwirPreprocessor::pad(const cv::Mat& gray, cv::Mat& output) const
             dst[x] = cv::Vec3b(src[x], src[x], src[x]);
     }
 }
+
+int LwirPreprocessor::input_width() const noexcept  { return config_.input.width; }
+
+int LwirPreprocessor::input_height() const noexcept  { return config_.input.height; }

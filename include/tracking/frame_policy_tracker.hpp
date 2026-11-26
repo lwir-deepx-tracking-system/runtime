@@ -17,7 +17,7 @@ public:
     TrackingStep process(const DetectionResult& input) override;
     void reset() override;
     void reset_for_model_change() override;
-    int current_confirmation_frames() const override { return effective_confirmation_frames_.load(); }
+    int current_confirmation_frames() const override;
 private:
     CameraMotion estimate(const cv::Mat& raw);
     void update_confirmation(std::chrono::steady_clock::time_point captured_at);

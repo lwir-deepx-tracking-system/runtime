@@ -26,6 +26,6 @@ public:
     // 추론·후처리 오류는 Completion의 exception_ptr로 보고하고 대기는 계속한다.
     // 동시 대기자를 허용하며, 종료를 확인하지 못한 채 반환하거나 예외를 내보내면 안 된다.
     virtual void wait_idle() noexcept = 0;
-    virtual NpuFeedState npu_feed_state() const { return {}; }
-    virtual bool set_npu_feed(std::uint8_t) { return false; }
+    virtual NpuFeedState npu_feed_state() const;
+    virtual bool set_npu_feed(std::uint8_t);
 };

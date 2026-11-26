@@ -14,13 +14,13 @@
 class PositionMemory {
 public:
     explicit PositionMemory(const std::string& mode);
-    bool enabled() const { return static_cast<bool>(model_); }
+    bool enabled() const;
     void observe(int id, const Detection& detection, const KalmanState& state,
                  const KalmanState* prediction = nullptr);
     void lost(int id, KalmanState& state, const CameraMotion& first_warp,
               const CameraMotion& current_warp);
-    void forget(int id) { tracks_.erase(id); }
-    void reset() { tracks_.clear(); }
+    void forget(int id);
+    void reset();
 private:
     struct Entry {
         std::deque<std::array<double,68>> history;

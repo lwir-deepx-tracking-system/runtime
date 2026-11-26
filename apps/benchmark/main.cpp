@@ -1,6 +1,6 @@
 #include <string>
 
-#include "benchmark.hpp"
+#include "benchmark/benchmark.hpp"
 
 int main(int argc, char* argv[])
 {

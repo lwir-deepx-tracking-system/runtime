@@ -83,3 +83,8 @@ bool TrackingCommandHandler::handle(const GuiCommand& c, std::vector<GuiCommand>
     report(replies);
     return true;
 }
+
+TrackingCommandHandler::TrackingCommandHandler(GimbalCommandExecutor& executor, int poll_ms)
+    : executor_(executor), poll_ms_(poll_ms) {}
+
+int TrackingCommandHandler::poll_timeout_ms() const  { return poll_ms_; }

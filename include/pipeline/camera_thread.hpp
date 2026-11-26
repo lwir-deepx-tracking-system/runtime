@@ -59,8 +59,8 @@ public:
     void join();
     void request_stop();
     bool request_reopen();
-    bool finished() const { return finished_.load(); }
-    bool failed() const { return failed_.load(); }
-    const std::string& error_message() const { return error_message_; }
-    const std::vector<StageMetric>& metrics() const { return metrics_; }
+    bool finished() const;
+    bool failed() const;
+    const std::string& error_message() const;
+    const std::vector<StageMetric>& metrics() const;
 };

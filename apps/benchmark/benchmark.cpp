@@ -1,5 +1,5 @@
-#include "benchmark.hpp"
-#include "result_writer.hpp"
+#include "benchmark/benchmark.hpp"
+#include "benchmark/result_writer.hpp"
 #include "app/run_directory.hpp"
 
 #include "common/detection.hpp"

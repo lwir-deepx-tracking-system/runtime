@@ -179,3 +179,5 @@ TrackingStep FramePolicyTracker::process(const DetectionResult& input)
     }
     return result;
 }
+
+int FramePolicyTracker::current_confirmation_frames() const  { return effective_confirmation_frames_.load(); }

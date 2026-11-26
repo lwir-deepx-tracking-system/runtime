@@ -14,5 +14,5 @@ public:
     virtual void record_detection(std::uint64_t generation, const DetectionTiming& timing) noexcept = 0;
     // Tracking supplies the epoch only after acquiring the active tracker.
     virtual void bind_tracking(std::uint64_t, std::uint64_t, std::uint64_t, int,
-        std::chrono::steady_clock::time_point) noexcept {}
+        std::chrono::steady_clock::time_point) noexcept;
 };

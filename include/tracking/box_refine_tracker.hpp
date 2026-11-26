@@ -16,9 +16,9 @@ public:
     void reset() override;
     void reset_for_model_change() override;
     void set_camera_motion(const CameraMotion& motion) override;
-    void set_image_size(float width, float height) override { base_->set_image_size(width,height); }
-    void set_confirmation_frames(int frames) override { base_->set_confirmation_frames(frames); }
-    int current_confirmation_frames() const override { return base_->current_confirmation_frames(); }
+    void set_image_size(float width, float height) override;
+    void set_confirmation_frames(int frames) override;
+    int current_confirmation_frames() const override;
 private:
     struct SizeState {
         double log_w = 0, log_h = 0, dw = 0, dh = 0;

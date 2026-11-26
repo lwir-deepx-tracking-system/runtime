@@ -17,7 +17,7 @@ public:
     using Clock = std::chrono::steady_clock;
     using TimePoint = Clock::time_point;
     static constexpr std::size_t Capacity = 256, EventCapacity = 2048;
-    explicit FrameTelemetryCollector(IMeasurementSink* csv = nullptr) : csv_(csv) {}
+    explicit FrameTelemetryCollector(IMeasurementSink* csv = nullptr);
     void activate(std::uint64_t, int) noexcept override;
     void record(std::uint64_t, MetricStage, const StageMetric&) noexcept override;
     void record_detection(std::uint64_t, const DetectionTiming&) noexcept override;
@@ -32,8 +32,8 @@ public:
     void rtp_ready(std::uint32_t timestamp, TimePoint completed = Clock::now()) noexcept;
     std::optional<FrameTelemetrySnapshot> latest_before(std::uint64_t frame,
         std::uint64_t generation, std::uint64_t epoch, TimePoint now = Clock::now());
-    std::uint64_t dropped_events() const { return dropped_.load(); }
-    std::uint64_t expired_frames() const { return expired_; }
+    std::uint64_t dropped_events() const;
+    std::uint64_t expired_frames() const;
 private:
     enum class Kind { Activate, Stage, Detection, Bind, Marker };
     struct Event {

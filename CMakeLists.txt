@@ -64,6 +64,10 @@ if(LWIR_BUILD_CAPTURE OR LWIR_BUILD_BENCHMARK OR LWIR_BUILD_RUNTIME OR BUILD_TES
 endif()
 list(REMOVE_DUPLICATES LWIR_OPENCV_COMPONENTS)
 
+if(LWIR_NEEDS_VISION AND LWIR_ENABLE_DX_APP)
+    list(APPEND LWIR_OPENCV_COMPONENTS videoio)
+endif()
+
 if(LWIR_OPENCV_COMPONENTS)
     find_package(OpenCV REQUIRED COMPONENTS ${LWIR_OPENCV_COMPONENTS})
 endif()
@@ -97,6 +101,11 @@ endif()
 # ==============================================================================
 
 add_library(lwir_common
+    src/app/pipeline_requests.cpp
+    src/common/detection_timing.cpp
+    src/common/measurement_sink.cpp
+    src/common/pipeline_performance.cpp
+    src/common/stage_metric.cpp
     src/common/logger.cpp
     src/common/frame_telemetry_collector.cpp
     src/config/app_config.cpp
@@ -165,6 +174,14 @@ endif()
 
 if(LWIR_NEEDS_VISION)
     add_library(lwir_vision
+        src/detection/i_detection_pipeline.cpp
+        src/detection/i_preprocessor.cpp
+        src/detection/frame_feed_pipeline.cpp
+        src/detection/tiled_detection_pipeline.cpp
+        src/reid/reid_worker.cpp
+        src/tracking/camera_motion.cpp
+        src/tracking/tracker.cpp
+        src/tracking/tracking_policy.cpp
         src/detection/lwir_preprocessor.cpp
         src/detection/auto_model_selector.cpp
         src/reid/reid_pipeline.cpp
@@ -199,7 +216,11 @@ if(LWIR_NEEDS_VISION)
 
     if(LWIR_ENABLE_DX_APP)
         target_sources(lwir_vision PRIVATE
+            src/common/dxrt_inference_option.cpp
+            src/common/run_dir.cpp
+            src/inference/npu_core_reservation.cpp
             src/inference/dxrt_session.cpp
+            src/detection/i_postprocessor.cpp
             src/detection/dxrt_detection_pipeline.cpp
             src/detection/yolo_postprocessor_core.cpp
             src/detection/yolov8_postprocessor.cpp
@@ -230,6 +251,9 @@ endif()
 
 if(LWIR_NEEDS_RUNTIME_CORE)
     add_library(lwir_runtime_core
+        src/app/camera_watchdog.cpp
+        src/control/gimbal_position_estimate.cpp
+        src/control/waveshare_pose.cpp
         src/target/target_selector.cpp
         src/control/gimbal_device.cpp
         src/control/pid_controller.cpp
@@ -292,14 +316,22 @@ if(LWIR_BUILD_WEB_GUI AND LWIR_NEEDS_RUNTIME_CORE)
     add_subdirectory(apps/web_gui)
 endif()
 
+set(LWIR_RUNTIME_SOURCES
+    apps/runtime/runtime.cpp
+    apps/runtime/runtime_workers.cpp
+    apps/runtime/auto_model_coordinator.cpp
+    apps/runtime/encoder_cpu_monitor.cpp
+    apps/runtime/model_change_requests.cpp
+    apps/runtime/recording_archive.cpp
+)
+
 if(LWIR_BUILD_RUNTIME)
     add_executable(lwir_video_send tools/video_send.cpp)
     target_link_libraries(lwir_video_send PRIVATE lwir_runtime_core)
 
     add_executable(lwir_runtime
         apps/runtime/main.cpp
-        apps/runtime/runtime.cpp
-        apps/runtime/runtime_workers.cpp
+        ${LWIR_RUNTIME_SOURCES}
     )
 
     target_link_libraries(lwir_runtime
@@ -362,18 +394,16 @@ endif()
 if(BUILD_TESTING)
 
     add_executable(test_frame_feed tests/pipeline/test_frame_feed.cpp)
-    target_include_directories(test_frame_feed PRIVATE src/detection ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(test_frame_feed PRIVATE lwir_common ${OpenCV_LIBS})
+    target_link_libraries(test_frame_feed PRIVATE lwir_vision)
     add_test(NAME frame_feed COMMAND test_frame_feed)
 
     add_executable(test_tile_completion tests/pipeline/test_tile_completion.cpp)
-    target_include_directories(test_tile_completion PRIVATE src/detection)
     target_link_libraries(test_tile_completion PRIVATE lwir_vision)
     add_test(NAME tile_completion COMMAND test_tile_completion)
     set_tests_properties(tile_completion PROPERTIES TIMEOUT 10)
 
     add_executable(test_reid_worker tests/reid/test_reid_worker.cpp)
-    target_link_libraries(test_reid_worker PRIVATE lwir_common Threads::Threads)
+    target_link_libraries(test_reid_worker PRIVATE lwir_vision)
     add_test(NAME reid_worker COMMAND test_reid_worker)
     set_tests_properties(reid_worker PROPERTIES TIMEOUT 10)
 
@@ -389,14 +419,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_position_memory PRIVATE lwir_vision)
     add_test(NAME position_memory COMMAND test_position_memory)
 
-    add_executable(test_botsort tests/tracking/test_botsort.cpp
-        src/tracking/botsort_tracker.cpp src/tracking/kalman_filter.cpp
-        src/tracking/position_model.cpp src/tracking/position_memory.cpp)
-    target_compile_definitions(test_botsort PRIVATE
-        LWIR_POSITION_WEIGHT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/tracking/position_weights")
-    target_include_directories(test_botsort PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(test_botsort PRIVATE ${OpenCV_LIBS} Threads::Threads)
+    add_executable(test_botsort tests/tracking/test_botsort.cpp)
+    target_link_libraries(test_botsort PRIVATE lwir_vision)
     add_test(NAME botsort COMMAND test_botsort)
     add_executable(test_multitracker_config
         tests/tracking/test_multitracker_config.cpp)
@@ -456,11 +480,7 @@ if(BUILD_TESTING)
     add_executable(
         test_app_config
         tests/app/test_app_config.cpp
-        apps/runtime/runtime.cpp
-        apps/runtime/runtime_workers.cpp
-    )
-    target_include_directories(test_app_config PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/apps
+        ${LWIR_RUNTIME_SOURCES}
     )
     target_link_libraries(test_app_config PRIVATE
         lwir_app_support
@@ -476,7 +496,6 @@ if(BUILD_TESTING)
 
     add_executable(test_runtime_metrics_writer
         tests/app/test_runtime_metrics_writer.cpp)
-    target_include_directories(test_runtime_metrics_writer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
     target_link_libraries(test_runtime_metrics_writer PRIVATE lwir_app_support)
     add_executable(test_raw_recorder tests/app/test_raw_recorder.cpp)
     target_link_libraries(test_raw_recorder PRIVATE lwir_runtime_core)
@@ -484,18 +503,16 @@ if(BUILD_TESTING)
     add_test(NAME runtime_metrics_writer COMMAND test_runtime_metrics_writer)
 
     add_executable(test_runtime_shutdown tests/app/test_runtime_shutdown.cpp)
-    target_include_directories(test_runtime_shutdown PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
     target_link_libraries(test_runtime_shutdown PRIVATE lwir_app_support)
     add_test(NAME runtime_shutdown COMMAND test_runtime_shutdown)
 
     add_executable(test_runtime_console
         tests/app/test_runtime_console.cpp)
-    target_include_directories(test_runtime_console PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
     target_link_libraries(test_runtime_console PRIVATE lwir_app_support)
     add_test(NAME runtime_console COMMAND test_runtime_console)
 
-    add_executable(test_encoder_cpu_monitor tests/app/test_encoder_cpu_monitor.cpp)
-    target_include_directories(test_encoder_cpu_monitor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps)
+    add_executable(test_encoder_cpu_monitor tests/app/test_encoder_cpu_monitor.cpp
+        apps/runtime/encoder_cpu_monitor.cpp)
     target_link_libraries(test_encoder_cpu_monitor PRIVATE lwir_runtime_core)
     add_test(NAME encoder_cpu_monitor COMMAND test_encoder_cpu_monitor)
 
@@ -521,7 +538,7 @@ if(BUILD_TESTING)
         apps/benchmark/result_writer.cpp
     )
     target_include_directories(test_benchmark_result_writer PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/apps/benchmark
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
     add_test(NAME benchmark_result_writer COMMAND test_benchmark_result_writer)
 
@@ -616,7 +633,8 @@ if(BUILD_TESTING)
     else()
         add_executable(test_postprocessor_host
             tests/detection/test_postprocessor.cpp
-            src/detection/yolo_postprocessor_core.cpp)
+            src/detection/yolo_postprocessor_core.cpp
+            src/detection/i_postprocessor.cpp)
         target_include_directories(test_postprocessor_host PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs
             ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -697,6 +715,7 @@ if(BUILD_TESTING)
     add_executable(
         test_bytetrack
         tests/tracking/test_bytetrack.cpp
+        tests/tracking/detection_csv.cpp
     )
     target_link_libraries(test_bytetrack PRIVATE lwir_vision)
     add_test(NAME bytetrack COMMAND test_bytetrack)
@@ -723,6 +742,8 @@ if(BUILD_TESTING)
     add_executable(
         bench_mot17
         tests/tracking/bench_mot17.cpp
+        tests/tracking/detection_csv.cpp
+        tests/tracking/tracking_metrics.cpp
     )
     target_link_libraries(bench_mot17 PRIVATE lwir_vision)
 

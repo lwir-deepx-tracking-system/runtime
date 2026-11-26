@@ -15,8 +15,7 @@ class PidController {
     double previous_error_ = 0, integral_ = 0, derivative_ = 0;
     double requested_ = 0, applied_ = 0;
 public:
-    PidController(PidAxisConfig config, AutoControllerType type, double max_output)
-        : config_(config), type_(type), max_output_(max_output) {}
+    PidController(PidAxisConfig config, AutoControllerType type, double max_output);
     PidOutput calculate(double error, double dt_seconds);
     // Command actually submitted after common SPD conversion and rate limiting.
     // This is command-space feedback, never motor/encoder feedback.

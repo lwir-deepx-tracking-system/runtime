@@ -4,6 +4,9 @@
 
 namespace app_shutdown
 {
+volatile std::sig_atomic_t requested = 0;
+volatile std::sig_atomic_t discard_results = 0;
+
 // 프로세스 단위 종료 신호를 설치하고 등록 실패 시 이미 바꾼 핸들러를 복구한다.
 SignalScope::SignalScope()
 {
@@ -31,4 +34,19 @@ SignalScope::~SignalScope()
         std::signal(signals_[installed_], previous_[installed_]);
     }
 }
-} // namespace app_shutdown
+
+void reset()
+{
+    requested       = 0;
+    discard_results = 0;
+}
+
+void handle_signal(int signal)
+{
+    if(signal == SIGQUIT) discard_results = 1;
+    requested = 1; // 이후 SIGINT/SIGTERM을 받아도 SIGQUIT의 폐기 요청은 유지한다.
+}
+
+void request_stop() { requested = 1; }
+
+}  // namespace app_shutdown

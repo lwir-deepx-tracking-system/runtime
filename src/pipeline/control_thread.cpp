@@ -102,3 +102,9 @@ void ControlThread::run()
     if (executor_) executor_->shutdown();
     Logger::info("[ControlThread] 종료");
 }
+
+bool ControlThread::failed() const { return failed_.load(); }
+
+const std::string& ControlThread::error_message() const { return error_message_; }
+
+const std::vector<StageMetric>& ControlThread::metrics() const { return metrics_; }

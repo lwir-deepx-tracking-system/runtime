@@ -766,3 +766,33 @@ ID 평가, Phase 2 Runtime 전체 기능, Phase 3 PC GUI, Phase 4 LAN은 남았�
   주석으로 정리하고 README에서 연결했다. 예시 기본값은 헤드리스다.
 - 실제 AppConfig로 원본 예시 및 `config/local/` 상대 경로 복사본의
   파싱을 확인했다. 하드웨어 실행은 이번 문서 작업의 검증 범위 밖이다.
+
+## 2026-11-26 헤더와 구현 파일 분리
+
+- `refactor/pipeline`, 시작 HEAD `f361b67185a1e970d9501b4e8017459b596afab2`.
+  작업 전 Git 상태는 깨끗했다. 작업 후에는 이 변경만 작업 트리에 있다.
+- `include/`, `apps/runtime/`, `src/detection/`, `tests/tracking/`의
+  헤더 53개에서 비템플릿 함수 본문을 대응하는 CPP로 옮겼다. CPP 26개를
+  추가하고 기존 CPP에도 구현을 배치했다. 템플릿, 타입 선언, 컴파일 타임
+  상수는 헤더에 유지했다. `CMakeLists.txt`에 새 소스와 테스트 링크를 반영했다.
+- 웹 GUI 활성 및 비활성 호스트 빌드가 모두 성공했다. 웹 GUI 활성 빌드에
+  `ctest --output-on-failure`를 실행해 53/53이 통과했다. 루프백 소켓
+  테스트는 샌드박스 밖에서 실행했고, 호스트에 없던 빌드 의존성과
+  `x264enc`는 검증용 임시 경로에서 사용했다. `git diff --check`도 통과했다.
+- `LWIR_ENABLE_DX_APP=ON`, `BUILD_TESTING=OFF` 구성의 호스트 컴파일과
+  링크가 성공했다. DXNN 로딩·추론·장치 텐서 검증·NPU 벤치마크, 카메라·짐벌
+  실기와 systemd watchdog 활성 구성은 이번 작업에서 미검증이다.
+- 다음 검증 단계는 Orange Pi에서 실제 DXNN 로딩과 추론을 확인하는 것이다.
+
+## 2026-11-26 헤더 경로 통합
+
+- `refactor/pipeline`의 `f361b67`에서 위 구현 분리 변경이 스테이징된
+  상태로 시작했다. 남은 헤더 14개를 `include/{benchmark,capture,runtime,web_gui,tests/tracking}/`으로
+  옮겼다. 탐지 헤더 두 개는 작업 시작 시 이미 `include/detection/`에 있었다.
+- 이동한 헤더를 참조하는 소스와 테스트, `CMakeLists.txt`의 검색 경로를
+  갱신했다. 구현 분리와 경로 통합을 함께 커밋한다.
+- 웹 GUI 활성 호스트 빌드와 DXRT 활성 컴파일·링크에 성공했다.
+  웹 GUI 구성에서 `ctest --output-on-failure` 53/53 통과.
+  루프백 테스트는 샌드박스 밖에서 실행했다.
+- 실제 장치에서 DXNN 로딩·추론·텐서 검증 및 NPU 벤치마크는 미검증이다.
+  다음 장치 검증에서 이 항목을 확인한다.

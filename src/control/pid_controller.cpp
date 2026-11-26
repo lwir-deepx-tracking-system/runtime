@@ -59,3 +59,6 @@ PidOutput PidController::calculate(double error, double dt_seconds)
     initialized_ = true;
     return output;
 }
+
+PidController::PidController(PidAxisConfig config, AutoControllerType type, double max_output)
+    : config_(config), type_(type), max_output_(max_output) {}

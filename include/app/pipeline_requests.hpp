@@ -66,26 +66,24 @@ class IPipelineRequests
     virtual ~IPipelineRequests()                                          = default;
     virtual std::uint32_t        model_count() const                      = 0;
     virtual std::uint32_t        tracker_count() const                    = 0;
-    virtual PipelineCatalogItem model_info(std::uint32_t) const { return {}; }
-    virtual PipelineCatalogItem tracker_info(std::uint32_t) const { return {}; }
-    virtual PipelineTrackerPolicy tracker_policy() const { return {}; }
-    virtual PipelineAutoDetection auto_detection() const { return {}; }
-    virtual bool set_auto_detection(bool) { return false; }
-    virtual bool set_auto_detection_thresholds(float,float) { return false; }
-    virtual NpuFeedState npu_feed_state() const { return {}; }
-    virtual bool set_npu_feed(std::uint8_t) { return false; }
-    virtual bool request_camera_reopen() { return false; }
-    virtual bool recording_available() const { return false; }
-    virtual PipelineRecordingStatus recording_status() const { return {}; }
-    virtual bool start_recording(const std::string&) { return false; }
-    virtual bool stop_recording() { return false; }
-    virtual std::string latest_recording() const { return {}; }
-    virtual std::vector<std::string> list_recordings() const { return {}; }
+    virtual PipelineCatalogItem model_info(std::uint32_t) const;
+    virtual PipelineCatalogItem tracker_info(std::uint32_t) const;
+    virtual PipelineTrackerPolicy tracker_policy() const;
+    virtual PipelineAutoDetection auto_detection() const;
+    virtual bool set_auto_detection(bool);
+    virtual bool set_auto_detection_thresholds(float,float);
+    virtual NpuFeedState npu_feed_state() const;
+    virtual bool set_npu_feed(std::uint8_t);
+    virtual bool request_camera_reopen();
+    virtual bool recording_available() const;
+    virtual PipelineRecordingStatus recording_status() const;
+    virtual bool start_recording(const std::string&);
+    virtual bool stop_recording();
+    virtual std::string latest_recording() const;
+    virtual std::vector<std::string> list_recordings() const;
     virtual PipelineRecordingFileChunk read_recording_file(
-        const std::string&, std::uint8_t, std::uint64_t, std::uint16_t) const { return {}; }
+        const std::string&, std::uint8_t, std::uint64_t, std::uint16_t) const;
     virtual PipelineChangeTicket request_model_change(std::uint32_t id)   = 0;
     virtual PipelineChangeTicket request_tracker_change(std::uint32_t id) = 0;
-    virtual PipelineChangeTicket request_policy_change(const TrackerPolicyUpdate&) {
-        return {PipelineResult::NotReady, {}};
-    }
+    virtual PipelineChangeTicket request_policy_change(const TrackerPolicyUpdate&);
 };

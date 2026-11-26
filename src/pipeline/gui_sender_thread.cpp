@@ -92,3 +92,7 @@ void GuiSenderThread::run()
     sender_.stop();
     Logger::info("[GuiSenderThread] stopped");
 }
+
+bool GuiSenderThread::failed() const { return failed_.load(); }
+
+const std::string& GuiSenderThread::error_message() const { return error_message_; }

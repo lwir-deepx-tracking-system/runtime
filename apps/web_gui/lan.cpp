@@ -1,4 +1,4 @@
-#include "lan.hpp"
+#include "web_gui/lan.hpp"
 
 #include <cstring>
 #include <memory>

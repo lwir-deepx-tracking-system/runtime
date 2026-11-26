@@ -25,7 +25,7 @@ public:
     void process(const cv::Mat& input, cv::Mat& output, PreprocessContext& context) const override;
 
     // runner가 기대하는 최종 tensor 크기를 노출한다.
-    int input_width() const noexcept override { return config_.input.width; }
-    int input_height() const noexcept override { return config_.input.height; }
+    int input_width() const noexcept override;
+    int input_height() const noexcept override;
 
 };

@@ -21,7 +21,7 @@ struct PreprocessContext
 class IPreprocessor
 {
 public:
-    explicit IPreprocessor(const ModelConfig& config) : config_(config) {}
+    explicit IPreprocessor(const ModelConfig& config);
     virtual ~IPreprocessor() = default;
 
     virtual void process(

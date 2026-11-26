@@ -350,3 +350,7 @@ void GuiReceiver::stop()
     close_socket(client);
     close_socket(listener);
 }
+
+bool GuiReceiver::stop_requested() { return stopped(); }
+
+void GuiReceiver::finish_session() { handler_->disconnected(); }

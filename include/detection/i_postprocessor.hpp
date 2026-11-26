@@ -11,7 +11,7 @@
 class IPostprocessor
 {
 public:
-    explicit IPostprocessor(const ModelConfig& config) : config_(config) {}
+    explicit IPostprocessor(const ModelConfig& config);
     virtual ~IPostprocessor() = default;
 
     virtual std::vector<Detection> process(

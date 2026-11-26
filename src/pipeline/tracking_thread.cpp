@@ -167,3 +167,9 @@ void TrackingThread::run()
     gui_output_queue_.close();
     Logger::info("[TrackingThread] 종료");
 }
+
+bool TrackingThread::failed() const { return failed_.load(); }
+
+const std::string& TrackingThread::error_message() const { return error_message_; }
+
+const std::vector<StageMetric>& TrackingThread::metrics() const { return metrics_; }

@@ -74,3 +74,9 @@ TrackingStep PostReidTracker::process(const DetectionResult& input)
             std::to_string(d.stable_id)+","+std::to_string(d.similarity));
     return result;
 }
+
+void PostReidTracker::set_confirmation_frames(int frames)  { base_->set_confirmation_frames(frames); }
+
+void PostReidTracker::set_camera_motion(const CameraMotion& motion)  { base_->set_camera_motion(motion); }
+
+void PostReidTracker::set_image_size(float width, float height)  { base_->set_image_size(width, height); }

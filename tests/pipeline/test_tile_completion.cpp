@@ -1,4 +1,4 @@
-#include "tiled_detection_pipeline.hpp"
+#include "detection/tiled_detection_pipeline.hpp"
 
 #include <stdexcept>
 

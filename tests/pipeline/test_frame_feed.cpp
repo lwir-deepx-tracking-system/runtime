@@ -1,4 +1,4 @@
-#include "frame_feed_pipeline.hpp"
+#include "detection/frame_feed_pipeline.hpp"
 
 #include <chrono>
 #include <memory>

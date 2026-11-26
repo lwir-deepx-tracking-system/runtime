@@ -3,8 +3,8 @@
 #include <stdexcept>
 #include <fstream>
 #include <openssl/evp.h>
-#include "tiled_detection_pipeline.hpp"
-#include "frame_feed_pipeline.hpp"
+#include "detection/tiled_detection_pipeline.hpp"
+#include "detection/frame_feed_pipeline.hpp"
 #include <utility>
 
 #include "detection/dxrt_detection_pipeline.hpp"

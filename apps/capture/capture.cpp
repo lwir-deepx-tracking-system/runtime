@@ -1,4 +1,4 @@
-#include "capture.hpp"
+#include "capture/capture.hpp"
 
 #include "camera/camera.hpp"
 #include "common/frame.hpp"

@@ -43,23 +43,14 @@ public:
     ) = 0;
 
     // Frame-aware path used by both applications. Legacy direct callers use track().
-    virtual TrackingStep process(const DetectionResult& input)
-    {
-        TrackingStep result;
-        const auto started = std::chrono::steady_clock::now();
-        result.tracks = track(input.detections);
-        result.association_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - started).count();
-        result.raw_tracks = result.tracks;
-        return result;
-    }
+    virtual TrackingStep process(const DetectionResult& input);
 
     // Tracker가 유지하는 내부 상태를 초기화한다.
     virtual void reset() = 0;
-    virtual void reset_for_model_change() { reset(); }
-    virtual void set_camera_motion(const CameraMotion&) {}
-    virtual void set_image_size(float, float) {}
-    virtual void set_confirmation_frames(int) {}
+    virtual void reset_for_model_change();
+    virtual void set_camera_motion(const CameraMotion&);
+    virtual void set_image_size(float, float);
+    virtual void set_confirmation_frames(int);
     // A frame policy may adjust this at runtime; zero means use catalog config.
-    virtual int current_confirmation_frames() const { return 0; }
+    virtual int current_confirmation_frames() const;
 };

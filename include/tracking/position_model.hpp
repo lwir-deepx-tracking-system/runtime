@@ -15,9 +15,9 @@ public:
     };
     explicit PositionModel(const std::string& path);
     std::array<double,4> step(const std::array<double,68>& input, State& state) const;
-    bool no_edges() const { return flags_ & 1u; }
-    bool warp_fix() const { return flags_ & 2u; }
-    bool box_mode_targets() const { return flags_ & 4u; }
+    bool no_edges() const;
+    bool warp_fix() const;
+    bool box_mode_targets() const;
 private:
     std::uint32_t kind_ = 0, flags_ = 0;
     std::vector<double> weights_;

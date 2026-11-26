@@ -124,3 +124,5 @@ std::uint64_t TrackerManager::active_epoch() const
     std::lock_guard<std::mutex> lock(active_mutex_);
     return active_.epoch;
 }
+
+bool TrackerManager::contains(int id) const { return catalog_.count(id) != 0; }

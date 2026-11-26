@@ -120,3 +120,5 @@ void GuiMetadataSender::close()
         metadata_address_size_ = 0;
     }
 }
+
+GuiMetadataSender::GuiMetadataSender(GuiMetadataConfig config) : metadata_config_(std::move(config)) {}

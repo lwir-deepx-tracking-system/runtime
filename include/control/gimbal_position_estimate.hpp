@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <chrono>
 
 // Display-only percentage estimate from successfully submitted commands.
@@ -9,27 +8,12 @@ class GimbalPositionEstimate {
 public:
     using Clock = std::chrono::steady_clock;
 
-    void advance(Clock::time_point now)
-    {
-        if (last_ != Clock::time_point{} && speed_ > 0) {
-            const double elapsed = std::max(0.0, std::chrono::duration<double>(now - last_).count());
-            const double units = elapsed * (std::max(5, speed_) / 5.0);
-            pan_ = std::clamp(pan_ + x_ * units * (100.0 / 40), 0.0, 100.0);
-            tilt_ = std::clamp(tilt_ + y_ * units * (100.0 / 14), 0.0, 100.0);
-        }
-        last_ = now;
-    }
+    void advance(Clock::time_point now);
 
-    void command(Clock::time_point now, int x, int y, int speed)
-    {
-        advance(now);
-        x_ = x;
-        y_ = y;
-        speed_ = speed;
-    }
+    void command(Clock::time_point now, int x, int y, int speed);
 
-    double pan() const { return pan_; }
-    double tilt() const { return tilt_; }
+    double pan() const;
+    double tilt() const;
 
 private:
     Clock::time_point last_{};

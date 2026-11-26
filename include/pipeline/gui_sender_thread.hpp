@@ -40,6 +40,6 @@ public:
 
     // TrackingThread가 queue를 닫고 남은 결과가 처리될 때까지 기다린다.
     void join();
-    bool failed() const { return failed_.load(); }
-    const std::string& error_message() const { return error_message_; }
+    bool failed() const;
+    const std::string& error_message() const;
 };

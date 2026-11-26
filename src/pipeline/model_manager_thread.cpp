@@ -268,3 +268,7 @@ void ModelManagerThread::run()
     resident_inactive_.reset();
     Logger::info("[ModelManagerThread] stopped");
 }
+
+bool ModelManagerThread::failed() const { return failed_.load(); }
+
+int ModelManagerThread::active_model_id() const { return active_model_id_.load(); }

@@ -58,11 +58,8 @@ public:
 
     void start();
     void join();
-    bool failed() const { return failed_.load(); }
-    const std::string& error_message() const { return error_message_; }
-    const std::vector<StageMetric>& metrics() const { return metrics_; }
-    const std::vector<DetectionTiming>& detection_timings() const
-    {
-        return detection_timings_;
-    }
+    bool failed() const;
+    const std::string& error_message() const;
+    const std::vector<StageMetric>& metrics() const;
+    const std::vector<DetectionTiming>& detection_timings() const;
 };

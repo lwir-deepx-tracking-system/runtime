@@ -35,7 +35,7 @@ public:
         bool measurement_enabled, IMeasurementSink* measurements = nullptr);
     void start();
     void join();
-    bool failed() const { return failed_.load(); }
-    const std::string& error_message() const { return error_message_; }
-    const std::vector<StageMetric>& metrics() const { return metrics_; }
+    bool failed() const;
+    const std::string& error_message() const;
+    const std::vector<StageMetric>& metrics() const;
 };

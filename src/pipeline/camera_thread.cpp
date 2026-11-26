@@ -203,3 +203,11 @@ void CameraThread::run()
     finished_.store(true);
     Logger::info("[CameraThread] 종료");
 }
+
+bool CameraThread::finished() const { return finished_.load(); }
+
+bool CameraThread::failed() const { return failed_.load(); }
+
+const std::string& CameraThread::error_message() const { return error_message_; }
+
+const std::vector<StageMetric>& CameraThread::metrics() const { return metrics_; }

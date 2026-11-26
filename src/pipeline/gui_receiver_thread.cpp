@@ -72,3 +72,7 @@ void GuiReceiverThread::run()
     receiver_.finish_session();
     Logger::info("[GuiReceiverThread] 종료");
 }
+
+bool GuiReceiverThread::failed() const { return failed_.load(); }
+
+const std::string& GuiReceiverThread::error_message() const { return error_message_; }

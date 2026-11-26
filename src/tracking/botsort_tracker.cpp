@@ -315,3 +315,9 @@ TrackingStep BotSortTracker::associate(const std::vector<Detection>& detections,
     result.association_ms=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
     return result;
 }
+
+void BotSortTracker::set_confirmation_frames(int frames)  { config_.confirmation_frames = frames; }
+
+void BotSortTracker::set_camera_motion(const CameraMotion& motion)  { motion_ = motion; }
+
+void BotSortTracker::set_image_size(float width, float height)  { width_ = width; height_ = height; }

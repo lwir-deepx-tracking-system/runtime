@@ -30,9 +30,9 @@ enum class KalmanFormat
 class KalmanFilter
 {
 public:
-    explicit KalmanFilter(KalmanFormat format = KalmanFormat::XYAH) : format_(format) {}
+    explicit KalmanFilter(KalmanFormat format = KalmanFormat::XYAH);
 
-    KalmanFormat format() const { return format_; }
+    KalmanFormat format() const;
 
     // 첫 검출로 새 Track의 상태를 만든다.
     KalmanState initiate(const KalmanMeasurement& z) const;

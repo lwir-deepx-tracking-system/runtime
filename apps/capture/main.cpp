@@ -1,6 +1,6 @@
 #include <string>
 
-#include "capture.hpp"
+#include "capture/capture.hpp"
 
 int main(int argc, char* argv[])
 {

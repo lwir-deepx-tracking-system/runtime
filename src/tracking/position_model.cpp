@@ -109,3 +109,9 @@ std::array<double,4> PositionModel::step(const std::array<double,68>& input,Stat
         throw std::runtime_error("Position model produced nonfinite output");
     return output;
 }
+
+bool PositionModel::no_edges() const { return flags_ & 1u; }
+
+bool PositionModel::warp_fix() const { return flags_ & 2u; }
+
+bool PositionModel::box_mode_targets() const { return flags_ & 4u; }

@@ -118,3 +118,9 @@ void PositionMemory::lost(int id,KalmanState& state,const CameraMotion& first_wa
         p.previous=p.plain;
     }catch(const std::exception&) {p.missed=16;}
 }
+
+bool PositionMemory::enabled() const { return static_cast<bool>(model_); }
+
+void PositionMemory::forget(int id) { tracks_.erase(id); }
+
+void PositionMemory::reset() { tracks_.clear(); }

@@ -164,3 +164,7 @@ void KalmanFilter::update(KalmanState& s, const KalmanMeasurement& z, double noi
 
     s.covariance = new_p;
 }
+
+KalmanFilter::KalmanFilter(KalmanFormat format) : format_(format) {}
+
+KalmanFormat KalmanFilter::format() const { return format_; }

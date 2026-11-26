@@ -1,7 +1,7 @@
 #include "gui/web_server.hpp"
 #include "config/app_config.hpp"
 #include "common/logger.hpp"
-#include "replay.hpp"
+#include "web_gui/replay.hpp"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>

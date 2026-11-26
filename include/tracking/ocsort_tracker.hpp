@@ -83,9 +83,9 @@ public:
     void reset() override;
 
     // 다음 track() 호출에 적용할 카메라 움직임(직전 프레임 → 현재 프레임). track()이 끝나면 지워진다.
-    void set_camera_motion(const CameraMotion& motion) { camera_motion_ = motion; }
+    void set_camera_motion(const CameraMotion& motion);
 
-    const OCSortConfig& config() const { return config_; }
+    const OCSortConfig& config() const;
 
 private:
     OCSortConfig config_;

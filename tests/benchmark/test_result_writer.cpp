@@ -1,4 +1,4 @@
-#include "result_writer.hpp"
+#include "benchmark/result_writer.hpp"
 
 #include <algorithm>
 #include <chrono>

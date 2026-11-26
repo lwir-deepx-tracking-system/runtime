@@ -8,7 +8,7 @@ struct GimbalDemand {
     double speed = 0;
     double error_x = 0, error_y = 0; // image coordinates: +Y down
     PidOutput pid_x, pid_y; // signed outputs in image coordinates
-    bool stop() const { return x == 0 && y == 0; }
+    bool stop() const;
 };
 
 // Per-target controller state, independent of TCP, Serial and wall-clock time.
@@ -22,9 +22,7 @@ class AutoTrackingController {
     FrameMetadata previous_{};
     GimbalDemand cached_{};
 public:
-    explicit AutoTrackingController(AutoControlConfig config)
-        : config_(config), x_(config.pid_x, config.controller, config.speed_max),
-          y_(config.pid_y, config.controller, config.speed_max) {}
+    explicit AutoTrackingController(AutoControlConfig config);
     bool valid(const Track&, int width, int height) const;
     GimbalDemand calculate(const Track&, int width, int height,
                           const FrameMetadata&, std::uint64_t model_generation = 0);

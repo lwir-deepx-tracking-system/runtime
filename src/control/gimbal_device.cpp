@@ -133,3 +133,9 @@ std::unique_ptr<IGimbalDevice> GimbalDeviceFactory::create(const GimbalConfig& c
 {
     return std::make_unique<WaveshareGimbal>(config);
 }
+
+void IGimbalDevice::move_with_speed(int, int, int) { throw std::logic_error("Variable gimbal speed unsupported"); }
+
+void IGimbalDevice::start_pose_feedback() {}
+
+std::optional<GimbalPose> IGimbalDevice::read_pose() { return std::nullopt; }

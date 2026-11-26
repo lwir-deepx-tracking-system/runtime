@@ -18,7 +18,7 @@
 
 #include "config/app_config.hpp"
 
-#include "tracking_metrics.hpp"
+#include "tests/tracking/tracking_metrics.hpp"
 
 // MOT17 공개 데이터로 ByteTrack 실행 (분석 도구, ctest에는 등록하지 않음)
 //

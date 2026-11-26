@@ -1,6 +1,6 @@
 #pragma once
 
-#include "video.hpp"
+#include "web_gui/video.hpp"
 
 #include <filesystem>
 #include <nlohmann/json.hpp>

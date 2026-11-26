@@ -754,3 +754,7 @@ std::vector<Track> OCSortTracker::track(const std::vector<Detection>& detections
     trackers_ = std::move(alive);
     return out;
 }
+
+void OCSortTracker::set_camera_motion(const CameraMotion& motion) { camera_motion_ = motion; }
+
+const OCSortConfig& OCSortTracker::config() const { return config_; }

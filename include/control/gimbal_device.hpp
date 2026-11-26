@@ -14,10 +14,10 @@ public:
     virtual ~IGimbalDevice() = default;
     virtual void move(int x_direction, int y_direction) = 0;
     // Implementations without variable speed must reject AUTO, never silently ignore SPD.
-    virtual void move_with_speed(int, int, int) { throw std::logic_error("Variable gimbal speed unsupported"); }
+    virtual void move_with_speed(int, int, int);
     virtual void stop() = 0;
-    virtual void start_pose_feedback() {}
-    virtual std::optional<GimbalPose> read_pose() { return std::nullopt; }
+    virtual void start_pose_feedback();
+    virtual std::optional<GimbalPose> read_pose();
     virtual void home() = 0; // Request only; does not establish physical completion.
 };
 

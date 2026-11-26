@@ -237,3 +237,14 @@ void DetectionThread::run()
     output_queue_.close();
     Logger::info("[DetectionThread] 종료");
 }
+
+bool DetectionThread::failed() const { return failed_.load(); }
+
+const std::string& DetectionThread::error_message() const { return error_message_; }
+
+const std::vector<StageMetric>& DetectionThread::metrics() const { return metrics_; }
+
+const std::vector<DetectionTiming>& DetectionThread::detection_timings() const
+{
+    return detection_timings_;
+}

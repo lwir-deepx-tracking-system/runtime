@@ -82,7 +82,7 @@ public:
     void wait_until_initialized();
     void join();
 
-    bool failed() const { return failed_.load(); }
-    int active_model_id() const { return active_model_id_.load(); }
+    bool failed() const;
+    int active_model_id() const;
     std::string error_message() const;
 };

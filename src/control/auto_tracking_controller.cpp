@@ -74,3 +74,9 @@ GimbalDemand AutoTrackingController::calculate(const Track& t, int width, int he
     previous_ = metadata; cached_ = d;
     return d;
 }
+
+bool GimbalDemand::stop() const { return x == 0 && y == 0; }
+
+AutoTrackingController::AutoTrackingController(AutoControlConfig config)
+    : config_(config), x_(config.pid_x, config.controller, config.speed_max),
+      y_(config.pid_y, config.controller, config.speed_max) {}

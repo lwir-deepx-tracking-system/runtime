@@ -19,18 +19,10 @@ class SignalScope
     SignalScope(const SignalScope &)            = delete;
     SignalScope &operator=(const SignalScope &) = delete;
 };
-inline volatile std::sig_atomic_t requested       = 0;
-inline volatile std::sig_atomic_t discard_results = 0;
+extern volatile std::sig_atomic_t requested;
+extern volatile std::sig_atomic_t discard_results;
 
-inline void reset()
-{
-    requested       = 0;
-    discard_results = 0;
-}
-inline void handle_signal(int signal)
-{
-    if(signal == SIGQUIT) discard_results = 1;
-    requested = 1; // 이후 SIGINT/SIGTERM을 받아도 SIGQUIT의 폐기 요청은 유지한다.
-}
-inline void request_stop() { requested = 1; } // 콘솔 quit는 SIGINT와 같은 저장 종료다.
+void reset();
+void handle_signal(int signal);
+void request_stop(); // 콘솔 quit는 SIGINT와 같은 저장 종료다.
 } // namespace app_shutdown

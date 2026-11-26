@@ -386,3 +386,11 @@ std::unique_ptr<IGuiCommandHandler> GuiCommandHandlerFactory::create(GuiCommandH
     } else throw std::runtime_error("Unsupported GUI command handler");
     return std::make_unique<PipelineCommandHandler>(std::move(handler), pipeline_requests);
 }
+
+void IGuiCommandHandler::connected() {}
+
+void IGuiCommandHandler::disconnected() {}
+
+void IGuiCommandHandler::tick(std::vector<GuiCommand>& replies) { replies.clear(); }
+
+int IGuiCommandHandler::poll_timeout_ms() const { return std::numeric_limits<int>::max(); }

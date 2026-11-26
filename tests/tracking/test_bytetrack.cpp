@@ -11,7 +11,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "detection_csv.hpp"
+#include "tests/tracking/detection_csv.hpp"
 
 // 사용법: test_bytetrack [data 폴더]
 // 인자가 없으면 tests/tracking/data/ 폴더를 사용한다.

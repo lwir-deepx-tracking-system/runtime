@@ -11,7 +11,7 @@ class FrameTelemetryCollector;
 // Owns the metadata UDP destination, socket and wire encoding.
 class GuiMetadataSender {
 public:
-    explicit GuiMetadataSender(GuiMetadataConfig config) : metadata_config_(std::move(config)) {}
+    explicit GuiMetadataSender(GuiMetadataConfig config);
     ~GuiMetadataSender();
     GuiMetadataSender(const GuiMetadataSender&) = delete;
     GuiMetadataSender& operator=(const GuiMetadataSender&) = delete;

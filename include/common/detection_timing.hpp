@@ -48,32 +48,16 @@ struct DetectionTiming
     double cpu_task_us = 0.0;
     bool cpu_task_valid = false;
 
-    double preprocess_ms() const
-    {
-        return elapsed_ms(preprocess_started_at, preprocess_finished_at);
-    }
+    double preprocess_ms() const;
 
     // dxrun Latency의 비교 대상으로 RunAsync 직전부터 callback 진입까지 측정한다.
-    double latency_ms() const
-    {
-        return elapsed_ms(inference_started_at, inference_finished_at);
-    }
+    double latency_ms() const;
 
     // DXRT profiler가 측정한 순수 NPU core 실행 시간이다.
-    double npu_processing_ms() const
-    {
-        return npu_processing_duration_ms;
-    }
+    double npu_processing_ms() const;
 
-    double postprocess_ms() const
-    {
-        return elapsed_ms(postprocess_started_at, postprocess_finished_at);
-    }
+    double postprocess_ms() const;
 
 private:
-    static double elapsed_ms(TimePoint started_at, TimePoint finished_at)
-    {
-        return std::chrono::duration<double, std::milli>(
-            finished_at - started_at).count();
-    }
+    static double elapsed_ms(TimePoint started_at, TimePoint finished_at);
 };

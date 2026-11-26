@@ -83,7 +83,7 @@ private:
     void activate(bytetrack::STrack& track);
     void apply_detection(bytetrack::STrack& track, const bytetrack::STrack& det);
     // OC-SORT 기능 중 하나라도 켜져 있는지 (관측 기록 여부)
-    bool observation_centric() const { return config_.oru || config_.ocm_weight > 0.0F || config_.ocr; }
+    bool observation_centric() const;
     // 관측 기록에 박스를 추가하고 오래된 기록을 정리한다.
     void record_observation(bytetrack::STrack& track, const std::array<float, 4>& tlwh) const;
     // ORU: 저장한 Lost 직전 상태에서 가상 관측으로 놓친 구간을 다시 계산한다 (새 검출 update 직전 상태까지).
@@ -104,19 +104,15 @@ public:
 
     // ByteTrack 내부 상태를 초기화한다.
     void reset() override;
-    void set_confirmation_frames(int frames) override { config_.confirmation_frames = frames; }
+    void set_confirmation_frames(int frames) override;
 
     // 다음 track() 호출에 적용할 카메라 움직임(직전 프레임 → 현재 프레임)을 지정한다.
     // track()이 끝나면 지워지므로 프레임마다 다시 지정한다. 호출하지 않으면 보정하지 않는다.
-    void set_camera_motion(const CameraMotion& motion) override { camera_motion_ = motion; }
+    void set_camera_motion(const CameraMotion& motion) override;
 
     // 영상 크기를 알려 준다. 지정하면 놓친 Track의 예측 박스가 화면 밖으로 나갔을 때
     // (보이는 넓이가 절반 미만) lost_output_frames 출력에서 제외한다. 지정하지 않으면 제외하지 않는다.
-    void set_image_size(float width, float height) override
-    {
-        image_width_ = width;
-        image_height_ = height;
-    }
+    void set_image_size(float width, float height) override;
 
-    const TrackingConfig& config() const { return config_; }
+    const TrackingConfig& config() const;
 };

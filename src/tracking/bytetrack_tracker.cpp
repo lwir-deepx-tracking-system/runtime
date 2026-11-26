@@ -870,3 +870,17 @@ void ByteTrackTracker::reset()
         "[Tracking] ByteTrackTracker 상태 초기화 완료"
     );
 }
+
+bool ByteTrackTracker::observation_centric() const { return config_.oru || config_.ocm_weight > 0.0F || config_.ocr; }
+
+void ByteTrackTracker::set_confirmation_frames(int frames)  { config_.confirmation_frames = frames; }
+
+void ByteTrackTracker::set_camera_motion(const CameraMotion& motion)  { camera_motion_ = motion; }
+
+void ByteTrackTracker::set_image_size(float width, float height)
+{
+    image_width_ = width;
+    image_height_ = height;
+}
+
+const TrackingConfig& ByteTrackTracker::config() const { return config_; }

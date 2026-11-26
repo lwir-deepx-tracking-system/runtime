@@ -228,3 +228,9 @@ std::optional<FrameTelemetrySnapshot> FrameTelemetryCollector::latest_before(
     }
     return std::nullopt;
 }
+
+FrameTelemetryCollector::FrameTelemetryCollector(IMeasurementSink* csv) : csv_(csv) {}
+
+std::uint64_t FrameTelemetryCollector::dropped_events() const { return dropped_.load(); }
+
+std::uint64_t FrameTelemetryCollector::expired_frames() const { return expired_; }

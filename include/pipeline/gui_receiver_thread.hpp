@@ -30,6 +30,6 @@ public:
 
     // receive loop가 끝날 때까지 worker 종료를 기다린다.
     void join();
-    bool failed() const { return failed_.load(); }
-    const std::string& error_message() const { return error_message_; }
+    bool failed() const;
+    const std::string& error_message() const;
 };

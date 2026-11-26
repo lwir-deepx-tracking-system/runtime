@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lan.hpp"
+#include "web_gui/lan.hpp"
 
 #include <cairo.h>
 #include <gst/app/gstappsink.h>

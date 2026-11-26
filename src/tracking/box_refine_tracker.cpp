@@ -220,3 +220,9 @@ void BoxRefineTracker::refine(std::vector<Track>& tracks,
     camera_log_scale_=0;
     if (saw_observed) switch_pending_=false;
 }
+
+void BoxRefineTracker::set_image_size(float width, float height)  { base_->set_image_size(width,height); }
+
+void BoxRefineTracker::set_confirmation_frames(int frames)  { base_->set_confirmation_frames(frames); }
+
+int BoxRefineTracker::current_confirmation_frames() const  { return base_->current_confirmation_frames(); }
